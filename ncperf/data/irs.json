@@ -1,0 +1,36 @@
+{
+ "_note": "Impulse responses the convolution reverb may fetch, by id. Metadata only: no audio ships with the kit. Every entry is CC BY with attribution, license verified on the source page (see verified). Files are pinned by sha256; a mismatch stops the render. A convolution reverb input is credited in the record like any other sound.",
+ "openair-stpauls-nave": {
+  "title": "St Paul's Cathedral, London: source under the dome, receiver in the nave (31.6 m), 2022",
+  "space": "St Paul's Cathedral, London",
+  "format": "bformat_fuma",
+  "positions": [
+   {"label": "P1 dome source, nave receiver (average of two takes)", "url": "https://webfiles.york.ac.uk/OPENAIR/IRs/st-pauls-cathedral/b-format/bformat_P1%20-%20S%20Dome%20R%20Nave%20Average.wav", "sha256": "338461ba49ec1e57cf0052bb1838cfd520faa5ced74287d522ede9826021c675"},
+   {"label": "P2 nave source, dome receiver (average of two takes)", "url": "https://webfiles.york.ac.uk/OPENAIR/IRs/st-pauls-cathedral/b-format/bformat_P2%20-%20S%20Nave%20R%20Dome%20Average.wav", "sha256": "5462bf3bb23feb46a9433f7f5ab1b66d76d011b353465f237dc7dc11788769ff"}
+  ],
+  "page": "https://www.openair.hosted.york.ac.uk/?page_id=1516",
+  "page_archive": "https://web.archive.org/web/2025/https://www.openair.hosted.york.ac.uk/?page_id=1516",
+  "license": {"id": "CC-BY-4.0", "name": "CC BY 4.0", "uri": "https://creativecommons.org/licenses/by/4.0/"},
+  "author": "OpenAIR, AudioLab, University of York (Damian Murphy, Frank Stevens, Aglaia Foteinou)",
+  "attribution": "St Paul's Cathedral impulse responses, OpenAIR (www.openairlib.net), AudioLab, University of York. Measurement team: Prof Damian Murphy, Dr Frank Stevens, Dr Aglaia Foteinou (captured 25/08/2022). CC BY 4.0.",
+  "verified": "2026-10-18: page text 'This work is licensed under a Creative Commons Attribution 4.0 International License' (search-index copy of page_id=1516; the live OpenAIR site was suspended, page content confirmed on the Wayback copy). Files from the University of York mirror webfiles.york.ac.uk.",
+  "measured": {"soundfield": "Soundfield ST340 MkII", "source": "Genelec 8130A, 60 Hz-20 kHz 1 min log sweep", "sr": 96000, "T30_500_s_raw": 10.6},
+  "defaults": {"decode": {"pattern": 0.27, "az_deg": 60, "lf_dipole_shelf_db": 6.0, "lf_dipole_shelf_hz": 500}, "decay_reshape_s": [9.8, 6.2], "direct_remove_ms": 3.0, "predelay_ms": 20}
+ },
+ "openair-stpauls-choir": {
+  "title": "St Paul's Cathedral, London: source and receiver in the choir (13.8 m), 2022",
+  "space": "St Paul's Cathedral, London",
+  "format": "bformat_fuma",
+  "positions": [
+   {"label": "P4 choir source, choir receiver (average of two takes)", "url": "https://webfiles.york.ac.uk/OPENAIR/IRs/st-pauls-cathedral/b-format/bformat_P4%20-%20S%20Choir%20R%20Choir%20Average.wav", "sha256": "d1190ab0adb06ccfcc3aefd85d7ea08058099e95474d15b2e493f7e53fafbae3"}
+  ],
+  "page": "https://www.openair.hosted.york.ac.uk/?page_id=1516",
+  "page_archive": "https://web.archive.org/web/2025/https://www.openair.hosted.york.ac.uk/?page_id=1516",
+  "license": {"id": "CC-BY-4.0", "name": "CC BY 4.0", "uri": "https://creativecommons.org/licenses/by/4.0/"},
+  "author": "OpenAIR, AudioLab, University of York (Damian Murphy, Frank Stevens, Aglaia Foteinou)",
+  "attribution": "St Paul's Cathedral impulse responses, OpenAIR (www.openairlib.net), AudioLab, University of York. Measurement team: Prof Damian Murphy, Dr Frank Stevens, Dr Aglaia Foteinou (captured 25/08/2022). CC BY 4.0.",
+  "verified": "2026-10-18: same page and licence as openair-stpauls-nave.",
+  "measured": {"soundfield": "Soundfield ST340 MkII", "source": "Genelec 8130A, 60 Hz-20 kHz 1 min log sweep", "sr": 96000, "T30_500_s_raw": 9.3},
+  "defaults": {"decode": {"pattern": 0.27, "az_deg": 60, "lf_dipole_shelf_db": 6.0, "lf_dipole_shelf_hz": 500}, "decay_reshape_s": null, "direct_remove_ms": 3.0, "predelay_ms": 20}
+ }
+}

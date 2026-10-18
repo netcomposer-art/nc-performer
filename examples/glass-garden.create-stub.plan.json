@@ -1,0 +1,355 @@
+{
+ "nc_plan_version": "0.1",
+ "id": "glass-garden",
+ "title": "Glass garden (stub performance)",
+ "composition": {
+  "title": "Glass garden",
+  "composer": "anonymous",
+  "file": "composition.md",
+  "words_verbatim": {
+   "composition": "1 min. Ebsus2, Cm-add9, Ab6/9, Bb7sus4, Eb6.",
+   "performance": "Clear and open, like light through glass. Gentle strikes, a little space between chords."
+  }
+ },
+ "interpreter": {
+  "kind": "stub",
+  "at": "2026-10-18T19:13:39.850Z",
+  "note": "Plan stub from netcomposer.art/create/: chord symbols found in the words, each voiced from the full chord set by voice leading, chord strikes plus a time-stretched pad. Edit it, or let an agent or `nc interpret` write a fuller plan."
+ },
+ "seed": 1,
+ "length_s": 60,
+ "tail_s": 4,
+ "pulse_bpm": 60,
+ "pitch_tolerance_cents": 15,
+ "sections": [
+  {
+   "id": "A",
+   "start_s": 0,
+   "end_s": 60,
+   "harmony": "Ebsus2 Cm-add9 Ab6-9 Bb7sus4 Eb6"
+  }
+ ],
+ "chords": [
+  {
+   "t": 0,
+   "dur": 12,
+   "symbol": "Ebsus2",
+   "voicing": [
+    53,
+    58,
+    63
+   ],
+   "section": "A"
+  },
+  {
+   "t": 12,
+   "dur": 12,
+   "symbol": "Cm-add9",
+   "voicing": [
+    51,
+    55,
+    60,
+    62
+   ],
+   "section": "A"
+  },
+  {
+   "t": 24,
+   "dur": 12,
+   "symbol": "Ab6-9",
+   "voicing": [
+    53,
+    58,
+    60,
+    63
+   ],
+   "section": "A"
+  },
+  {
+   "t": 36,
+   "dur": 12,
+   "symbol": "Bb7sus4",
+   "voicing": [
+    53,
+    56,
+    58,
+    63
+   ],
+   "section": "A"
+  },
+  {
+   "t": 48,
+   "dur": 12,
+   "symbol": "Eb6",
+   "voicing": [
+    55,
+    58,
+    60,
+    63
+   ],
+   "section": "A"
+  }
+ ],
+ "sources": {
+  "mm-05_suspended_Ebsus2_inv1": {
+   "kind": "supplier",
+   "manifest": "https://musicmatter.art/sounds/fullchords-v4/Eb/05_suspended_Ebsus2_inv1.nc.json",
+   "pitched": false
+  },
+  "mm-07_add_Cm-add9_inv1": {
+   "kind": "supplier",
+   "manifest": "https://musicmatter.art/sounds/fullchords-v4/C/07_add_Cm-add9_inv1.nc.json",
+   "pitched": false
+  },
+  "mm-06_sixths_Ab6-9_rootless_B": {
+   "kind": "supplier",
+   "manifest": "https://musicmatter.art/sounds/fullchords-v4/Ab/06_sixths_Ab6-9_rootless_B.nc.json",
+   "pitched": false
+  },
+  "mm-05_suspended_Bb7sus4_inv2": {
+   "kind": "supplier",
+   "manifest": "https://musicmatter.art/sounds/fullchords-v4/Bb/05_suspended_Bb7sus4_inv2.nc.json",
+   "pitched": false
+  },
+  "mm-06_sixths_Eb6_inv1": {
+   "kind": "supplier",
+   "manifest": "https://musicmatter.art/sounds/fullchords-v4/Eb/06_sixths_Eb6_inv1.nc.json",
+   "pitched": false
+  }
+ },
+ "banks": {},
+ "layers": [
+  {
+   "id": "pad",
+   "type": "clips",
+   "bus": "pad",
+   "role": "stretched chord pad",
+   "events": [
+    {
+     "t": 0,
+     "source": "mm-05_suspended_Ebsus2_inv1",
+     "offset_s": 0,
+     "src_window_s": [
+      0.05,
+      3.6
+     ],
+     "stretch_to_s": 16,
+     "fade_in_s": 4.5,
+     "fade_out_s": 4,
+     "gain": 0.6,
+     "role": "stretched chord pad (time-stretch, no pitch-shift)"
+    },
+    {
+     "t": 10.5,
+     "source": "mm-07_add_Cm-add9_inv1",
+     "offset_s": 0,
+     "src_window_s": [
+      0.05,
+      3.6
+     ],
+     "stretch_to_s": 16,
+     "fade_in_s": 3,
+     "fade_out_s": 4,
+     "gain": 0.6,
+     "role": "stretched chord pad (time-stretch, no pitch-shift)"
+    },
+    {
+     "t": 22.5,
+     "source": "mm-06_sixths_Ab6-9_rootless_B",
+     "offset_s": 0,
+     "src_window_s": [
+      0.05,
+      3.6
+     ],
+     "stretch_to_s": 16,
+     "fade_in_s": 3,
+     "fade_out_s": 4,
+     "gain": 0.6,
+     "role": "stretched chord pad (time-stretch, no pitch-shift)"
+    },
+    {
+     "t": 34.5,
+     "source": "mm-05_suspended_Bb7sus4_inv2",
+     "offset_s": 0,
+     "src_window_s": [
+      0.05,
+      3.6
+     ],
+     "stretch_to_s": 16,
+     "fade_in_s": 3,
+     "fade_out_s": 4,
+     "gain": 0.6,
+     "role": "stretched chord pad (time-stretch, no pitch-shift)"
+    },
+    {
+     "t": 46.5,
+     "source": "mm-06_sixths_Eb6_inv1",
+     "offset_s": 0,
+     "src_window_s": [
+      0.05,
+      3.6
+     ],
+     "stretch_to_s": 16,
+     "fade_in_s": 3,
+     "fade_out_s": 4,
+     "gain": 0.6,
+     "role": "stretched chord pad (time-stretch, no pitch-shift)"
+    }
+   ]
+  },
+  {
+   "id": "keys",
+   "type": "clips",
+   "bus": "keys",
+   "role": "chord strikes",
+   "events": [
+    {
+     "t": 0.3,
+     "source": "mm-05_suspended_Ebsus2_inv1",
+     "offset_s": 0,
+     "dur_s": 4.3,
+     "fade_in_s": 0.02,
+     "fade_out_s": 2,
+     "gain": 0.8,
+     "role": "chord strike (full chord set)"
+    },
+    {
+     "t": 6.3,
+     "source": "mm-05_suspended_Ebsus2_inv1",
+     "offset_s": 0,
+     "dur_s": 4.3,
+     "fade_in_s": 0.02,
+     "fade_out_s": 2,
+     "gain": 0.45,
+     "role": "chord restrike (full chord set)"
+    },
+    {
+     "t": 12.3,
+     "source": "mm-07_add_Cm-add9_inv1",
+     "offset_s": 0,
+     "dur_s": 4.3,
+     "fade_in_s": 0.02,
+     "fade_out_s": 2,
+     "gain": 0.8,
+     "role": "chord strike (full chord set)"
+    },
+    {
+     "t": 18.3,
+     "source": "mm-07_add_Cm-add9_inv1",
+     "offset_s": 0,
+     "dur_s": 4.3,
+     "fade_in_s": 0.02,
+     "fade_out_s": 2,
+     "gain": 0.45,
+     "role": "chord restrike (full chord set)"
+    },
+    {
+     "t": 24.3,
+     "source": "mm-06_sixths_Ab6-9_rootless_B",
+     "offset_s": 0,
+     "dur_s": 4.3,
+     "fade_in_s": 0.02,
+     "fade_out_s": 2,
+     "gain": 0.8,
+     "role": "chord strike (full chord set)"
+    },
+    {
+     "t": 30.3,
+     "source": "mm-06_sixths_Ab6-9_rootless_B",
+     "offset_s": 0,
+     "dur_s": 4.3,
+     "fade_in_s": 0.02,
+     "fade_out_s": 2,
+     "gain": 0.45,
+     "role": "chord restrike (full chord set)"
+    },
+    {
+     "t": 36.3,
+     "source": "mm-05_suspended_Bb7sus4_inv2",
+     "offset_s": 0,
+     "dur_s": 4.3,
+     "fade_in_s": 0.02,
+     "fade_out_s": 2,
+     "gain": 0.8,
+     "role": "chord strike (full chord set)"
+    },
+    {
+     "t": 42.3,
+     "source": "mm-05_suspended_Bb7sus4_inv2",
+     "offset_s": 0,
+     "dur_s": 4.3,
+     "fade_in_s": 0.02,
+     "fade_out_s": 2,
+     "gain": 0.45,
+     "role": "chord restrike (full chord set)"
+    },
+    {
+     "t": 48.3,
+     "source": "mm-06_sixths_Eb6_inv1",
+     "offset_s": 0,
+     "dur_s": 4.3,
+     "fade_in_s": 0.02,
+     "fade_out_s": 2,
+     "gain": 0.8,
+     "role": "chord strike (full chord set)"
+    },
+    {
+     "t": 54.3,
+     "source": "mm-06_sixths_Eb6_inv1",
+     "offset_s": 0,
+     "dur_s": 4.3,
+     "fade_in_s": 0.02,
+     "fade_out_s": 2,
+     "gain": 0.45,
+     "role": "chord restrike (full chord set)"
+    }
+   ]
+  }
+ ],
+ "master": {
+  "buses": {
+   "pad": {
+    "filters": [
+     {
+      "type": "lp",
+      "hz": 2500,
+      "order": 2
+     }
+    ],
+    "lufs": -21,
+    "pan": 0.05
+   },
+   "keys": {
+    "filters": [
+     {
+      "type": "lp",
+      "hz": 3000,
+      "order": 2
+     }
+    ],
+    "lufs": -23,
+    "pan": -0.08
+   }
+  },
+  "reverb": {
+   "rt60_s": 5,
+   "predelay_ms": 40,
+   "wet": 0.4,
+   "lp_hz": 4000,
+   "hp_hz": 170
+  },
+  "hp_hz": 30,
+  "lp_blend": {
+   "hz": 9000,
+   "mix": 0.4
+  },
+  "loudness": {
+   "lufs": -17,
+   "tp": -1.5,
+   "lra": 11
+  }
+ },
+ "notes": [
+  "Stub plan from netcomposer.art/create/: no melody line and no triplets were read from the words; add a \"notes\" layer by hand or use an interpreter."
+ ]
+}

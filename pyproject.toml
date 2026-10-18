@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nc-performer"
+version = "0.2.0"
+description = "NetComposer Performer kit: Composition words -> plan.json -> rendered Performance + record"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Peter Semmelhack" }]
+
+dependencies = ["numpy", "scipy", "soundfile", "librosa", "pyloudnorm"]
+
+[project.optional-dependencies]
+# GPL-3.0, not bundled: hosts the Dragonfly Hall VST3 (installed separately) for the default reverb hack
+reverb = ["pedalboard>=0.9"]
+
+[project.urls]
+Homepage = "https://netcomposer.art/"
+Source = "https://github.com/netcomposer-art/nc-performer"
+
+[project.scripts]
+nc = "ncperf.cli:main"
+
+[tool.setuptools]
+packages = ["ncperf", "ncperf.schema"]
+
+[tool.setuptools.package-data]
+ncperf = ["data/*.json"]
+"ncperf.schema" = ["*.json"]

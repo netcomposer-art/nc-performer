@@ -1,0 +1,6178 @@
+{
+  "record_type": "netcomposer.performance_record",
+  "record_format_version": null,
+  "record_format_note": "Draft format (spec §5.7-5.9, §9.4 sketch), same shape as perf_ambient-cm-01 and the BWV 846 records.",
+  "performance": {
+    "id": "perf_ambient-cm-02",
+    "title": "Cm into Am and F, with a slow C–F–G line (ambient): take 2, open-commons palette",
+    "performed_at": "2026-10-18T15:09:09Z",
+    "performed_at_local": "2026-10-18T08:09:09-07:00",
+    "duration_s": 124.0,
+    "music_ends_at_s": 120.0,
+    "performer_mode": "algorithmic",
+    "performer_id": null,
+    "performer": {
+      "name": "Astrid, NetComposer Algorithmic Performer (stand-in script on the box, not the netcomposer CLI)",
+      "script": {
+        "path": "nc_ambient_cm/render_ambient_cm_02.py",
+        "sha256": "5c8c2041e0e7c334966da64f74c7234f4ed5a318b74c879b6240059964c9479d"
+      }
+    },
+    "rules_set_by": {
+      "display_name": "Peter",
+      "note": "Same Composition as take 1. Peter after take 1: \"Do it again and don't just use musicmatter sounds. Mix it up. Same vibe.\""
+    },
+    "composition_ref": {
+      "composition_id": "nc_ambient_cm/composition_ambient_cm.md",
+      "sha256": "70f714dcf1b6eef79451a1814095e4a8b05018417e5e1521971c6eadb2b49697",
+      "composer": {
+        "display_name": "Peter"
+      },
+      "unchanged_since_perf01": true
+    },
+    "rule_set": {
+      "name": "ambient Cm (take 2, mixed palette)",
+      "seed": 1018,
+      "pulse_bpm": 60,
+      "chord_length_s": 10.0,
+      "section_A": "0-60 s. Six chords, type drawn at random from {Cm, Cm7, Cm9} (no immediate repeat, all three heard, last not Cm7, not perf01's sequence). Voicings drawn without reuse from a new pool built note by note from measured single notes (none of perf01's voicings).",
+      "build": "38-62 s: pad/keys/drone +6 dB, low-pass opens (pad 1.2->3.2 kHz, keys 1.8->4.2 kHz), re-strikes 1 -> 2 (40 s) -> 4 (50 s), both Rhodes and piano strike, singing-bowl-like C5 bells at 45, 52.5, 58 s, waves swell +2.5 dB.",
+      "section_B": "60-120 s: Cm7, Am, F, then Cm, Am, F. Iowa piano strikes (Rhodes added on alternate chords), cello under each chord, final F rings.",
+      "line": "C5, F5, G5, one note about every 5 s (+-0.35 s seeded jitter) in 20 s cycles from 5 s. Timbre per cycle: piano, violin, piano+harp, violin, piano+violin, violin+harp. Quarter-note triplets (C-F-G in 2 beats) in the rest slot of cycles 2, 3, 4: 1:00 (guitar), 1:20 (piano), 1:40 (guitar).",
+      "musicmatter_share": "4 faint strikes (2 sounds) in the first half; about 0.3% of pre-reverb energy",
+      "energy_share_percent_pre_reverb": {
+        "pad (Iowa piano stretched + Iowa cello)": 37.8,
+        "keys (Rhodes + Iowa piano strikes)": 20.4,
+        "line": 20.4,
+        "bed (ocean waves)": 11.1,
+        "drone (Iowa piano stretched)": 8.0,
+        "bells": 2.0,
+        "musicmatter chords": 0.3
+      },
+      "transforms_enabled": [
+        "trim",
+        "gain",
+        "fade",
+        "filter",
+        "reverb",
+        "delay",
+        "time_stretch"
+      ],
+      "pitch_shift": false,
+      "pitch_policy": "Every pitched sound chosen by NC measurement (pYIN / FFT peak), not by label. Accepted within about +-15 cents; Iowa cello notes up to +15 c (G3)."
+    },
+    "timeline": [
+      {
+        "chord_index": 0,
+        "start_s": 0.0,
+        "end_s": 10.0,
+        "section": "A",
+        "chord": "Cm7",
+        "voicing": [
+          "D#3",
+          "G3",
+          "A#3",
+          "C4",
+          "D#4"
+        ],
+        "keys": [
+          "rhodes"
+        ],
+        "restrikes_at_s": [],
+        "cello": [
+          "C2",
+          "A#3"
+        ]
+      },
+      {
+        "chord_index": 1,
+        "start_s": 10.0,
+        "end_s": 20.0,
+        "section": "A",
+        "chord": "Cm9",
+        "voicing": [
+          "C3",
+          "G3",
+          "A#3",
+          "D4",
+          "D#4"
+        ],
+        "keys": [
+          "rhodes"
+        ],
+        "restrikes_at_s": [],
+        "cello": [
+          "C2",
+          "A#3"
+        ]
+      },
+      {
+        "chord_index": 2,
+        "start_s": 20.0,
+        "end_s": 30.0,
+        "section": "A",
+        "chord": "Cm",
+        "voicing": [
+          "D#3",
+          "C4",
+          "G4"
+        ],
+        "keys": [
+          "rhodes"
+        ],
+        "restrikes_at_s": [],
+        "cello": [
+          "C2",
+          "G3"
+        ]
+      },
+      {
+        "chord_index": 3,
+        "start_s": 30.0,
+        "end_s": 40.0,
+        "section": "A",
+        "chord": "Cm7",
+        "voicing": [
+          "C3",
+          "A#3",
+          "D#4"
+        ],
+        "keys": [
+          "rhodes"
+        ],
+        "restrikes_at_s": [],
+        "cello": [
+          "C2",
+          "A#3"
+        ]
+      },
+      {
+        "chord_index": 4,
+        "start_s": 40.0,
+        "end_s": 50.0,
+        "section": "A (build)",
+        "chord": "Cm9",
+        "voicing": [
+          "D#3",
+          "A#3",
+          "D4",
+          "G4"
+        ],
+        "keys": [
+          "rhodes",
+          "piano"
+        ],
+        "restrikes_at_s": [
+          45.3
+        ],
+        "cello": [
+          "C2",
+          "A#3"
+        ]
+      },
+      {
+        "chord_index": 5,
+        "start_s": 50.0,
+        "end_s": 60.0,
+        "section": "A (build)",
+        "chord": "Cm",
+        "voicing": [
+          "C3",
+          "G3",
+          "C4",
+          "D#4"
+        ],
+        "keys": [
+          "rhodes",
+          "piano"
+        ],
+        "restrikes_at_s": [
+          52.8,
+          55.3,
+          57.8
+        ],
+        "cello": [
+          "C2",
+          "G3"
+        ]
+      },
+      {
+        "chord_index": 6,
+        "start_s": 60.0,
+        "end_s": 70.0,
+        "section": "B",
+        "chord": "Cm7",
+        "voicing": [
+          "C3",
+          "G3",
+          "A#3",
+          "D#4"
+        ],
+        "keys": [
+          "piano"
+        ],
+        "restrikes_at_s": [
+          65.3
+        ],
+        "cello": [
+          "C2",
+          "A#3"
+        ]
+      },
+      {
+        "chord_index": 7,
+        "start_s": 70.0,
+        "end_s": 80.0,
+        "section": "B",
+        "chord": "Am",
+        "voicing": [
+          "A2",
+          "E3",
+          "A3",
+          "C4",
+          "E4"
+        ],
+        "keys": [
+          "piano",
+          "rhodes"
+        ],
+        "restrikes_at_s": [
+          75.3
+        ],
+        "cello": [
+          "E2"
+        ]
+      },
+      {
+        "chord_index": 8,
+        "start_s": 80.0,
+        "end_s": 90.0,
+        "section": "B",
+        "chord": "F",
+        "voicing": [
+          "F2",
+          "F3",
+          "A3",
+          "C4"
+        ],
+        "keys": [
+          "piano"
+        ],
+        "restrikes_at_s": [
+          85.3
+        ],
+        "cello": [
+          "F3"
+        ]
+      },
+      {
+        "chord_index": 9,
+        "start_s": 90.0,
+        "end_s": 100.0,
+        "section": "B",
+        "chord": "Cm",
+        "voicing": [
+          "C3",
+          "G3",
+          "C4",
+          "D#4"
+        ],
+        "keys": [
+          "piano",
+          "rhodes"
+        ],
+        "restrikes_at_s": [
+          95.3
+        ],
+        "cello": [
+          "C2",
+          "G3"
+        ]
+      },
+      {
+        "chord_index": 10,
+        "start_s": 100.0,
+        "end_s": 110.0,
+        "section": "B",
+        "chord": "Am",
+        "voicing": [
+          "E3",
+          "A3",
+          "C4",
+          "E4"
+        ],
+        "keys": [
+          "piano"
+        ],
+        "restrikes_at_s": [
+          105.3
+        ],
+        "cello": [
+          "E2"
+        ]
+      },
+      {
+        "chord_index": 11,
+        "start_s": 110.0,
+        "end_s": 120.0,
+        "section": "B",
+        "chord": "F",
+        "voicing": [
+          "F3",
+          "A3",
+          "C4",
+          "C5"
+        ],
+        "keys": [
+          "piano",
+          "rhodes"
+        ],
+        "restrikes_at_s": [
+          115.3
+        ],
+        "cello": [
+          "F3"
+        ]
+      }
+    ],
+    "line_events": [
+      {
+        "t": 5.093,
+        "pitch": "C",
+        "kind": "line",
+        "timbre": "piano",
+        "len": 7.0
+      },
+      {
+        "t": 9.676,
+        "pitch": "F",
+        "kind": "line",
+        "timbre": "piano",
+        "len": 7.0
+      },
+      {
+        "t": 15.107,
+        "pitch": "G",
+        "kind": "line",
+        "timbre": "piano",
+        "len": 7.0
+      },
+      {
+        "t": 25.274,
+        "pitch": "C",
+        "kind": "line",
+        "timbre": "violin",
+        "len": 7.0
+      },
+      {
+        "t": 29.706,
+        "pitch": "F",
+        "kind": "line",
+        "timbre": "violin",
+        "len": 7.0
+      },
+      {
+        "t": 35.149,
+        "pitch": "G",
+        "kind": "line",
+        "timbre": "violin",
+        "len": 7.0
+      },
+      {
+        "t": 44.776,
+        "pitch": "C",
+        "kind": "line",
+        "timbre": "piano+harp",
+        "len": 7.0
+      },
+      {
+        "t": 50.038,
+        "pitch": "F",
+        "kind": "line",
+        "timbre": "piano+harp",
+        "len": 7.0
+      },
+      {
+        "t": 54.982,
+        "pitch": "G",
+        "kind": "line",
+        "timbre": "piano+harp",
+        "len": 7.0
+      },
+      {
+        "t": 60.015,
+        "pitch": "C",
+        "kind": "triplet",
+        "timbre": "guitar",
+        "len": 2.6
+      },
+      {
+        "t": 60.681,
+        "pitch": "F",
+        "kind": "triplet",
+        "timbre": "guitar",
+        "len": 2.6
+      },
+      {
+        "t": 61.348,
+        "pitch": "G",
+        "kind": "triplet",
+        "timbre": "guitar",
+        "len": 2.6
+      },
+      {
+        "t": 64.85,
+        "pitch": "C",
+        "kind": "line",
+        "timbre": "violin",
+        "len": 7.0
+      },
+      {
+        "t": 70.249,
+        "pitch": "F",
+        "kind": "line",
+        "timbre": "violin",
+        "len": 7.0
+      },
+      {
+        "t": 74.787,
+        "pitch": "G",
+        "kind": "line",
+        "timbre": "violin",
+        "len": 7.0
+      },
+      {
+        "t": 79.801,
+        "pitch": "C",
+        "kind": "triplet",
+        "timbre": "piano",
+        "len": 2.6
+      },
+      {
+        "t": 80.468,
+        "pitch": "F",
+        "kind": "triplet",
+        "timbre": "piano",
+        "len": 2.6
+      },
+      {
+        "t": 81.135,
+        "pitch": "G",
+        "kind": "triplet",
+        "timbre": "piano",
+        "len": 2.6
+      },
+      {
+        "t": 84.796,
+        "pitch": "C",
+        "kind": "line",
+        "timbre": "piano+violin",
+        "len": 7.0
+      },
+      {
+        "t": 90.323,
+        "pitch": "F",
+        "kind": "line",
+        "timbre": "piano+violin",
+        "len": 7.0
+      },
+      {
+        "t": 95.346,
+        "pitch": "G",
+        "kind": "line",
+        "timbre": "piano+violin",
+        "len": 7.0
+      },
+      {
+        "t": 100.069,
+        "pitch": "C",
+        "kind": "triplet",
+        "timbre": "guitar",
+        "len": 2.6
+      },
+      {
+        "t": 100.736,
+        "pitch": "F",
+        "kind": "triplet",
+        "timbre": "guitar",
+        "len": 2.6
+      },
+      {
+        "t": 101.403,
+        "pitch": "G",
+        "kind": "triplet",
+        "timbre": "guitar",
+        "len": 2.6
+      },
+      {
+        "t": 105.106,
+        "pitch": "C",
+        "kind": "line",
+        "timbre": "violin+harp",
+        "len": 7.0
+      },
+      {
+        "t": 109.861,
+        "pitch": "F",
+        "kind": "line",
+        "timbre": "violin+harp",
+        "len": 7.0
+      },
+      {
+        "t": 114.69,
+        "pitch": "G",
+        "kind": "line",
+        "timbre": "violin+harp",
+        "len": 9.0
+      }
+    ],
+    "outputs": [
+      {
+        "file": "nc_ambient_cm/nc_ambient_cm_perf02.flac",
+        "format": "FLAC 24-bit/48 kHz stereo",
+        "sha256": "9a3c04831beecf66ba0dd87ae03e57609f90fec379af9f1991bb6ebf22c9c370",
+        "size_bytes": 15103122,
+        "duration_s": 124.0,
+        "loudness_lufs_integrated": -17.0,
+        "true_peak_dbtp": -2.5,
+        "lra_lu": 7.0
+      },
+      {
+        "file": "nc_ambient_cm/nc_ambient_cm_perf02_preview.mp3",
+        "format": "MP3 320 kbps, 48 kHz (preview)",
+        "sha256": "83ae98b139df590c001405058b019965127fb39f9a954d2505562914f9b86105",
+        "size_bytes": 4962284,
+        "duration_s": 124.032,
+        "loudness_lufs_integrated": -17.0,
+        "true_peak_dbtp": -2.5,
+        "lra_lu": 7.0
+      }
+    ],
+    "known_compromises": [
+      {
+        "what": "Freesound sounds are HQ previews (lossy); originals need OAuth, not set up. Iowa MIS files are the lossless originals."
+      },
+      {
+        "what": "Iowa cello pp intonation varies by note; only notes measured within about +15 c were used (C2 +3, E2 +3, F3 +1, G3 +15, Bb3 +9). The G3 is audibly a touch sharp against the piano."
+      },
+      {
+        "what": "The pad and drone are x3.7 / x4 time-stretches of piano notes, so they carry phase-vocoder smear (bowed-piano texture), as in take 1."
+      },
+      {
+        "what": "Dropped after measurement: Jovica \"Chrunched Church Organ Drone Pad\" (off-key partials near F#2/G2 under C3), Jovica Melodrone \"Invisible Choir\" (did not measure as its labelled pitch), Jovica \"MegaDrone PadScape\" (every file sounds a semitone above its label, -15 to -30 c), bassimat Bowl Bell C3 (strong partial between F4 and F#4), Iowa vibraphone (motor tremolo defeated the pitch check), Iowa viola (run could not be segmented reliably). None of these are in the audio."
+      },
+      {
+        "what": "The violin F5 has a weak fundamental and strong 3rd partial (C7), so it reads brighter than its C5/G5; its gain is raised 3.5 dB and the line is low-passed at 5.5 kHz."
+      },
+      {
+        "what": "Iowa MIS terms are \"freely available ... used for any projects, without restrictions\", not a formal CC0/PD dedication; treated as public-domain equivalent, credited anyway."
+      }
+    ],
+    "license_out": {
+      "id": "CC-BY-SA-4.0",
+      "uri": "https://creativecommons.org/licenses/by-sa/4.0/"
+    }
+  },
+  "hacks_chain": [
+    {
+      "n": 1,
+      "tool": "time_stretch",
+      "engine": "ffmpeg rubberband",
+      "options": "transients=smooth:window=long:phase=independent, pitch=1",
+      "ratios": {
+        "pad (piano)": 3.7333,
+        "drone (piano)": 4.0,
+        "cello": "about 2.1-2.4 (per note)"
+      }
+    },
+    {
+      "n": 2,
+      "tool": "gain",
+      "type": "decay flatten (300 ms RMS follower, max +20 dB)",
+      "applies_to": [
+        "pad",
+        "drone"
+      ]
+    },
+    {
+      "n": 3,
+      "tool": "fade",
+      "type": "equal-power swells and rolled strikes (0-90 ms seeded roll per chord)",
+      "pad_in_s": 3.0,
+      "pad_out_s": 4.5,
+      "violin_in_s": 0.25
+    },
+    {
+      "n": 4,
+      "tool": "lowpass/highpass",
+      "automation": "dark->bright crossfade 40-60 s, back toward dark over the last 15 s",
+      "pad_hz": [
+        1200,
+        3200
+      ],
+      "keys_hz": [
+        1800,
+        4200
+      ],
+      "musicmatter_hz": [
+        1500,
+        3000
+      ],
+      "drone": "50 Hz HP, 280 Hz LP (4th order)",
+      "bed": "120 Hz HP, 2.6 kHz LP",
+      "bell": "750 Hz LP (8th order total)",
+      "line": "180 Hz HP, 5.5 kHz LP"
+    },
+    {
+      "n": 5,
+      "tool": "delay",
+      "on": "line",
+      "time_s": 0.75,
+      "feedback": 0.3,
+      "taps": 5,
+      "ping_pong": true,
+      "mix": 0.5
+    },
+    {
+      "n": 6,
+      "tool": "lufs_match",
+      "targets_lufs": {
+        "drone": -28.0,
+        "pad": -22.0,
+        "keys": -22.0,
+        "line": -22.0,
+        "bed": -29.0,
+        "bell": -31.0,
+        "mm": -31.0
+      },
+      "pan": {
+        "drone": 0.0,
+        "pad": -0.08,
+        "keys": 0.1,
+        "line": 0.15,
+        "bed": 0.0,
+        "bell": -0.2,
+        "mm": -0.15
+      },
+      "build_gain_db": "pad/keys/drone -6 -> 0 over 38-62 s; bed 0 -> +2.5 (60 s) -> 0 (100 s) -> -3"
+    },
+    {
+      "n": 7,
+      "tool": "reverb",
+      "type": "synthetic hall, generated in the script",
+      "rt60_s": 5.5,
+      "predelay_ms": 40,
+      "seed": 1018,
+      "wet": 0.38
+    },
+    {
+      "n": 8,
+      "tool": "highpass",
+      "cutoff_hz": 30
+    },
+    {
+      "n": 9,
+      "tool": "lowpass",
+      "type": "gentle 9 kHz blend (40%)"
+    },
+    {
+      "n": 10,
+      "tool": "tail",
+      "rule": "music ends 120 s, 4 s fade, file 124 s"
+    },
+    {
+      "n": 11,
+      "tool": "loudness",
+      "method": "ffmpeg loudnorm two-pass, linear",
+      "target_lufs": -17,
+      "ceiling_dbtp": -1.5
+    }
+  ],
+  "sounds_used": [
+    {
+      "key": "fs:65721",
+      "source": "Freesound",
+      "title": "C_S Rhodes Mark II D#2.aif",
+      "source_url": "https://freesound.org/people/tim.kahn/sounds/65721/",
+      "author": "tim.kahn",
+      "audio_used": {
+        "url": "https://cdn.freesound.org/previews/65/65721_7037-hq.ogg",
+        "what": "Freesound HQ preview (lossy Ogg Vorbis), resampled to 48 kHz on decode, pitch unchanged",
+        "sha256": "4628bc084794279c5c799c7ae89eafa80cdd04489645291febd9d26486f58cde",
+        "size_bytes": 254124
+      },
+      "supplier": {
+        "display_name": "tim.kahn",
+        "primary_link": "https://freesound.org/people/tim.kahn/"
+      },
+      "license": {
+        "name": "CC BY 4.0",
+        "uri": "https://creativecommons.org/licenses/by/4.0/",
+        "verified_live": "2026-10-18, creativecommons.org/licenses/by/4.0"
+      },
+      "credit_line": "“C_S Rhodes Mark II D#2.aif” by tim.kahn (https://freesound.org/people/tim.kahn/sounds/65721/), CC BY 4.0",
+      "pitch_measured": {
+        "sounding": "D#3",
+        "cents": 4.7,
+        "method": "NC pYIN on the preview"
+      },
+      "roles": [
+        "rhodes strike"
+      ],
+      "uses": 4,
+      "time_stretch_ratios": [
+        1.0
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "fs:65721",
+          "layer": "keys",
+          "at_s": 0.316,
+          "len_s": 9.0,
+          "gain_db": -1.67,
+          "pitch_shift": false,
+          "chord_index": 0,
+          "midi": 51,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65721",
+          "layer": "keys",
+          "at_s": 20.304,
+          "len_s": 9.0,
+          "gain_db": -2.53,
+          "pitch_shift": false,
+          "chord_index": 2,
+          "midi": 51,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65721",
+          "layer": "keys",
+          "at_s": 40.312,
+          "len_s": 9.0,
+          "gain_db": -1.71,
+          "pitch_shift": false,
+          "chord_index": 4,
+          "midi": 51,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65721",
+          "layer": "keys",
+          "at_s": 45.313,
+          "len_s": 9.0,
+          "gain_db": -5.69,
+          "pitch_shift": false,
+          "chord_index": 4,
+          "midi": 51,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        }
+      ]
+    },
+    {
+      "key": "fs:65730",
+      "source": "Freesound",
+      "title": "C_S Rhodes Mark II G2.aif",
+      "source_url": "https://freesound.org/people/tim.kahn/sounds/65730/",
+      "author": "tim.kahn",
+      "audio_used": {
+        "url": "https://cdn.freesound.org/previews/65/65730_7037-hq.ogg",
+        "what": "Freesound HQ preview (lossy Ogg Vorbis), resampled to 48 kHz on decode, pitch unchanged",
+        "sha256": "88b2beb95f7aa244af1b210bf7af463892b60f09e24a1144e07b9e372a2493e8",
+        "size_bytes": 262723
+      },
+      "supplier": {
+        "display_name": "tim.kahn",
+        "primary_link": "https://freesound.org/people/tim.kahn/"
+      },
+      "license": {
+        "name": "CC BY 4.0",
+        "uri": "https://creativecommons.org/licenses/by/4.0/",
+        "verified_live": "2026-10-18, creativecommons.org/licenses/by/4.0"
+      },
+      "credit_line": "“C_S Rhodes Mark II G2.aif” by tim.kahn (https://freesound.org/people/tim.kahn/sounds/65730/), CC BY 4.0",
+      "pitch_measured": {
+        "sounding": "G3",
+        "cents": 4.7,
+        "method": "NC pYIN on the preview"
+      },
+      "roles": [
+        "rhodes strike"
+      ],
+      "uses": 8,
+      "time_stretch_ratios": [
+        1.0
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "fs:65730",
+          "layer": "keys",
+          "at_s": 0.335,
+          "len_s": 9.0,
+          "gain_db": -2.74,
+          "pitch_shift": false,
+          "chord_index": 0,
+          "midi": 55,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65730",
+          "layer": "keys",
+          "at_s": 10.329,
+          "len_s": 9.0,
+          "gain_db": -1.86,
+          "pitch_shift": false,
+          "chord_index": 1,
+          "midi": 55,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65730",
+          "layer": "keys",
+          "at_s": 50.368,
+          "len_s": 9.0,
+          "gain_db": -2.84,
+          "pitch_shift": false,
+          "chord_index": 5,
+          "midi": 55,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65730",
+          "layer": "keys",
+          "at_s": 52.84,
+          "len_s": 9.0,
+          "gain_db": -6.6,
+          "pitch_shift": false,
+          "chord_index": 5,
+          "midi": 55,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65730",
+          "layer": "keys",
+          "at_s": 55.324,
+          "len_s": 9.0,
+          "gain_db": -6.36,
+          "pitch_shift": false,
+          "chord_index": 5,
+          "midi": 55,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65730",
+          "layer": "keys",
+          "at_s": 57.848,
+          "len_s": 9.0,
+          "gain_db": -6.81,
+          "pitch_shift": false,
+          "chord_index": 5,
+          "midi": 55,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65730",
+          "layer": "keys",
+          "at_s": 90.336,
+          "len_s": 9.0,
+          "gain_db": -1.49,
+          "pitch_shift": false,
+          "chord_index": 9,
+          "midi": 55,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65730",
+          "layer": "keys",
+          "at_s": 95.357,
+          "len_s": 9.0,
+          "gain_db": -6.83,
+          "pitch_shift": false,
+          "chord_index": 9,
+          "midi": 55,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        }
+      ]
+    },
+    {
+      "key": "fs:65714",
+      "source": "Freesound",
+      "title": "C_S Rhodes Mark II A#2.aif",
+      "source_url": "https://freesound.org/people/tim.kahn/sounds/65714/",
+      "author": "tim.kahn",
+      "audio_used": {
+        "url": "https://cdn.freesound.org/previews/65/65714_7037-hq.ogg",
+        "what": "Freesound HQ preview (lossy Ogg Vorbis), resampled to 48 kHz on decode, pitch unchanged",
+        "sha256": "3694992422be575c2ab55125ca7951a5a5d8e0663968190afe8baedec343ebbc",
+        "size_bytes": 256401
+      },
+      "supplier": {
+        "display_name": "tim.kahn",
+        "primary_link": "https://freesound.org/people/tim.kahn/"
+      },
+      "license": {
+        "name": "CC BY 4.0",
+        "uri": "https://creativecommons.org/licenses/by/4.0/",
+        "verified_live": "2026-10-18, creativecommons.org/licenses/by/4.0"
+      },
+      "credit_line": "“C_S Rhodes Mark II A#2.aif” by tim.kahn (https://freesound.org/people/tim.kahn/sounds/65714/), CC BY 4.0",
+      "pitch_measured": {
+        "sounding": "A#3",
+        "cents": -3.3,
+        "method": "NC pYIN on the preview"
+      },
+      "roles": [
+        "rhodes strike"
+      ],
+      "uses": 5,
+      "time_stretch_ratios": [
+        1.0
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "fs:65714",
+          "layer": "keys",
+          "at_s": 0.348,
+          "len_s": 9.0,
+          "gain_db": -1.1,
+          "pitch_shift": false,
+          "chord_index": 0,
+          "midi": 58,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65714",
+          "layer": "keys",
+          "at_s": 10.333,
+          "len_s": 9.0,
+          "gain_db": -2.31,
+          "pitch_shift": false,
+          "chord_index": 1,
+          "midi": 58,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65714",
+          "layer": "keys",
+          "at_s": 30.317,
+          "len_s": 9.0,
+          "gain_db": -2.5,
+          "pitch_shift": false,
+          "chord_index": 3,
+          "midi": 58,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65714",
+          "layer": "keys",
+          "at_s": 40.315,
+          "len_s": 9.0,
+          "gain_db": -1.24,
+          "pitch_shift": false,
+          "chord_index": 4,
+          "midi": 58,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65714",
+          "layer": "keys",
+          "at_s": 45.343,
+          "len_s": 9.0,
+          "gain_db": -6.89,
+          "pitch_shift": false,
+          "chord_index": 4,
+          "midi": 58,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        }
+      ]
+    },
+    {
+      "key": "fs:65720",
+      "source": "Freesound",
+      "title": "C_S Rhodes Mark II C3.aif",
+      "source_url": "https://freesound.org/people/tim.kahn/sounds/65720/",
+      "author": "tim.kahn",
+      "audio_used": {
+        "url": "https://cdn.freesound.org/previews/65/65720_7037-hq.ogg",
+        "what": "Freesound HQ preview (lossy Ogg Vorbis), resampled to 48 kHz on decode, pitch unchanged",
+        "sha256": "87fb7780806e1d6f03ae0f6a8872f7805eadbfbf9c5947fb3fc220f3f21f9cd2",
+        "size_bytes": 109375
+      },
+      "supplier": {
+        "display_name": "tim.kahn",
+        "primary_link": "https://freesound.org/people/tim.kahn/"
+      },
+      "license": {
+        "name": "CC BY 4.0",
+        "uri": "https://creativecommons.org/licenses/by/4.0/",
+        "verified_live": "2026-10-18, creativecommons.org/licenses/by/4.0"
+      },
+      "credit_line": "“C_S Rhodes Mark II C3.aif” by tim.kahn (https://freesound.org/people/tim.kahn/sounds/65720/), CC BY 4.0",
+      "pitch_measured": {
+        "sounding": "C4",
+        "cents": -3.3,
+        "method": "NC pYIN on the preview"
+      },
+      "roles": [
+        "rhodes strike"
+      ],
+      "uses": 12,
+      "time_stretch_ratios": [
+        1.0
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "fs:65720",
+          "layer": "keys",
+          "at_s": 0.364,
+          "len_s": 9.0,
+          "gain_db": -1.97,
+          "pitch_shift": false,
+          "chord_index": 0,
+          "midi": 60,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65720",
+          "layer": "keys",
+          "at_s": 20.313,
+          "len_s": 9.0,
+          "gain_db": -2.47,
+          "pitch_shift": false,
+          "chord_index": 2,
+          "midi": 60,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65720",
+          "layer": "keys",
+          "at_s": 50.38,
+          "len_s": 9.0,
+          "gain_db": -1.78,
+          "pitch_shift": false,
+          "chord_index": 5,
+          "midi": 60,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65720",
+          "layer": "keys",
+          "at_s": 52.877,
+          "len_s": 9.0,
+          "gain_db": -5.68,
+          "pitch_shift": false,
+          "chord_index": 5,
+          "midi": 60,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65720",
+          "layer": "keys",
+          "at_s": 55.361,
+          "len_s": 9.0,
+          "gain_db": -6.24,
+          "pitch_shift": false,
+          "chord_index": 5,
+          "midi": 60,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65720",
+          "layer": "keys",
+          "at_s": 57.861,
+          "len_s": 9.0,
+          "gain_db": -5.51,
+          "pitch_shift": false,
+          "chord_index": 5,
+          "midi": 60,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65720",
+          "layer": "keys",
+          "at_s": 70.33,
+          "len_s": 9.0,
+          "gain_db": -2.35,
+          "pitch_shift": false,
+          "chord_index": 7,
+          "midi": 60,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65720",
+          "layer": "keys",
+          "at_s": 75.358,
+          "len_s": 9.0,
+          "gain_db": -6.03,
+          "pitch_shift": false,
+          "chord_index": 7,
+          "midi": 60,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65720",
+          "layer": "keys",
+          "at_s": 90.363,
+          "len_s": 9.0,
+          "gain_db": -1.1,
+          "pitch_shift": false,
+          "chord_index": 9,
+          "midi": 60,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65720",
+          "layer": "keys",
+          "at_s": 95.363,
+          "len_s": 9.0,
+          "gain_db": -5.43,
+          "pitch_shift": false,
+          "chord_index": 9,
+          "midi": 60,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65720",
+          "layer": "keys",
+          "at_s": 110.374,
+          "len_s": 11.833,
+          "gain_db": -2.3,
+          "pitch_shift": false,
+          "chord_index": 11,
+          "midi": 60,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65720",
+          "layer": "keys",
+          "at_s": 115.33,
+          "len_s": 11.833,
+          "gain_db": -6.53,
+          "pitch_shift": false,
+          "chord_index": 11,
+          "midi": 60,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        }
+      ]
+    },
+    {
+      "key": "fs:65722",
+      "source": "Freesound",
+      "title": "C_S Rhodes Mark II D#3.aif",
+      "source_url": "https://freesound.org/people/tim.kahn/sounds/65722/",
+      "author": "tim.kahn",
+      "audio_used": {
+        "url": "https://cdn.freesound.org/previews/65/65722_7037-hq.ogg",
+        "what": "Freesound HQ preview (lossy Ogg Vorbis), resampled to 48 kHz on decode, pitch unchanged",
+        "sha256": "d73fb56a036e15bad239cd3837b73dba9d1d556ade55bb76d7966f684a2ab515",
+        "size_bytes": 168548
+      },
+      "supplier": {
+        "display_name": "tim.kahn",
+        "primary_link": "https://freesound.org/people/tim.kahn/"
+      },
+      "license": {
+        "name": "CC BY 4.0",
+        "uri": "https://creativecommons.org/licenses/by/4.0/",
+        "verified_live": "2026-10-18, creativecommons.org/licenses/by/4.0"
+      },
+      "credit_line": "“C_S Rhodes Mark II D#3.aif” by tim.kahn (https://freesound.org/people/tim.kahn/sounds/65722/), CC BY 4.0",
+      "pitch_measured": {
+        "sounding": "D#4",
+        "cents": 6.7,
+        "method": "NC pYIN on the preview"
+      },
+      "roles": [
+        "rhodes strike"
+      ],
+      "uses": 9,
+      "time_stretch_ratios": [
+        1.0
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "fs:65722",
+          "layer": "keys",
+          "at_s": 0.382,
+          "len_s": 9.0,
+          "gain_db": -2.52,
+          "pitch_shift": false,
+          "chord_index": 0,
+          "midi": 63,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65722",
+          "layer": "keys",
+          "at_s": 10.384,
+          "len_s": 9.0,
+          "gain_db": -1.2,
+          "pitch_shift": false,
+          "chord_index": 1,
+          "midi": 63,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65722",
+          "layer": "keys",
+          "at_s": 30.339,
+          "len_s": 9.0,
+          "gain_db": -2.51,
+          "pitch_shift": false,
+          "chord_index": 3,
+          "midi": 63,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65722",
+          "layer": "keys",
+          "at_s": 50.381,
+          "len_s": 9.0,
+          "gain_db": -2.31,
+          "pitch_shift": false,
+          "chord_index": 5,
+          "midi": 63,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65722",
+          "layer": "keys",
+          "at_s": 52.88,
+          "len_s": 9.0,
+          "gain_db": -6.34,
+          "pitch_shift": false,
+          "chord_index": 5,
+          "midi": 63,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65722",
+          "layer": "keys",
+          "at_s": 55.371,
+          "len_s": 9.0,
+          "gain_db": -5.7,
+          "pitch_shift": false,
+          "chord_index": 5,
+          "midi": 63,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65722",
+          "layer": "keys",
+          "at_s": 57.877,
+          "len_s": 9.0,
+          "gain_db": -5.21,
+          "pitch_shift": false,
+          "chord_index": 5,
+          "midi": 63,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65722",
+          "layer": "keys",
+          "at_s": 90.372,
+          "len_s": 9.0,
+          "gain_db": -1.57,
+          "pitch_shift": false,
+          "chord_index": 9,
+          "midi": 63,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65722",
+          "layer": "keys",
+          "at_s": 95.381,
+          "len_s": 9.0,
+          "gain_db": -6.98,
+          "pitch_shift": false,
+          "chord_index": 9,
+          "midi": 63,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        }
+      ]
+    },
+    {
+      "key": "iowa:Piano.pp.Eb3.aiff",
+      "source": "University of Iowa Musical Instrument Samples (MIS)",
+      "title": "Piano.pp.Eb3.aiff",
+      "source_url": "https://theremin.music.uiowa.edu/MISpiano.html",
+      "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+      "audio_used": {
+        "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.Eb3.aiff",
+        "what": "original AIFF (lossless), resampled to 48 kHz on decode, pitch unchanged",
+        "sha256": "f9a7030f5e6ddeede3efdf4760d47c23ef366e2861cb28e91606d9485f1823f3",
+        "size_bytes": 6464222
+      },
+      "supplier": {
+        "display_name": "University of Iowa Electronic Music Studios",
+        "primary_link": "https://theremin.music.uiowa.edu/MIS.html"
+      },
+      "license": {
+        "name": "Public domain equivalent (UIowa MIS: no restrictions)",
+        "uri": "https://theremin.music.uiowa.edu/MIS.html",
+        "terms_verbatim": "\"Since 1997, these recordings have been freely available on this website and may be downloaded and used for any projects, without restrictions.\" (theremin.music.uiowa.edu/MIS.html, read 2026-10-18)"
+      },
+      "credit_line": "Piano.pp.Eb3.aiff, University of Iowa Musical Instrument Samples, Electronic Music Studios (Lawrence Fritts), https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.Eb3.aiff",
+      "pitch_measured": null,
+      "roles": [
+        "piano strike",
+        "stretched pad"
+      ],
+      "uses": 5,
+      "time_stretch_ratios": [
+        1.0,
+        3.7333
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "iowa:Piano.pp.Eb3.aiff",
+          "layer": "pad",
+          "at_s": 0.0,
+          "len_s": 13.975,
+          "gain_db": -10.09,
+          "pitch_shift": false,
+          "chord_index": 0,
+          "midi": 51,
+          "source_offset_s": 0.575,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        },
+        {
+          "key": "iowa:Piano.pp.Eb3.aiff",
+          "layer": "pad",
+          "at_s": 18.5,
+          "len_s": 13.975,
+          "gain_db": -7.87,
+          "pitch_shift": false,
+          "chord_index": 2,
+          "midi": 51,
+          "source_offset_s": 0.575,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        },
+        {
+          "key": "iowa:Piano.pp.Eb3.aiff",
+          "layer": "keys",
+          "at_s": 40.319,
+          "len_s": 9.0,
+          "gain_db": -2.52,
+          "pitch_shift": false,
+          "chord_index": 4,
+          "midi": 51,
+          "source_offset_s": 0.325,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.Eb3.aiff",
+          "layer": "keys",
+          "at_s": 45.309,
+          "len_s": 9.0,
+          "gain_db": -8.4,
+          "pitch_shift": false,
+          "chord_index": 4,
+          "midi": 51,
+          "source_offset_s": 0.325,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.Eb3.aiff",
+          "layer": "pad",
+          "at_s": 38.5,
+          "len_s": 13.975,
+          "gain_db": -9.12,
+          "pitch_shift": false,
+          "chord_index": 4,
+          "midi": 51,
+          "source_offset_s": 0.575,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        }
+      ]
+    },
+    {
+      "key": "iowa:Piano.pp.G3.aiff",
+      "source": "University of Iowa Musical Instrument Samples (MIS)",
+      "title": "Piano.pp.G3.aiff",
+      "source_url": "https://theremin.music.uiowa.edu/MISpiano.html",
+      "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+      "audio_used": {
+        "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.G3.aiff",
+        "what": "original AIFF (lossless), resampled to 48 kHz on decode, pitch unchanged",
+        "sha256": "0c7e525105fbf59dff53634331e87e1ff7a2e331e77e468e9a3f0dfe4bbaa21a",
+        "size_bytes": 6330178
+      },
+      "supplier": {
+        "display_name": "University of Iowa Electronic Music Studios",
+        "primary_link": "https://theremin.music.uiowa.edu/MIS.html"
+      },
+      "license": {
+        "name": "Public domain equivalent (UIowa MIS: no restrictions)",
+        "uri": "https://theremin.music.uiowa.edu/MIS.html",
+        "terms_verbatim": "\"Since 1997, these recordings have been freely available on this website and may be downloaded and used for any projects, without restrictions.\" (theremin.music.uiowa.edu/MIS.html, read 2026-10-18)"
+      },
+      "credit_line": "Piano.pp.G3.aiff, University of Iowa Musical Instrument Samples, Electronic Music Studios (Lawrence Fritts), https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.G3.aiff",
+      "pitch_measured": null,
+      "roles": [
+        "piano strike",
+        "stretched pad"
+      ],
+      "uses": 13,
+      "time_stretch_ratios": [
+        1.0,
+        3.7333
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "iowa:Piano.pp.G3.aiff",
+          "layer": "pad",
+          "at_s": 0.0,
+          "len_s": 13.975,
+          "gain_db": -10.09,
+          "pitch_shift": false,
+          "chord_index": 0,
+          "midi": 55,
+          "source_offset_s": 0.442,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        },
+        {
+          "key": "iowa:Piano.pp.G3.aiff",
+          "layer": "pad",
+          "at_s": 8.5,
+          "len_s": 13.975,
+          "gain_db": -10.09,
+          "pitch_shift": false,
+          "chord_index": 1,
+          "midi": 55,
+          "source_offset_s": 0.442,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        },
+        {
+          "key": "iowa:Piano.pp.G3.aiff",
+          "layer": "keys",
+          "at_s": 50.322,
+          "len_s": 9.0,
+          "gain_db": -4.06,
+          "pitch_shift": false,
+          "chord_index": 5,
+          "midi": 55,
+          "source_offset_s": 0.192,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.G3.aiff",
+          "layer": "keys",
+          "at_s": 52.873,
+          "len_s": 9.0,
+          "gain_db": -7.48,
+          "pitch_shift": false,
+          "chord_index": 5,
+          "midi": 55,
+          "source_offset_s": 0.192,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.G3.aiff",
+          "layer": "keys",
+          "at_s": 55.331,
+          "len_s": 9.0,
+          "gain_db": -7.07,
+          "pitch_shift": false,
+          "chord_index": 5,
+          "midi": 55,
+          "source_offset_s": 0.192,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.G3.aiff",
+          "layer": "keys",
+          "at_s": 57.822,
+          "len_s": 9.0,
+          "gain_db": -7.65,
+          "pitch_shift": false,
+          "chord_index": 5,
+          "midi": 55,
+          "source_offset_s": 0.192,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.G3.aiff",
+          "layer": "pad",
+          "at_s": 48.5,
+          "len_s": 13.975,
+          "gain_db": -9.12,
+          "pitch_shift": false,
+          "chord_index": 5,
+          "midi": 55,
+          "source_offset_s": 0.442,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        },
+        {
+          "key": "iowa:Piano.pp.G3.aiff",
+          "layer": "keys",
+          "at_s": 60.309,
+          "len_s": 9.0,
+          "gain_db": -2.45,
+          "pitch_shift": false,
+          "chord_index": 6,
+          "midi": 55,
+          "source_offset_s": 0.192,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.G3.aiff",
+          "layer": "keys",
+          "at_s": 65.353,
+          "len_s": 9.0,
+          "gain_db": -7.86,
+          "pitch_shift": false,
+          "chord_index": 6,
+          "midi": 55,
+          "source_offset_s": 0.192,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.G3.aiff",
+          "layer": "pad",
+          "at_s": 58.5,
+          "len_s": 13.975,
+          "gain_db": -9.12,
+          "pitch_shift": false,
+          "chord_index": 6,
+          "midi": 55,
+          "source_offset_s": 0.442,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        },
+        {
+          "key": "iowa:Piano.pp.G3.aiff",
+          "layer": "keys",
+          "at_s": 90.345,
+          "len_s": 9.0,
+          "gain_db": -3.07,
+          "pitch_shift": false,
+          "chord_index": 9,
+          "midi": 55,
+          "source_offset_s": 0.192,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.G3.aiff",
+          "layer": "keys",
+          "at_s": 95.322,
+          "len_s": 9.0,
+          "gain_db": -6.67,
+          "pitch_shift": false,
+          "chord_index": 9,
+          "midi": 55,
+          "source_offset_s": 0.192,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.G3.aiff",
+          "layer": "pad",
+          "at_s": 88.5,
+          "len_s": 13.975,
+          "gain_db": -9.12,
+          "pitch_shift": false,
+          "chord_index": 9,
+          "midi": 55,
+          "source_offset_s": 0.442,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        }
+      ]
+    },
+    {
+      "key": "iowa:Piano.pp.Bb3.aiff",
+      "source": "University of Iowa Musical Instrument Samples (MIS)",
+      "title": "Piano.pp.Bb3.aiff",
+      "source_url": "https://theremin.music.uiowa.edu/MISpiano.html",
+      "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+      "audio_used": {
+        "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.Bb3.aiff",
+        "what": "original AIFF (lossless), resampled to 48 kHz on decode, pitch unchanged",
+        "sha256": "097e6fe88ba65bfcb83ab1b5c863cf66760a469ad66dfaff8c601ea71ee35cf7",
+        "size_bytes": 6053438
+      },
+      "supplier": {
+        "display_name": "University of Iowa Electronic Music Studios",
+        "primary_link": "https://theremin.music.uiowa.edu/MIS.html"
+      },
+      "license": {
+        "name": "Public domain equivalent (UIowa MIS: no restrictions)",
+        "uri": "https://theremin.music.uiowa.edu/MIS.html",
+        "terms_verbatim": "\"Since 1997, these recordings have been freely available on this website and may be downloaded and used for any projects, without restrictions.\" (theremin.music.uiowa.edu/MIS.html, read 2026-10-18)"
+      },
+      "credit_line": "Piano.pp.Bb3.aiff, University of Iowa Musical Instrument Samples, Electronic Music Studios (Lawrence Fritts), https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.Bb3.aiff",
+      "pitch_measured": null,
+      "roles": [
+        "piano strike",
+        "stretched pad"
+      ],
+      "uses": 9,
+      "time_stretch_ratios": [
+        1.0,
+        3.7333
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "iowa:Piano.pp.Bb3.aiff",
+          "layer": "pad",
+          "at_s": 0.0,
+          "len_s": 13.975,
+          "gain_db": -10.09,
+          "pitch_shift": false,
+          "chord_index": 0,
+          "midi": 58,
+          "source_offset_s": 0.54,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        },
+        {
+          "key": "iowa:Piano.pp.Bb3.aiff",
+          "layer": "pad",
+          "at_s": 8.5,
+          "len_s": 13.975,
+          "gain_db": -10.09,
+          "pitch_shift": false,
+          "chord_index": 1,
+          "midi": 58,
+          "source_offset_s": 0.54,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        },
+        {
+          "key": "iowa:Piano.pp.Bb3.aiff",
+          "layer": "pad",
+          "at_s": 28.5,
+          "len_s": 13.975,
+          "gain_db": -7.87,
+          "pitch_shift": false,
+          "chord_index": 3,
+          "midi": 58,
+          "source_offset_s": 0.54,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        },
+        {
+          "key": "iowa:Piano.pp.Bb3.aiff",
+          "layer": "keys",
+          "at_s": 40.366,
+          "len_s": 9.0,
+          "gain_db": -2.52,
+          "pitch_shift": false,
+          "chord_index": 4,
+          "midi": 58,
+          "source_offset_s": 0.29,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.Bb3.aiff",
+          "layer": "keys",
+          "at_s": 45.318,
+          "len_s": 9.0,
+          "gain_db": -8.01,
+          "pitch_shift": false,
+          "chord_index": 4,
+          "midi": 58,
+          "source_offset_s": 0.29,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.Bb3.aiff",
+          "layer": "pad",
+          "at_s": 38.5,
+          "len_s": 13.975,
+          "gain_db": -9.12,
+          "pitch_shift": false,
+          "chord_index": 4,
+          "midi": 58,
+          "source_offset_s": 0.54,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        },
+        {
+          "key": "iowa:Piano.pp.Bb3.aiff",
+          "layer": "keys",
+          "at_s": 60.353,
+          "len_s": 9.0,
+          "gain_db": -4.12,
+          "pitch_shift": false,
+          "chord_index": 6,
+          "midi": 58,
+          "source_offset_s": 0.29,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.Bb3.aiff",
+          "layer": "keys",
+          "at_s": 65.359,
+          "len_s": 9.0,
+          "gain_db": -8.18,
+          "pitch_shift": false,
+          "chord_index": 6,
+          "midi": 58,
+          "source_offset_s": 0.29,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.Bb3.aiff",
+          "layer": "pad",
+          "at_s": 58.5,
+          "len_s": 13.975,
+          "gain_db": -9.12,
+          "pitch_shift": false,
+          "chord_index": 6,
+          "midi": 58,
+          "source_offset_s": 0.54,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        }
+      ]
+    },
+    {
+      "key": "iowa:Piano.pp.C4.aiff",
+      "source": "University of Iowa Musical Instrument Samples (MIS)",
+      "title": "Piano.pp.C4.aiff",
+      "source_url": "https://theremin.music.uiowa.edu/MISpiano.html",
+      "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+      "audio_used": {
+        "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.C4.aiff",
+        "what": "original AIFF (lossless), resampled to 48 kHz on decode, pitch unchanged",
+        "sha256": "94540df460e6f4b1517d9ae0bb1a1cc5b4b28ffd61106eda3e89475544ee545d",
+        "size_bytes": 5195362
+      },
+      "supplier": {
+        "display_name": "University of Iowa Electronic Music Studios",
+        "primary_link": "https://theremin.music.uiowa.edu/MIS.html"
+      },
+      "license": {
+        "name": "Public domain equivalent (UIowa MIS: no restrictions)",
+        "uri": "https://theremin.music.uiowa.edu/MIS.html",
+        "terms_verbatim": "\"Since 1997, these recordings have been freely available on this website and may be downloaded and used for any projects, without restrictions.\" (theremin.music.uiowa.edu/MIS.html, read 2026-10-18)"
+      },
+      "credit_line": "Piano.pp.C4.aiff, University of Iowa Musical Instrument Samples, Electronic Music Studios (Lawrence Fritts), https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.C4.aiff",
+      "pitch_measured": {
+        "sounding": "C4",
+        "cents": 7.0,
+        "method": "NC pYIN (0.02-semitone resolution) on the note segment"
+      },
+      "roles": [
+        "piano strike",
+        "stretched pad"
+      ],
+      "uses": 22,
+      "time_stretch_ratios": [
+        1.0,
+        3.7333
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "iowa:Piano.pp.C4.aiff",
+          "layer": "pad",
+          "at_s": 0.0,
+          "len_s": 13.975,
+          "gain_db": -10.09,
+          "pitch_shift": false,
+          "chord_index": 0,
+          "midi": 60,
+          "source_offset_s": 0.525,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        },
+        {
+          "key": "iowa:Piano.pp.C4.aiff",
+          "layer": "pad",
+          "at_s": 18.5,
+          "len_s": 13.975,
+          "gain_db": -7.87,
+          "pitch_shift": false,
+          "chord_index": 2,
+          "midi": 60,
+          "source_offset_s": 0.525,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        },
+        {
+          "key": "iowa:Piano.pp.C4.aiff",
+          "layer": "keys",
+          "at_s": 50.358,
+          "len_s": 9.0,
+          "gain_db": -3.54,
+          "pitch_shift": false,
+          "chord_index": 5,
+          "midi": 60,
+          "source_offset_s": 0.275,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.C4.aiff",
+          "layer": "keys",
+          "at_s": 52.888,
+          "len_s": 9.0,
+          "gain_db": -8.23,
+          "pitch_shift": false,
+          "chord_index": 5,
+          "midi": 60,
+          "source_offset_s": 0.275,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.C4.aiff",
+          "layer": "keys",
+          "at_s": 55.332,
+          "len_s": 9.0,
+          "gain_db": -7.59,
+          "pitch_shift": false,
+          "chord_index": 5,
+          "midi": 60,
+          "source_offset_s": 0.275,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.C4.aiff",
+          "layer": "keys",
+          "at_s": 57.831,
+          "len_s": 9.0,
+          "gain_db": -8.51,
+          "pitch_shift": false,
+          "chord_index": 5,
+          "midi": 60,
+          "source_offset_s": 0.275,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.C4.aiff",
+          "layer": "pad",
+          "at_s": 48.5,
+          "len_s": 13.975,
+          "gain_db": -9.12,
+          "pitch_shift": false,
+          "chord_index": 5,
+          "midi": 60,
+          "source_offset_s": 0.525,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        },
+        {
+          "key": "iowa:Piano.pp.C4.aiff",
+          "layer": "keys",
+          "at_s": 70.37,
+          "len_s": 9.0,
+          "gain_db": -2.41,
+          "pitch_shift": false,
+          "chord_index": 7,
+          "midi": 60,
+          "source_offset_s": 0.275,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.C4.aiff",
+          "layer": "keys",
+          "at_s": 75.368,
+          "len_s": 9.0,
+          "gain_db": -7.43,
+          "pitch_shift": false,
+          "chord_index": 7,
+          "midi": 60,
+          "source_offset_s": 0.275,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.C4.aiff",
+          "layer": "pad",
+          "at_s": 68.5,
+          "len_s": 13.975,
+          "gain_db": -10.09,
+          "pitch_shift": false,
+          "chord_index": 7,
+          "midi": 60,
+          "source_offset_s": 0.525,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        },
+        {
+          "key": "iowa:Piano.pp.C4.aiff",
+          "layer": "keys",
+          "at_s": 80.372,
+          "len_s": 9.0,
+          "gain_db": -2.79,
+          "pitch_shift": false,
+          "chord_index": 8,
+          "midi": 60,
+          "source_offset_s": 0.275,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.C4.aiff",
+          "layer": "keys",
+          "at_s": 85.381,
+          "len_s": 9.0,
+          "gain_db": -7.28,
+          "pitch_shift": false,
+          "chord_index": 8,
+          "midi": 60,
+          "source_offset_s": 0.275,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.C4.aiff",
+          "layer": "pad",
+          "at_s": 78.5,
+          "len_s": 13.975,
+          "gain_db": -9.12,
+          "pitch_shift": false,
+          "chord_index": 8,
+          "midi": 60,
+          "source_offset_s": 0.525,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        },
+        {
+          "key": "iowa:Piano.pp.C4.aiff",
+          "layer": "keys",
+          "at_s": 90.377,
+          "len_s": 9.0,
+          "gain_db": -3.13,
+          "pitch_shift": false,
+          "chord_index": 9,
+          "midi": 60,
+          "source_offset_s": 0.275,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.C4.aiff",
+          "layer": "keys",
+          "at_s": 95.373,
+          "len_s": 9.0,
+          "gain_db": -8.09,
+          "pitch_shift": false,
+          "chord_index": 9,
+          "midi": 60,
+          "source_offset_s": 0.275,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.C4.aiff",
+          "layer": "pad",
+          "at_s": 88.5,
+          "len_s": 13.975,
+          "gain_db": -9.12,
+          "pitch_shift": false,
+          "chord_index": 9,
+          "midi": 60,
+          "source_offset_s": 0.525,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        },
+        {
+          "key": "iowa:Piano.pp.C4.aiff",
+          "layer": "keys",
+          "at_s": 100.34,
+          "len_s": 9.0,
+          "gain_db": -3.64,
+          "pitch_shift": false,
+          "chord_index": 10,
+          "midi": 60,
+          "source_offset_s": 0.275,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.C4.aiff",
+          "layer": "keys",
+          "at_s": 105.324,
+          "len_s": 9.0,
+          "gain_db": -7.23,
+          "pitch_shift": false,
+          "chord_index": 10,
+          "midi": 60,
+          "source_offset_s": 0.275,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.C4.aiff",
+          "layer": "pad",
+          "at_s": 98.5,
+          "len_s": 13.975,
+          "gain_db": -9.12,
+          "pitch_shift": false,
+          "chord_index": 10,
+          "midi": 60,
+          "source_offset_s": 0.525,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        },
+        {
+          "key": "iowa:Piano.pp.C4.aiff",
+          "layer": "keys",
+          "at_s": 110.362,
+          "len_s": 12.0,
+          "gain_db": -4.19,
+          "pitch_shift": false,
+          "chord_index": 11,
+          "midi": 60,
+          "source_offset_s": 0.275,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.C4.aiff",
+          "layer": "keys",
+          "at_s": 115.325,
+          "len_s": 12.0,
+          "gain_db": -7.71,
+          "pitch_shift": false,
+          "chord_index": 11,
+          "midi": 60,
+          "source_offset_s": 0.275,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.C4.aiff",
+          "layer": "pad",
+          "at_s": 108.5,
+          "len_s": 13.975,
+          "gain_db": -9.12,
+          "pitch_shift": false,
+          "chord_index": 11,
+          "midi": 60,
+          "source_offset_s": 0.525,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        }
+      ]
+    },
+    {
+      "key": "iowa:Piano.pp.Eb4.aiff",
+      "source": "University of Iowa Musical Instrument Samples (MIS)",
+      "title": "Piano.pp.Eb4.aiff",
+      "source_url": "https://theremin.music.uiowa.edu/MISpiano.html",
+      "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+      "audio_used": {
+        "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.Eb4.aiff",
+        "what": "original AIFF (lossless), resampled to 48 kHz on decode, pitch unchanged",
+        "sha256": "6aac55d41b3d987a7b860b7b87a81a2e6f035ed221007669f1396e315531e86e",
+        "size_bytes": 5556150
+      },
+      "supplier": {
+        "display_name": "University of Iowa Electronic Music Studios",
+        "primary_link": "https://theremin.music.uiowa.edu/MIS.html"
+      },
+      "license": {
+        "name": "Public domain equivalent (UIowa MIS: no restrictions)",
+        "uri": "https://theremin.music.uiowa.edu/MIS.html",
+        "terms_verbatim": "\"Since 1997, these recordings have been freely available on this website and may be downloaded and used for any projects, without restrictions.\" (theremin.music.uiowa.edu/MIS.html, read 2026-10-18)"
+      },
+      "credit_line": "Piano.pp.Eb4.aiff, University of Iowa Musical Instrument Samples, Electronic Music Studios (Lawrence Fritts), https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.Eb4.aiff",
+      "pitch_measured": {
+        "sounding": "D#4",
+        "cents": 10.0,
+        "method": "NC pYIN (0.02-semitone resolution) on the note segment"
+      },
+      "roles": [
+        "piano strike",
+        "stretched pad"
+      ],
+      "uses": 14,
+      "time_stretch_ratios": [
+        1.0,
+        3.7333
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "iowa:Piano.pp.Eb4.aiff",
+          "layer": "pad",
+          "at_s": 0.0,
+          "len_s": 13.975,
+          "gain_db": -10.09,
+          "pitch_shift": false,
+          "chord_index": 0,
+          "midi": 63,
+          "source_offset_s": 0.51,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        },
+        {
+          "key": "iowa:Piano.pp.Eb4.aiff",
+          "layer": "pad",
+          "at_s": 8.5,
+          "len_s": 13.975,
+          "gain_db": -10.09,
+          "pitch_shift": false,
+          "chord_index": 1,
+          "midi": 63,
+          "source_offset_s": 0.51,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        },
+        {
+          "key": "iowa:Piano.pp.Eb4.aiff",
+          "layer": "pad",
+          "at_s": 28.5,
+          "len_s": 13.975,
+          "gain_db": -7.87,
+          "pitch_shift": false,
+          "chord_index": 3,
+          "midi": 63,
+          "source_offset_s": 0.51,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        },
+        {
+          "key": "iowa:Piano.pp.Eb4.aiff",
+          "layer": "keys",
+          "at_s": 50.381,
+          "len_s": 9.0,
+          "gain_db": -2.48,
+          "pitch_shift": false,
+          "chord_index": 5,
+          "midi": 63,
+          "source_offset_s": 0.26,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.Eb4.aiff",
+          "layer": "keys",
+          "at_s": 52.889,
+          "len_s": 9.0,
+          "gain_db": -8.3,
+          "pitch_shift": false,
+          "chord_index": 5,
+          "midi": 63,
+          "source_offset_s": 0.26,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.Eb4.aiff",
+          "layer": "keys",
+          "at_s": 55.336,
+          "len_s": 9.0,
+          "gain_db": -8.28,
+          "pitch_shift": false,
+          "chord_index": 5,
+          "midi": 63,
+          "source_offset_s": 0.26,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.Eb4.aiff",
+          "layer": "keys",
+          "at_s": 57.874,
+          "len_s": 9.0,
+          "gain_db": -7.69,
+          "pitch_shift": false,
+          "chord_index": 5,
+          "midi": 63,
+          "source_offset_s": 0.26,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.Eb4.aiff",
+          "layer": "pad",
+          "at_s": 48.5,
+          "len_s": 13.975,
+          "gain_db": -9.12,
+          "pitch_shift": false,
+          "chord_index": 5,
+          "midi": 63,
+          "source_offset_s": 0.51,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        },
+        {
+          "key": "iowa:Piano.pp.Eb4.aiff",
+          "layer": "keys",
+          "at_s": 60.378,
+          "len_s": 9.0,
+          "gain_db": -3.82,
+          "pitch_shift": false,
+          "chord_index": 6,
+          "midi": 63,
+          "source_offset_s": 0.26,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.Eb4.aiff",
+          "layer": "keys",
+          "at_s": 65.38,
+          "len_s": 9.0,
+          "gain_db": -7.27,
+          "pitch_shift": false,
+          "chord_index": 6,
+          "midi": 63,
+          "source_offset_s": 0.26,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.Eb4.aiff",
+          "layer": "pad",
+          "at_s": 58.5,
+          "len_s": 13.975,
+          "gain_db": -9.12,
+          "pitch_shift": false,
+          "chord_index": 6,
+          "midi": 63,
+          "source_offset_s": 0.51,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        },
+        {
+          "key": "iowa:Piano.pp.Eb4.aiff",
+          "layer": "keys",
+          "at_s": 90.383,
+          "len_s": 9.0,
+          "gain_db": -3.79,
+          "pitch_shift": false,
+          "chord_index": 9,
+          "midi": 63,
+          "source_offset_s": 0.26,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.Eb4.aiff",
+          "layer": "keys",
+          "at_s": 95.39,
+          "len_s": 9.0,
+          "gain_db": -7.86,
+          "pitch_shift": false,
+          "chord_index": 9,
+          "midi": 63,
+          "source_offset_s": 0.26,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.Eb4.aiff",
+          "layer": "pad",
+          "at_s": 88.5,
+          "len_s": 13.975,
+          "gain_db": -9.12,
+          "pitch_shift": false,
+          "chord_index": 9,
+          "midi": 63,
+          "source_offset_s": 0.51,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        }
+      ]
+    },
+    {
+      "key": "iowa:Cello.arco.pp.sulC.C2B2.stereo.aif#0",
+      "source": "University of Iowa Musical Instrument Samples (MIS)",
+      "title": "Cello.arco.pp.sulC.C2B2.stereo.aif (note 1 of the run, 36)",
+      "source_url": "https://theremin.music.uiowa.edu/MIScello2012.html",
+      "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+      "audio_used": {
+        "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/cello2012/Cello.arco.pp.sulC.C2B2.stereo.aif",
+        "what": "original AIFF (lossless), resampled to 48 kHz on decode, pitch unchanged; trimmed to the run segment 0.952-7.129 s",
+        "sha256": "4827099978f4e3af699006788ab143ce79022a91781d317dde68bb158170b0df",
+        "size_bytes": 15961096
+      },
+      "supplier": {
+        "display_name": "University of Iowa Electronic Music Studios",
+        "primary_link": "https://theremin.music.uiowa.edu/MIS.html"
+      },
+      "license": {
+        "name": "Public domain equivalent (UIowa MIS: no restrictions)",
+        "uri": "https://theremin.music.uiowa.edu/MIS.html",
+        "terms_verbatim": "\"Since 1997, these recordings have been freely available on this website and may be downloaded and used for any projects, without restrictions.\" (theremin.music.uiowa.edu/MIS.html, read 2026-10-18)"
+      },
+      "credit_line": "Cello.arco.pp.sulC.C2B2.stereo.aif, University of Iowa Musical Instrument Samples, Electronic Music Studios (Lawrence Fritts), https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/cello2012/Cello.arco.pp.sulC.C2B2.stereo.aif",
+      "pitch_measured": {
+        "sounding": "C2",
+        "cents": 3.0,
+        "method": "NC pYIN (0.02-semitone resolution) on the note segment"
+      },
+      "roles": [
+        "cello"
+      ],
+      "uses": 8,
+      "time_stretch_ratios": [
+        2.5562
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "iowa:Cello.arco.pp.sulC.C2B2.stereo.aif#0",
+          "layer": "pad",
+          "at_s": 0.5,
+          "len_s": 14.0,
+          "gain_db": -6.94,
+          "pitch_shift": false,
+          "chord_index": 0,
+          "midi": 36,
+          "source_offset_s": 1.252,
+          "source_len_s": 5.477,
+          "time_stretch": 2.5562,
+          "role": "cello"
+        },
+        {
+          "key": "iowa:Cello.arco.pp.sulC.C2B2.stereo.aif#0",
+          "layer": "pad",
+          "at_s": 9.0,
+          "len_s": 14.0,
+          "gain_db": -6.94,
+          "pitch_shift": false,
+          "chord_index": 1,
+          "midi": 36,
+          "source_offset_s": 1.252,
+          "source_len_s": 5.477,
+          "time_stretch": 2.5562,
+          "role": "cello"
+        },
+        {
+          "key": "iowa:Cello.arco.pp.sulC.C2B2.stereo.aif#0",
+          "layer": "pad",
+          "at_s": 19.0,
+          "len_s": 14.0,
+          "gain_db": -6.94,
+          "pitch_shift": false,
+          "chord_index": 2,
+          "midi": 36,
+          "source_offset_s": 1.252,
+          "source_len_s": 5.477,
+          "time_stretch": 2.5562,
+          "role": "cello"
+        },
+        {
+          "key": "iowa:Cello.arco.pp.sulC.C2B2.stereo.aif#0",
+          "layer": "pad",
+          "at_s": 29.0,
+          "len_s": 14.0,
+          "gain_db": -6.94,
+          "pitch_shift": false,
+          "chord_index": 3,
+          "midi": 36,
+          "source_offset_s": 1.252,
+          "source_len_s": 5.477,
+          "time_stretch": 2.5562,
+          "role": "cello"
+        },
+        {
+          "key": "iowa:Cello.arco.pp.sulC.C2B2.stereo.aif#0",
+          "layer": "pad",
+          "at_s": 39.0,
+          "len_s": 14.0,
+          "gain_db": -6.94,
+          "pitch_shift": false,
+          "chord_index": 4,
+          "midi": 36,
+          "source_offset_s": 1.252,
+          "source_len_s": 5.477,
+          "time_stretch": 2.5562,
+          "role": "cello"
+        },
+        {
+          "key": "iowa:Cello.arco.pp.sulC.C2B2.stereo.aif#0",
+          "layer": "pad",
+          "at_s": 49.0,
+          "len_s": 14.0,
+          "gain_db": -6.94,
+          "pitch_shift": false,
+          "chord_index": 5,
+          "midi": 36,
+          "source_offset_s": 1.252,
+          "source_len_s": 5.477,
+          "time_stretch": 2.5562,
+          "role": "cello"
+        },
+        {
+          "key": "iowa:Cello.arco.pp.sulC.C2B2.stereo.aif#0",
+          "layer": "pad",
+          "at_s": 59.0,
+          "len_s": 14.0,
+          "gain_db": -6.94,
+          "pitch_shift": false,
+          "chord_index": 6,
+          "midi": 36,
+          "source_offset_s": 1.252,
+          "source_len_s": 5.477,
+          "time_stretch": 2.5562,
+          "role": "cello"
+        },
+        {
+          "key": "iowa:Cello.arco.pp.sulC.C2B2.stereo.aif#0",
+          "layer": "pad",
+          "at_s": 89.0,
+          "len_s": 14.0,
+          "gain_db": -6.94,
+          "pitch_shift": false,
+          "chord_index": 9,
+          "midi": 36,
+          "source_offset_s": 1.252,
+          "source_len_s": 5.477,
+          "time_stretch": 2.5562,
+          "role": "cello"
+        }
+      ]
+    },
+    {
+      "key": "iowa:Cello.arco.pp.sulC.C3C4.stereo.aif#9",
+      "source": "University of Iowa Musical Instrument Samples (MIS)",
+      "title": "Cello.arco.pp.sulC.C3C4.stereo.aif (note 10 of the run, 58)",
+      "source_url": "https://theremin.music.uiowa.edu/MIScello2012.html",
+      "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+      "audio_used": {
+        "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/cello2012/Cello.arco.pp.sulC.C3C4.stereo.aif",
+        "what": "original AIFF (lossless), resampled to 48 kHz on decode, pitch unchanged; trimmed to the run segment 65.84-71.436 s",
+        "sha256": "71d9ceaf937b1d85460b787e47452ed9e9ca69193d7b50da3cc08053cd57ddcd",
+        "size_bytes": 15547616
+      },
+      "supplier": {
+        "display_name": "University of Iowa Electronic Music Studios",
+        "primary_link": "https://theremin.music.uiowa.edu/MIS.html"
+      },
+      "license": {
+        "name": "Public domain equivalent (UIowa MIS: no restrictions)",
+        "uri": "https://theremin.music.uiowa.edu/MIS.html",
+        "terms_verbatim": "\"Since 1997, these recordings have been freely available on this website and may be downloaded and used for any projects, without restrictions.\" (theremin.music.uiowa.edu/MIS.html, read 2026-10-18)"
+      },
+      "credit_line": "Cello.arco.pp.sulC.C3C4.stereo.aif, University of Iowa Musical Instrument Samples, Electronic Music Studios (Lawrence Fritts), https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/cello2012/Cello.arco.pp.sulC.C3C4.stereo.aif",
+      "pitch_measured": {
+        "sounding": "A#3",
+        "cents": 9.0,
+        "method": "NC pYIN (0.02-semitone resolution) on the note segment"
+      },
+      "roles": [
+        "cello"
+      ],
+      "uses": 5,
+      "time_stretch_ratios": [
+        2.8595
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "iowa:Cello.arco.pp.sulC.C3C4.stereo.aif#9",
+          "layer": "pad",
+          "at_s": 0.5,
+          "len_s": 13.998,
+          "gain_db": -9.12,
+          "pitch_shift": false,
+          "chord_index": 0,
+          "midi": 58,
+          "source_offset_s": 66.14,
+          "source_len_s": 4.896,
+          "time_stretch": 2.8595,
+          "role": "cello"
+        },
+        {
+          "key": "iowa:Cello.arco.pp.sulC.C3C4.stereo.aif#9",
+          "layer": "pad",
+          "at_s": 9.0,
+          "len_s": 13.998,
+          "gain_db": -9.12,
+          "pitch_shift": false,
+          "chord_index": 1,
+          "midi": 58,
+          "source_offset_s": 66.14,
+          "source_len_s": 4.896,
+          "time_stretch": 2.8595,
+          "role": "cello"
+        },
+        {
+          "key": "iowa:Cello.arco.pp.sulC.C3C4.stereo.aif#9",
+          "layer": "pad",
+          "at_s": 29.0,
+          "len_s": 13.998,
+          "gain_db": -9.12,
+          "pitch_shift": false,
+          "chord_index": 3,
+          "midi": 58,
+          "source_offset_s": 66.14,
+          "source_len_s": 4.896,
+          "time_stretch": 2.8595,
+          "role": "cello"
+        },
+        {
+          "key": "iowa:Cello.arco.pp.sulC.C3C4.stereo.aif#9",
+          "layer": "pad",
+          "at_s": 39.0,
+          "len_s": 13.998,
+          "gain_db": -9.12,
+          "pitch_shift": false,
+          "chord_index": 4,
+          "midi": 58,
+          "source_offset_s": 66.14,
+          "source_len_s": 4.896,
+          "time_stretch": 2.8595,
+          "role": "cello"
+        },
+        {
+          "key": "iowa:Cello.arco.pp.sulC.C3C4.stereo.aif#9",
+          "layer": "pad",
+          "at_s": 59.0,
+          "len_s": 13.998,
+          "gain_db": -9.12,
+          "pitch_shift": false,
+          "chord_index": 6,
+          "midi": 58,
+          "source_offset_s": 66.14,
+          "source_len_s": 4.896,
+          "time_stretch": 2.8595,
+          "role": "cello"
+        }
+      ]
+    },
+    {
+      "key": "fs:65719",
+      "source": "Freesound",
+      "title": "C_S Rhodes Mark II C2.aif",
+      "source_url": "https://freesound.org/people/tim.kahn/sounds/65719/",
+      "author": "tim.kahn",
+      "audio_used": {
+        "url": "https://cdn.freesound.org/previews/65/65719_7037-hq.ogg",
+        "what": "Freesound HQ preview (lossy Ogg Vorbis), resampled to 48 kHz on decode, pitch unchanged",
+        "sha256": "6507f87075f2a499cbb02f144bd30404d16609a1bb219332032b0db999a586a7",
+        "size_bytes": 172234
+      },
+      "supplier": {
+        "display_name": "tim.kahn",
+        "primary_link": "https://freesound.org/people/tim.kahn/"
+      },
+      "license": {
+        "name": "CC BY 4.0",
+        "uri": "https://creativecommons.org/licenses/by/4.0/",
+        "verified_live": "2026-10-18, creativecommons.org/licenses/by/4.0"
+      },
+      "credit_line": "“C_S Rhodes Mark II C2.aif” by tim.kahn (https://freesound.org/people/tim.kahn/sounds/65719/), CC BY 4.0",
+      "pitch_measured": {
+        "sounding": "C3",
+        "cents": 6.7,
+        "method": "NC pYIN on the preview"
+      },
+      "roles": [
+        "rhodes strike"
+      ],
+      "uses": 8,
+      "time_stretch_ratios": [
+        1.0
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "fs:65719",
+          "layer": "keys",
+          "at_s": 10.318,
+          "len_s": 9.0,
+          "gain_db": -1.01,
+          "pitch_shift": false,
+          "chord_index": 1,
+          "midi": 48,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65719",
+          "layer": "keys",
+          "at_s": 30.306,
+          "len_s": 9.0,
+          "gain_db": -1.79,
+          "pitch_shift": false,
+          "chord_index": 3,
+          "midi": 48,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65719",
+          "layer": "keys",
+          "at_s": 50.306,
+          "len_s": 9.0,
+          "gain_db": -2.69,
+          "pitch_shift": false,
+          "chord_index": 5,
+          "midi": 48,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65719",
+          "layer": "keys",
+          "at_s": 52.819,
+          "len_s": 9.0,
+          "gain_db": -5.82,
+          "pitch_shift": false,
+          "chord_index": 5,
+          "midi": 48,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65719",
+          "layer": "keys",
+          "at_s": 55.323,
+          "len_s": 9.0,
+          "gain_db": -5.32,
+          "pitch_shift": false,
+          "chord_index": 5,
+          "midi": 48,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65719",
+          "layer": "keys",
+          "at_s": 57.837,
+          "len_s": 9.0,
+          "gain_db": -6.15,
+          "pitch_shift": false,
+          "chord_index": 5,
+          "midi": 48,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65719",
+          "layer": "keys",
+          "at_s": 90.335,
+          "len_s": 9.0,
+          "gain_db": -1.09,
+          "pitch_shift": false,
+          "chord_index": 9,
+          "midi": 48,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65719",
+          "layer": "keys",
+          "at_s": 95.312,
+          "len_s": 9.0,
+          "gain_db": -6.29,
+          "pitch_shift": false,
+          "chord_index": 9,
+          "midi": 48,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        }
+      ]
+    },
+    {
+      "key": "fs:65724",
+      "source": "Freesound",
+      "title": "C_S Rhodes Mark II D3.aif",
+      "source_url": "https://freesound.org/people/tim.kahn/sounds/65724/",
+      "author": "tim.kahn",
+      "audio_used": {
+        "url": "https://cdn.freesound.org/previews/65/65724_7037-hq.ogg",
+        "what": "Freesound HQ preview (lossy Ogg Vorbis), resampled to 48 kHz on decode, pitch unchanged",
+        "sha256": "f84604bb08e6fc3afd2800103a4d953063a0c59fe9a0dba1b4294e28e5c8f397",
+        "size_bytes": 139699
+      },
+      "supplier": {
+        "display_name": "tim.kahn",
+        "primary_link": "https://freesound.org/people/tim.kahn/"
+      },
+      "license": {
+        "name": "CC BY 4.0",
+        "uri": "https://creativecommons.org/licenses/by/4.0/",
+        "verified_live": "2026-10-18, creativecommons.org/licenses/by/4.0"
+      },
+      "credit_line": "“C_S Rhodes Mark II D3.aif” by tim.kahn (https://freesound.org/people/tim.kahn/sounds/65724/), CC BY 4.0",
+      "pitch_measured": {
+        "sounding": "D4",
+        "cents": 6.7,
+        "method": "NC pYIN on the preview"
+      },
+      "roles": [
+        "rhodes strike"
+      ],
+      "uses": 3,
+      "time_stretch_ratios": [
+        1.0
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "fs:65724",
+          "layer": "keys",
+          "at_s": 10.354,
+          "len_s": 9.0,
+          "gain_db": -1.07,
+          "pitch_shift": false,
+          "chord_index": 1,
+          "midi": 62,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65724",
+          "layer": "keys",
+          "at_s": 40.318,
+          "len_s": 9.0,
+          "gain_db": -1.87,
+          "pitch_shift": false,
+          "chord_index": 4,
+          "midi": 62,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65724",
+          "layer": "keys",
+          "at_s": 45.357,
+          "len_s": 9.0,
+          "gain_db": -7.01,
+          "pitch_shift": false,
+          "chord_index": 4,
+          "midi": 62,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        }
+      ]
+    },
+    {
+      "key": "iowa:Piano.pp.C3.aiff",
+      "source": "University of Iowa Musical Instrument Samples (MIS)",
+      "title": "Piano.pp.C3.aiff",
+      "source_url": "https://theremin.music.uiowa.edu/MISpiano.html",
+      "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+      "audio_used": {
+        "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.C3.aiff",
+        "what": "original AIFF (lossless), resampled to 48 kHz on decode, pitch unchanged",
+        "sha256": "dedfacca6a9c244ff7c38d7b53c55b08e43fc8f4ce7d6c8c5a0f8b70fb03b58d",
+        "size_bytes": 6798614
+      },
+      "supplier": {
+        "display_name": "University of Iowa Electronic Music Studios",
+        "primary_link": "https://theremin.music.uiowa.edu/MIS.html"
+      },
+      "license": {
+        "name": "Public domain equivalent (UIowa MIS: no restrictions)",
+        "uri": "https://theremin.music.uiowa.edu/MIS.html",
+        "terms_verbatim": "\"Since 1997, these recordings have been freely available on this website and may be downloaded and used for any projects, without restrictions.\" (theremin.music.uiowa.edu/MIS.html, read 2026-10-18)"
+      },
+      "credit_line": "Piano.pp.C3.aiff, University of Iowa Musical Instrument Samples, Electronic Music Studios (Lawrence Fritts), https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.C3.aiff",
+      "pitch_measured": {
+        "sounding": "C3",
+        "cents": 3.0,
+        "method": "NC pYIN (0.02-semitone resolution) on the note segment"
+      },
+      "roles": [
+        "piano drone",
+        "piano strike",
+        "stretched pad"
+      ],
+      "uses": 22,
+      "time_stretch_ratios": [
+        1.0,
+        3.7333,
+        4.0
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "iowa:Piano.pp.C3.aiff",
+          "layer": "pad",
+          "at_s": 8.5,
+          "len_s": 13.975,
+          "gain_db": -10.09,
+          "pitch_shift": false,
+          "chord_index": 1,
+          "midi": 48,
+          "source_offset_s": 0.663,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        },
+        {
+          "key": "iowa:Piano.pp.C3.aiff",
+          "layer": "pad",
+          "at_s": 28.5,
+          "len_s": 13.975,
+          "gain_db": -7.87,
+          "pitch_shift": false,
+          "chord_index": 3,
+          "midi": 48,
+          "source_offset_s": 0.663,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        },
+        {
+          "key": "iowa:Piano.pp.C3.aiff",
+          "layer": "keys",
+          "at_s": 50.3,
+          "len_s": 9.0,
+          "gain_db": -3.48,
+          "pitch_shift": false,
+          "chord_index": 5,
+          "midi": 48,
+          "source_offset_s": 0.413,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.C3.aiff",
+          "layer": "keys",
+          "at_s": 52.861,
+          "len_s": 9.0,
+          "gain_db": -8.08,
+          "pitch_shift": false,
+          "chord_index": 5,
+          "midi": 48,
+          "source_offset_s": 0.413,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.C3.aiff",
+          "layer": "keys",
+          "at_s": 55.319,
+          "len_s": 9.0,
+          "gain_db": -7.39,
+          "pitch_shift": false,
+          "chord_index": 5,
+          "midi": 48,
+          "source_offset_s": 0.413,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.C3.aiff",
+          "layer": "keys",
+          "at_s": 57.819,
+          "len_s": 9.0,
+          "gain_db": -8.25,
+          "pitch_shift": false,
+          "chord_index": 5,
+          "midi": 48,
+          "source_offset_s": 0.413,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.C3.aiff",
+          "layer": "pad",
+          "at_s": 48.5,
+          "len_s": 13.975,
+          "gain_db": -9.12,
+          "pitch_shift": false,
+          "chord_index": 5,
+          "midi": 48,
+          "source_offset_s": 0.663,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        },
+        {
+          "key": "iowa:Piano.pp.C3.aiff",
+          "layer": "keys",
+          "at_s": 60.308,
+          "len_s": 9.0,
+          "gain_db": -2.47,
+          "pitch_shift": false,
+          "chord_index": 6,
+          "midi": 48,
+          "source_offset_s": 0.413,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.C3.aiff",
+          "layer": "keys",
+          "at_s": 65.323,
+          "len_s": 9.0,
+          "gain_db": -6.62,
+          "pitch_shift": false,
+          "chord_index": 6,
+          "midi": 48,
+          "source_offset_s": 0.413,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.C3.aiff",
+          "layer": "pad",
+          "at_s": 58.5,
+          "len_s": 13.975,
+          "gain_db": -9.12,
+          "pitch_shift": false,
+          "chord_index": 6,
+          "midi": 48,
+          "source_offset_s": 0.663,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        },
+        {
+          "key": "iowa:Piano.pp.C3.aiff",
+          "layer": "keys",
+          "at_s": 90.331,
+          "len_s": 9.0,
+          "gain_db": -2.83,
+          "pitch_shift": false,
+          "chord_index": 9,
+          "midi": 48,
+          "source_offset_s": 0.413,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.C3.aiff",
+          "layer": "keys",
+          "at_s": 95.31,
+          "len_s": 9.0,
+          "gain_db": -8.11,
+          "pitch_shift": false,
+          "chord_index": 9,
+          "midi": 48,
+          "source_offset_s": 0.413,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.C3.aiff",
+          "layer": "pad",
+          "at_s": 88.5,
+          "len_s": 13.975,
+          "gain_db": -9.12,
+          "pitch_shift": false,
+          "chord_index": 9,
+          "midi": 48,
+          "source_offset_s": 0.663,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        },
+        {
+          "key": "iowa:Piano.pp.C3.aiff",
+          "layer": "drone",
+          "at_s": 0.0,
+          "len_s": 14.976,
+          "gain_db": -4.44,
+          "pitch_shift": false,
+          "midi": 48,
+          "source_offset_s": 0.663,
+          "source_len_s": 3.75,
+          "time_stretch": 4.0,
+          "role": "piano drone"
+        },
+        {
+          "key": "iowa:Piano.pp.C3.aiff",
+          "layer": "drone",
+          "at_s": 11.0,
+          "len_s": 14.976,
+          "gain_db": -4.44,
+          "pitch_shift": false,
+          "midi": 48,
+          "source_offset_s": 0.663,
+          "source_len_s": 3.75,
+          "time_stretch": 4.0,
+          "role": "piano drone"
+        },
+        {
+          "key": "iowa:Piano.pp.C3.aiff",
+          "layer": "drone",
+          "at_s": 22.0,
+          "len_s": 14.976,
+          "gain_db": -4.44,
+          "pitch_shift": false,
+          "midi": 48,
+          "source_offset_s": 0.663,
+          "source_len_s": 3.75,
+          "time_stretch": 4.0,
+          "role": "piano drone"
+        },
+        {
+          "key": "iowa:Piano.pp.C3.aiff",
+          "layer": "drone",
+          "at_s": 33.0,
+          "len_s": 14.976,
+          "gain_db": -4.44,
+          "pitch_shift": false,
+          "midi": 48,
+          "source_offset_s": 0.663,
+          "source_len_s": 3.75,
+          "time_stretch": 4.0,
+          "role": "piano drone"
+        },
+        {
+          "key": "iowa:Piano.pp.C3.aiff",
+          "layer": "drone",
+          "at_s": 44.0,
+          "len_s": 14.976,
+          "gain_db": -4.44,
+          "pitch_shift": false,
+          "midi": 48,
+          "source_offset_s": 0.663,
+          "source_len_s": 3.75,
+          "time_stretch": 4.0,
+          "role": "piano drone"
+        },
+        {
+          "key": "iowa:Piano.pp.C3.aiff",
+          "layer": "drone",
+          "at_s": 55.0,
+          "len_s": 14.976,
+          "gain_db": -4.44,
+          "pitch_shift": false,
+          "midi": 48,
+          "source_offset_s": 0.663,
+          "source_len_s": 3.75,
+          "time_stretch": 4.0,
+          "role": "piano drone"
+        },
+        {
+          "key": "iowa:Piano.pp.C3.aiff",
+          "layer": "drone",
+          "at_s": 66.0,
+          "len_s": 8.0,
+          "gain_db": -4.44,
+          "pitch_shift": false,
+          "midi": 48,
+          "source_offset_s": 0.663,
+          "source_len_s": 3.75,
+          "time_stretch": 4.0,
+          "role": "piano drone"
+        },
+        {
+          "key": "iowa:Piano.pp.C3.aiff",
+          "layer": "drone",
+          "at_s": 88.0,
+          "len_s": 14.976,
+          "gain_db": -4.44,
+          "pitch_shift": false,
+          "midi": 48,
+          "source_offset_s": 0.663,
+          "source_len_s": 3.75,
+          "time_stretch": 4.0,
+          "role": "piano drone"
+        },
+        {
+          "key": "iowa:Piano.pp.C3.aiff",
+          "layer": "drone",
+          "at_s": 99.0,
+          "len_s": 5.0,
+          "gain_db": -4.44,
+          "pitch_shift": false,
+          "midi": 48,
+          "source_offset_s": 0.663,
+          "source_len_s": 3.75,
+          "time_stretch": 4.0,
+          "role": "piano drone"
+        }
+      ]
+    },
+    {
+      "key": "iowa:Piano.pp.D4.aiff",
+      "source": "University of Iowa Musical Instrument Samples (MIS)",
+      "title": "Piano.pp.D4.aiff",
+      "source_url": "https://theremin.music.uiowa.edu/MISpiano.html",
+      "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+      "audio_used": {
+        "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.D4.aiff",
+        "what": "original AIFF (lossless), resampled to 48 kHz on decode, pitch unchanged",
+        "sha256": "e84dc5003c0341e56518334ca7afdaf2f0831affc29095b39a99d58cc322e7f7",
+        "size_bytes": 4859750
+      },
+      "supplier": {
+        "display_name": "University of Iowa Electronic Music Studios",
+        "primary_link": "https://theremin.music.uiowa.edu/MIS.html"
+      },
+      "license": {
+        "name": "Public domain equivalent (UIowa MIS: no restrictions)",
+        "uri": "https://theremin.music.uiowa.edu/MIS.html",
+        "terms_verbatim": "\"Since 1997, these recordings have been freely available on this website and may be downloaded and used for any projects, without restrictions.\" (theremin.music.uiowa.edu/MIS.html, read 2026-10-18)"
+      },
+      "credit_line": "Piano.pp.D4.aiff, University of Iowa Musical Instrument Samples, Electronic Music Studios (Lawrence Fritts), https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.D4.aiff",
+      "pitch_measured": null,
+      "roles": [
+        "piano strike",
+        "stretched pad"
+      ],
+      "uses": 4,
+      "time_stretch_ratios": [
+        1.0,
+        3.7333
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "iowa:Piano.pp.D4.aiff",
+          "layer": "pad",
+          "at_s": 8.5,
+          "len_s": 13.975,
+          "gain_db": -10.09,
+          "pitch_shift": false,
+          "chord_index": 1,
+          "midi": 62,
+          "source_offset_s": 0.275,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        },
+        {
+          "key": "iowa:Piano.pp.D4.aiff",
+          "layer": "keys",
+          "at_s": 40.375,
+          "len_s": 9.0,
+          "gain_db": -3.59,
+          "pitch_shift": false,
+          "chord_index": 4,
+          "midi": 62,
+          "source_offset_s": 0.025,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.D4.aiff",
+          "layer": "keys",
+          "at_s": 45.321,
+          "len_s": 9.0,
+          "gain_db": -7.93,
+          "pitch_shift": false,
+          "chord_index": 4,
+          "midi": 62,
+          "source_offset_s": 0.025,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.D4.aiff",
+          "layer": "pad",
+          "at_s": 38.5,
+          "len_s": 13.975,
+          "gain_db": -9.12,
+          "pitch_shift": false,
+          "chord_index": 4,
+          "midi": 62,
+          "source_offset_s": 0.275,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        }
+      ]
+    },
+    {
+      "key": "iowa:Piano.pp.G4.aiff",
+      "source": "University of Iowa Musical Instrument Samples (MIS)",
+      "title": "Piano.pp.G4.aiff",
+      "source_url": "https://theremin.music.uiowa.edu/MISpiano.html",
+      "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+      "audio_used": {
+        "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.G4.aiff",
+        "what": "original AIFF (lossless), resampled to 48 kHz on decode, pitch unchanged",
+        "sha256": "b791b4ee88662169f6b5b33e0fc278a7159a4aa9b3f25af3301af1687f10be90",
+        "size_bytes": 4506022
+      },
+      "supplier": {
+        "display_name": "University of Iowa Electronic Music Studios",
+        "primary_link": "https://theremin.music.uiowa.edu/MIS.html"
+      },
+      "license": {
+        "name": "Public domain equivalent (UIowa MIS: no restrictions)",
+        "uri": "https://theremin.music.uiowa.edu/MIS.html",
+        "terms_verbatim": "\"Since 1997, these recordings have been freely available on this website and may be downloaded and used for any projects, without restrictions.\" (theremin.music.uiowa.edu/MIS.html, read 2026-10-18)"
+      },
+      "credit_line": "Piano.pp.G4.aiff, University of Iowa Musical Instrument Samples, Electronic Music Studios (Lawrence Fritts), https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.G4.aiff",
+      "pitch_measured": null,
+      "roles": [
+        "piano strike",
+        "stretched pad"
+      ],
+      "uses": 4,
+      "time_stretch_ratios": [
+        1.0,
+        3.7333
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "iowa:Piano.pp.G4.aiff",
+          "layer": "pad",
+          "at_s": 18.5,
+          "len_s": 13.975,
+          "gain_db": -7.87,
+          "pitch_shift": false,
+          "chord_index": 2,
+          "midi": 67,
+          "source_offset_s": 0.484,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        },
+        {
+          "key": "iowa:Piano.pp.G4.aiff",
+          "layer": "keys",
+          "at_s": 40.387,
+          "len_s": 9.0,
+          "gain_db": -3.41,
+          "pitch_shift": false,
+          "chord_index": 4,
+          "midi": 67,
+          "source_offset_s": 0.234,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.G4.aiff",
+          "layer": "keys",
+          "at_s": 45.369,
+          "len_s": 9.0,
+          "gain_db": -6.81,
+          "pitch_shift": false,
+          "chord_index": 4,
+          "midi": 67,
+          "source_offset_s": 0.234,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.G4.aiff",
+          "layer": "pad",
+          "at_s": 38.5,
+          "len_s": 13.975,
+          "gain_db": -9.12,
+          "pitch_shift": false,
+          "chord_index": 4,
+          "midi": 67,
+          "source_offset_s": 0.484,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        }
+      ]
+    },
+    {
+      "key": "iowa:Cello.arco.pp.sulC.C3C4.stereo.aif#6",
+      "source": "University of Iowa Musical Instrument Samples (MIS)",
+      "title": "Cello.arco.pp.sulC.C3C4.stereo.aif (note 7 of the run, 55)",
+      "source_url": "https://theremin.music.uiowa.edu/MIScello2012.html",
+      "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+      "audio_used": {
+        "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/cello2012/Cello.arco.pp.sulC.C3C4.stereo.aif",
+        "what": "original AIFF (lossless), resampled to 48 kHz on decode, pitch unchanged; trimmed to the run segment 44.257-50.236 s",
+        "sha256": "71d9ceaf937b1d85460b787e47452ed9e9ca69193d7b50da3cc08053cd57ddcd",
+        "size_bytes": 15547616
+      },
+      "supplier": {
+        "display_name": "University of Iowa Electronic Music Studios",
+        "primary_link": "https://theremin.music.uiowa.edu/MIS.html"
+      },
+      "license": {
+        "name": "Public domain equivalent (UIowa MIS: no restrictions)",
+        "uri": "https://theremin.music.uiowa.edu/MIS.html",
+        "terms_verbatim": "\"Since 1997, these recordings have been freely available on this website and may be downloaded and used for any projects, without restrictions.\" (theremin.music.uiowa.edu/MIS.html, read 2026-10-18)"
+      },
+      "credit_line": "Cello.arco.pp.sulC.C3C4.stereo.aif, University of Iowa Musical Instrument Samples, Electronic Music Studios (Lawrence Fritts), https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/cello2012/Cello.arco.pp.sulC.C3C4.stereo.aif",
+      "pitch_measured": {
+        "sounding": "G3",
+        "cents": 15.0,
+        "method": "NC pYIN (0.02-semitone resolution) on the note segment"
+      },
+      "roles": [
+        "cello"
+      ],
+      "uses": 3,
+      "time_stretch_ratios": [
+        2.652
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "iowa:Cello.arco.pp.sulC.C3C4.stereo.aif#6",
+          "layer": "pad",
+          "at_s": 19.0,
+          "len_s": 14.0,
+          "gain_db": -9.12,
+          "pitch_shift": false,
+          "chord_index": 2,
+          "midi": 55,
+          "source_offset_s": 44.557,
+          "source_len_s": 5.279,
+          "time_stretch": 2.652,
+          "role": "cello"
+        },
+        {
+          "key": "iowa:Cello.arco.pp.sulC.C3C4.stereo.aif#6",
+          "layer": "pad",
+          "at_s": 49.0,
+          "len_s": 14.0,
+          "gain_db": -9.12,
+          "pitch_shift": false,
+          "chord_index": 5,
+          "midi": 55,
+          "source_offset_s": 44.557,
+          "source_len_s": 5.279,
+          "time_stretch": 2.652,
+          "role": "cello"
+        },
+        {
+          "key": "iowa:Cello.arco.pp.sulC.C3C4.stereo.aif#6",
+          "layer": "pad",
+          "at_s": 89.0,
+          "len_s": 14.0,
+          "gain_db": -9.12,
+          "pitch_shift": false,
+          "chord_index": 9,
+          "midi": 55,
+          "source_offset_s": 44.557,
+          "source_len_s": 5.279,
+          "time_stretch": 2.652,
+          "role": "cello"
+        }
+      ]
+    },
+    {
+      "key": "iowa:Piano.pp.A2.aiff",
+      "source": "University of Iowa Musical Instrument Samples (MIS)",
+      "title": "Piano.pp.A2.aiff",
+      "source_url": "https://theremin.music.uiowa.edu/MISpiano.html",
+      "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+      "audio_used": {
+        "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.A2.aiff",
+        "what": "original AIFF (lossless), resampled to 48 kHz on decode, pitch unchanged",
+        "sha256": "aa7af8abfa5fc0abb4bc567924b1e7e585293f2f41ac5ce17c82ef619d5bf676",
+        "size_bytes": 6518630
+      },
+      "supplier": {
+        "display_name": "University of Iowa Electronic Music Studios",
+        "primary_link": "https://theremin.music.uiowa.edu/MIS.html"
+      },
+      "license": {
+        "name": "Public domain equivalent (UIowa MIS: no restrictions)",
+        "uri": "https://theremin.music.uiowa.edu/MIS.html",
+        "terms_verbatim": "\"Since 1997, these recordings have been freely available on this website and may be downloaded and used for any projects, without restrictions.\" (theremin.music.uiowa.edu/MIS.html, read 2026-10-18)"
+      },
+      "credit_line": "Piano.pp.A2.aiff, University of Iowa Musical Instrument Samples, Electronic Music Studios (Lawrence Fritts), https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.A2.aiff",
+      "pitch_measured": null,
+      "roles": [
+        "piano strike",
+        "stretched pad"
+      ],
+      "uses": 3,
+      "time_stretch_ratios": [
+        1.0,
+        3.7333
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "iowa:Piano.pp.A2.aiff",
+          "layer": "keys",
+          "at_s": 70.313,
+          "len_s": 9.0,
+          "gain_db": -2.56,
+          "pitch_shift": false,
+          "chord_index": 7,
+          "midi": 45,
+          "source_offset_s": 0.067,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.A2.aiff",
+          "layer": "keys",
+          "at_s": 75.306,
+          "len_s": 9.0,
+          "gain_db": -7.59,
+          "pitch_shift": false,
+          "chord_index": 7,
+          "midi": 45,
+          "source_offset_s": 0.067,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.A2.aiff",
+          "layer": "pad",
+          "at_s": 68.5,
+          "len_s": 13.975,
+          "gain_db": -10.09,
+          "pitch_shift": false,
+          "chord_index": 7,
+          "midi": 45,
+          "source_offset_s": 0.317,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        }
+      ]
+    },
+    {
+      "key": "iowa:Piano.pp.E3.aiff",
+      "source": "University of Iowa Musical Instrument Samples (MIS)",
+      "title": "Piano.pp.E3.aiff",
+      "source_url": "https://theremin.music.uiowa.edu/MISpiano.html",
+      "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+      "audio_used": {
+        "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.E3.aiff",
+        "what": "original AIFF (lossless), resampled to 48 kHz on decode, pitch unchanged",
+        "sha256": "0ffda603c58580ffb4ff1245213a5b8a571c040f73c87fba40a99a493d93b9e7",
+        "size_bytes": 6471390
+      },
+      "supplier": {
+        "display_name": "University of Iowa Electronic Music Studios",
+        "primary_link": "https://theremin.music.uiowa.edu/MIS.html"
+      },
+      "license": {
+        "name": "Public domain equivalent (UIowa MIS: no restrictions)",
+        "uri": "https://theremin.music.uiowa.edu/MIS.html",
+        "terms_verbatim": "\"Since 1997, these recordings have been freely available on this website and may be downloaded and used for any projects, without restrictions.\" (theremin.music.uiowa.edu/MIS.html, read 2026-10-18)"
+      },
+      "credit_line": "Piano.pp.E3.aiff, University of Iowa Musical Instrument Samples, Electronic Music Studios (Lawrence Fritts), https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.E3.aiff",
+      "pitch_measured": null,
+      "roles": [
+        "piano strike",
+        "stretched pad"
+      ],
+      "uses": 6,
+      "time_stretch_ratios": [
+        1.0,
+        3.7333
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "iowa:Piano.pp.E3.aiff",
+          "layer": "keys",
+          "at_s": 70.329,
+          "len_s": 9.0,
+          "gain_db": -2.92,
+          "pitch_shift": false,
+          "chord_index": 7,
+          "midi": 52,
+          "source_offset_s": 0.202,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.E3.aiff",
+          "layer": "keys",
+          "at_s": 75.318,
+          "len_s": 9.0,
+          "gain_db": -6.86,
+          "pitch_shift": false,
+          "chord_index": 7,
+          "midi": 52,
+          "source_offset_s": 0.202,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.E3.aiff",
+          "layer": "pad",
+          "at_s": 68.5,
+          "len_s": 13.975,
+          "gain_db": -10.09,
+          "pitch_shift": false,
+          "chord_index": 7,
+          "midi": 52,
+          "source_offset_s": 0.452,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        },
+        {
+          "key": "iowa:Piano.pp.E3.aiff",
+          "layer": "keys",
+          "at_s": 100.322,
+          "len_s": 9.0,
+          "gain_db": -2.73,
+          "pitch_shift": false,
+          "chord_index": 10,
+          "midi": 52,
+          "source_offset_s": 0.202,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.E3.aiff",
+          "layer": "keys",
+          "at_s": 105.315,
+          "len_s": 9.0,
+          "gain_db": -6.87,
+          "pitch_shift": false,
+          "chord_index": 10,
+          "midi": 52,
+          "source_offset_s": 0.202,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.E3.aiff",
+          "layer": "pad",
+          "at_s": 98.5,
+          "len_s": 13.975,
+          "gain_db": -9.12,
+          "pitch_shift": false,
+          "chord_index": 10,
+          "midi": 52,
+          "source_offset_s": 0.452,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        }
+      ]
+    },
+    {
+      "key": "iowa:Piano.pp.A3.aiff",
+      "source": "University of Iowa Musical Instrument Samples (MIS)",
+      "title": "Piano.pp.A3.aiff",
+      "source_url": "https://theremin.music.uiowa.edu/MISpiano.html",
+      "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+      "audio_used": {
+        "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.A3.aiff",
+        "what": "original AIFF (lossless), resampled to 48 kHz on decode, pitch unchanged",
+        "sha256": "f303ec812c5ef76ed682af574746cea79fa8187229fb735233b0ee852d570b72",
+        "size_bytes": 6480466
+      },
+      "supplier": {
+        "display_name": "University of Iowa Electronic Music Studios",
+        "primary_link": "https://theremin.music.uiowa.edu/MIS.html"
+      },
+      "license": {
+        "name": "Public domain equivalent (UIowa MIS: no restrictions)",
+        "uri": "https://theremin.music.uiowa.edu/MIS.html",
+        "terms_verbatim": "\"Since 1997, these recordings have been freely available on this website and may be downloaded and used for any projects, without restrictions.\" (theremin.music.uiowa.edu/MIS.html, read 2026-10-18)"
+      },
+      "credit_line": "Piano.pp.A3.aiff, University of Iowa Musical Instrument Samples, Electronic Music Studios (Lawrence Fritts), https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.A3.aiff",
+      "pitch_measured": null,
+      "roles": [
+        "piano strike",
+        "stretched pad"
+      ],
+      "uses": 12,
+      "time_stretch_ratios": [
+        1.0,
+        3.7333
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "iowa:Piano.pp.A3.aiff",
+          "layer": "keys",
+          "at_s": 70.345,
+          "len_s": 9.0,
+          "gain_db": -4.14,
+          "pitch_shift": false,
+          "chord_index": 7,
+          "midi": 57,
+          "source_offset_s": 0.452,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.A3.aiff",
+          "layer": "keys",
+          "at_s": 75.318,
+          "len_s": 9.0,
+          "gain_db": -7.97,
+          "pitch_shift": false,
+          "chord_index": 7,
+          "midi": 57,
+          "source_offset_s": 0.452,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.A3.aiff",
+          "layer": "pad",
+          "at_s": 68.5,
+          "len_s": 13.975,
+          "gain_db": -10.09,
+          "pitch_shift": false,
+          "chord_index": 7,
+          "midi": 57,
+          "source_offset_s": 0.702,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        },
+        {
+          "key": "iowa:Piano.pp.A3.aiff",
+          "layer": "keys",
+          "at_s": 80.371,
+          "len_s": 9.0,
+          "gain_db": -3.77,
+          "pitch_shift": false,
+          "chord_index": 8,
+          "midi": 57,
+          "source_offset_s": 0.452,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.A3.aiff",
+          "layer": "keys",
+          "at_s": 85.378,
+          "len_s": 9.0,
+          "gain_db": -7.14,
+          "pitch_shift": false,
+          "chord_index": 8,
+          "midi": 57,
+          "source_offset_s": 0.452,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.A3.aiff",
+          "layer": "pad",
+          "at_s": 78.5,
+          "len_s": 13.975,
+          "gain_db": -9.12,
+          "pitch_shift": false,
+          "chord_index": 8,
+          "midi": 57,
+          "source_offset_s": 0.702,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        },
+        {
+          "key": "iowa:Piano.pp.A3.aiff",
+          "layer": "keys",
+          "at_s": 100.337,
+          "len_s": 9.0,
+          "gain_db": -3.4,
+          "pitch_shift": false,
+          "chord_index": 10,
+          "midi": 57,
+          "source_offset_s": 0.452,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.A3.aiff",
+          "layer": "keys",
+          "at_s": 105.32,
+          "len_s": 9.0,
+          "gain_db": -8.16,
+          "pitch_shift": false,
+          "chord_index": 10,
+          "midi": 57,
+          "source_offset_s": 0.452,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.A3.aiff",
+          "layer": "pad",
+          "at_s": 98.5,
+          "len_s": 13.975,
+          "gain_db": -9.12,
+          "pitch_shift": false,
+          "chord_index": 10,
+          "midi": 57,
+          "source_offset_s": 0.702,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        },
+        {
+          "key": "iowa:Piano.pp.A3.aiff",
+          "layer": "keys",
+          "at_s": 110.352,
+          "len_s": 12.0,
+          "gain_db": -3.76,
+          "pitch_shift": false,
+          "chord_index": 11,
+          "midi": 57,
+          "source_offset_s": 0.452,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.A3.aiff",
+          "layer": "keys",
+          "at_s": 115.307,
+          "len_s": 12.0,
+          "gain_db": -6.82,
+          "pitch_shift": false,
+          "chord_index": 11,
+          "midi": 57,
+          "source_offset_s": 0.452,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.A3.aiff",
+          "layer": "pad",
+          "at_s": 108.5,
+          "len_s": 13.975,
+          "gain_db": -9.12,
+          "pitch_shift": false,
+          "chord_index": 11,
+          "midi": 57,
+          "source_offset_s": 0.702,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        }
+      ]
+    },
+    {
+      "key": "iowa:Piano.pp.E4.aiff",
+      "source": "University of Iowa Musical Instrument Samples (MIS)",
+      "title": "Piano.pp.E4.aiff",
+      "source_url": "https://theremin.music.uiowa.edu/MISpiano.html",
+      "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+      "audio_used": {
+        "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.E4.aiff",
+        "what": "original AIFF (lossless), resampled to 48 kHz on decode, pitch unchanged",
+        "sha256": "3dfb2e26042b3c3352dd0d2911ac37ec9506dc42941cc7d9c89b345bc024e03c",
+        "size_bytes": 5190070
+      },
+      "supplier": {
+        "display_name": "University of Iowa Electronic Music Studios",
+        "primary_link": "https://theremin.music.uiowa.edu/MIS.html"
+      },
+      "license": {
+        "name": "Public domain equivalent (UIowa MIS: no restrictions)",
+        "uri": "https://theremin.music.uiowa.edu/MIS.html",
+        "terms_verbatim": "\"Since 1997, these recordings have been freely available on this website and may be downloaded and used for any projects, without restrictions.\" (theremin.music.uiowa.edu/MIS.html, read 2026-10-18)"
+      },
+      "credit_line": "Piano.pp.E4.aiff, University of Iowa Musical Instrument Samples, Electronic Music Studios (Lawrence Fritts), https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.E4.aiff",
+      "pitch_measured": {
+        "sounding": "E4",
+        "cents": 9.0,
+        "method": "NC pYIN (0.02-semitone resolution) on the note segment"
+      },
+      "roles": [
+        "piano strike",
+        "stretched pad"
+      ],
+      "uses": 6,
+      "time_stretch_ratios": [
+        1.0,
+        3.7333
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "iowa:Piano.pp.E4.aiff",
+          "layer": "keys",
+          "at_s": 70.386,
+          "len_s": 9.0,
+          "gain_db": -2.81,
+          "pitch_shift": false,
+          "chord_index": 7,
+          "midi": 64,
+          "source_offset_s": 0.265,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.E4.aiff",
+          "layer": "keys",
+          "at_s": 75.377,
+          "len_s": 9.0,
+          "gain_db": -7.42,
+          "pitch_shift": false,
+          "chord_index": 7,
+          "midi": 64,
+          "source_offset_s": 0.265,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.E4.aiff",
+          "layer": "pad",
+          "at_s": 68.5,
+          "len_s": 13.975,
+          "gain_db": -10.09,
+          "pitch_shift": false,
+          "chord_index": 7,
+          "midi": 64,
+          "source_offset_s": 0.515,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        },
+        {
+          "key": "iowa:Piano.pp.E4.aiff",
+          "layer": "keys",
+          "at_s": 100.362,
+          "len_s": 9.0,
+          "gain_db": -3.77,
+          "pitch_shift": false,
+          "chord_index": 10,
+          "midi": 64,
+          "source_offset_s": 0.265,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.E4.aiff",
+          "layer": "keys",
+          "at_s": 105.351,
+          "len_s": 9.0,
+          "gain_db": -7.45,
+          "pitch_shift": false,
+          "chord_index": 10,
+          "midi": 64,
+          "source_offset_s": 0.265,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.E4.aiff",
+          "layer": "pad",
+          "at_s": 98.5,
+          "len_s": 13.975,
+          "gain_db": -9.12,
+          "pitch_shift": false,
+          "chord_index": 10,
+          "midi": 64,
+          "source_offset_s": 0.515,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        }
+      ]
+    },
+    {
+      "key": "fs:65725",
+      "source": "Freesound",
+      "title": "C_S Rhodes Mark II E2.aif",
+      "source_url": "https://freesound.org/people/tim.kahn/sounds/65725/",
+      "author": "tim.kahn",
+      "audio_used": {
+        "url": "https://cdn.freesound.org/previews/65/65725_7037-hq.ogg",
+        "what": "Freesound HQ preview (lossy Ogg Vorbis), resampled to 48 kHz on decode, pitch unchanged",
+        "sha256": "f19a4d7a7491fa8dc7fbadd714ae5272f8015e6eb76cb91829c59da8cf11ac0b",
+        "size_bytes": 202334
+      },
+      "supplier": {
+        "display_name": "tim.kahn",
+        "primary_link": "https://freesound.org/people/tim.kahn/"
+      },
+      "license": {
+        "name": "CC BY 4.0",
+        "uri": "https://creativecommons.org/licenses/by/4.0/",
+        "verified_live": "2026-10-18, creativecommons.org/licenses/by/4.0"
+      },
+      "credit_line": "“C_S Rhodes Mark II E2.aif” by tim.kahn (https://freesound.org/people/tim.kahn/sounds/65725/), CC BY 4.0",
+      "pitch_measured": {
+        "sounding": "E3",
+        "cents": 0.7,
+        "method": "NC pYIN on the preview"
+      },
+      "roles": [
+        "rhodes strike"
+      ],
+      "uses": 2,
+      "time_stretch_ratios": [
+        1.0
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "fs:65725",
+          "layer": "keys",
+          "at_s": 70.312,
+          "len_s": 9.0,
+          "gain_db": -1.25,
+          "pitch_shift": false,
+          "chord_index": 7,
+          "midi": 52,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65725",
+          "layer": "keys",
+          "at_s": 75.342,
+          "len_s": 9.0,
+          "gain_db": -6.25,
+          "pitch_shift": false,
+          "chord_index": 7,
+          "midi": 52,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        }
+      ]
+    },
+    {
+      "key": "fs:65715",
+      "source": "Freesound",
+      "title": "C_S Rhodes Mark II A2.aif",
+      "source_url": "https://freesound.org/people/tim.kahn/sounds/65715/",
+      "author": "tim.kahn",
+      "audio_used": {
+        "url": "https://cdn.freesound.org/previews/65/65715_7037-hq.ogg",
+        "what": "Freesound HQ preview (lossy Ogg Vorbis), resampled to 48 kHz on decode, pitch unchanged",
+        "sha256": "dd229c1dfd81bde3a6bf6834d42593676dff78794139d848978a54c1fb12b442",
+        "size_bytes": 203443
+      },
+      "supplier": {
+        "display_name": "tim.kahn",
+        "primary_link": "https://freesound.org/people/tim.kahn/"
+      },
+      "license": {
+        "name": "CC BY 4.0",
+        "uri": "https://creativecommons.org/licenses/by/4.0/",
+        "verified_live": "2026-10-18, creativecommons.org/licenses/by/4.0"
+      },
+      "credit_line": "“C_S Rhodes Mark II A2.aif” by tim.kahn (https://freesound.org/people/tim.kahn/sounds/65715/), CC BY 4.0",
+      "pitch_measured": {
+        "sounding": "A3",
+        "cents": 4.7,
+        "method": "NC pYIN on the preview"
+      },
+      "roles": [
+        "rhodes strike"
+      ],
+      "uses": 4,
+      "time_stretch_ratios": [
+        1.0
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "fs:65715",
+          "layer": "keys",
+          "at_s": 70.315,
+          "len_s": 9.0,
+          "gain_db": -1.44,
+          "pitch_shift": false,
+          "chord_index": 7,
+          "midi": 57,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65715",
+          "layer": "keys",
+          "at_s": 75.346,
+          "len_s": 9.0,
+          "gain_db": -5.44,
+          "pitch_shift": false,
+          "chord_index": 7,
+          "midi": 57,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65715",
+          "layer": "keys",
+          "at_s": 110.332,
+          "len_s": 12.0,
+          "gain_db": -1.74,
+          "pitch_shift": false,
+          "chord_index": 11,
+          "midi": 57,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65715",
+          "layer": "keys",
+          "at_s": 115.317,
+          "len_s": 12.0,
+          "gain_db": -6.95,
+          "pitch_shift": false,
+          "chord_index": 11,
+          "midi": 57,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        }
+      ]
+    },
+    {
+      "key": "fs:65726",
+      "source": "Freesound",
+      "title": "C_S Rhodes Mark II E3aif.aif",
+      "source_url": "https://freesound.org/people/tim.kahn/sounds/65726/",
+      "author": "tim.kahn",
+      "audio_used": {
+        "url": "https://cdn.freesound.org/previews/65/65726_7037-hq.ogg",
+        "what": "Freesound HQ preview (lossy Ogg Vorbis), resampled to 48 kHz on decode, pitch unchanged",
+        "sha256": "ff55c1b5245bd5d0ab7fb6b2a73938dca93964e2760e122275b306182b3aed24",
+        "size_bytes": 178430
+      },
+      "supplier": {
+        "display_name": "tim.kahn",
+        "primary_link": "https://freesound.org/people/tim.kahn/"
+      },
+      "license": {
+        "name": "CC BY 4.0",
+        "uri": "https://creativecommons.org/licenses/by/4.0/",
+        "verified_live": "2026-10-18, creativecommons.org/licenses/by/4.0"
+      },
+      "credit_line": "“C_S Rhodes Mark II E3aif.aif” by tim.kahn (https://freesound.org/people/tim.kahn/sounds/65726/), CC BY 4.0",
+      "pitch_measured": {
+        "sounding": "E4",
+        "cents": 6.7,
+        "method": "NC pYIN on the preview"
+      },
+      "roles": [
+        "rhodes strike"
+      ],
+      "uses": 2,
+      "time_stretch_ratios": [
+        1.0
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "fs:65726",
+          "layer": "keys",
+          "at_s": 70.373,
+          "len_s": 9.0,
+          "gain_db": -2.23,
+          "pitch_shift": false,
+          "chord_index": 7,
+          "midi": 64,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65726",
+          "layer": "keys",
+          "at_s": 75.365,
+          "len_s": 9.0,
+          "gain_db": -6.55,
+          "pitch_shift": false,
+          "chord_index": 7,
+          "midi": 64,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        }
+      ]
+    },
+    {
+      "key": "iowa:Cello.arco.pp.sulC.C2B2.stereo.aif#4",
+      "source": "University of Iowa Musical Instrument Samples (MIS)",
+      "title": "Cello.arco.pp.sulC.C2B2.stereo.aif (note 5 of the run, 40)",
+      "source_url": "https://theremin.music.uiowa.edu/MIScello2012.html",
+      "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+      "audio_used": {
+        "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/cello2012/Cello.arco.pp.sulC.C2B2.stereo.aif",
+        "what": "original AIFF (lossless), resampled to 48 kHz on decode, pitch unchanged; trimmed to the run segment 31.08-37.907 s",
+        "sha256": "4827099978f4e3af699006788ab143ce79022a91781d317dde68bb158170b0df",
+        "size_bytes": 15961096
+      },
+      "supplier": {
+        "display_name": "University of Iowa Electronic Music Studios",
+        "primary_link": "https://theremin.music.uiowa.edu/MIS.html"
+      },
+      "license": {
+        "name": "Public domain equivalent (UIowa MIS: no restrictions)",
+        "uri": "https://theremin.music.uiowa.edu/MIS.html",
+        "terms_verbatim": "\"Since 1997, these recordings have been freely available on this website and may be downloaded and used for any projects, without restrictions.\" (theremin.music.uiowa.edu/MIS.html, read 2026-10-18)"
+      },
+      "credit_line": "Cello.arco.pp.sulC.C2B2.stereo.aif, University of Iowa Musical Instrument Samples, Electronic Music Studios (Lawrence Fritts), https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/cello2012/Cello.arco.pp.sulC.C2B2.stereo.aif",
+      "pitch_measured": {
+        "sounding": "E2",
+        "cents": 3.0,
+        "method": "NC pYIN (0.02-semitone resolution) on the note segment"
+      },
+      "roles": [
+        "cello"
+      ],
+      "uses": 2,
+      "time_stretch_ratios": [
+        2.285
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "iowa:Cello.arco.pp.sulC.C2B2.stereo.aif#4",
+          "layer": "pad",
+          "at_s": 69.0,
+          "len_s": 14.0,
+          "gain_db": -6.94,
+          "pitch_shift": false,
+          "chord_index": 7,
+          "midi": 40,
+          "source_offset_s": 31.38,
+          "source_len_s": 6.127,
+          "time_stretch": 2.285,
+          "role": "cello"
+        },
+        {
+          "key": "iowa:Cello.arco.pp.sulC.C2B2.stereo.aif#4",
+          "layer": "pad",
+          "at_s": 99.0,
+          "len_s": 14.0,
+          "gain_db": -6.94,
+          "pitch_shift": false,
+          "chord_index": 10,
+          "midi": 40,
+          "source_offset_s": 31.38,
+          "source_len_s": 6.127,
+          "time_stretch": 2.285,
+          "role": "cello"
+        }
+      ]
+    },
+    {
+      "key": "iowa:Piano.pp.F2.aiff",
+      "source": "University of Iowa Musical Instrument Samples (MIS)",
+      "title": "Piano.pp.F2.aiff",
+      "source_url": "https://theremin.music.uiowa.edu/MISpiano.html",
+      "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+      "audio_used": {
+        "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.F2.aiff",
+        "what": "original AIFF (lossless), resampled to 48 kHz on decode, pitch unchanged",
+        "sha256": "d4796cf0bdedaa56337d22c39f74d9a17014913deb93bb7c66c21316ca52f8b0",
+        "size_bytes": 5864006
+      },
+      "supplier": {
+        "display_name": "University of Iowa Electronic Music Studios",
+        "primary_link": "https://theremin.music.uiowa.edu/MIS.html"
+      },
+      "license": {
+        "name": "Public domain equivalent (UIowa MIS: no restrictions)",
+        "uri": "https://theremin.music.uiowa.edu/MIS.html",
+        "terms_verbatim": "\"Since 1997, these recordings have been freely available on this website and may be downloaded and used for any projects, without restrictions.\" (theremin.music.uiowa.edu/MIS.html, read 2026-10-18)"
+      },
+      "credit_line": "Piano.pp.F2.aiff, University of Iowa Musical Instrument Samples, Electronic Music Studios (Lawrence Fritts), https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.F2.aiff",
+      "pitch_measured": null,
+      "roles": [
+        "piano drone",
+        "piano strike",
+        "stretched pad"
+      ],
+      "uses": 6,
+      "time_stretch_ratios": [
+        1.0,
+        3.7333,
+        4.0
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "iowa:Piano.pp.F2.aiff",
+          "layer": "keys",
+          "at_s": 80.314,
+          "len_s": 9.0,
+          "gain_db": -2.59,
+          "pitch_shift": false,
+          "chord_index": 8,
+          "midi": 41,
+          "source_offset_s": 0.389,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.F2.aiff",
+          "layer": "keys",
+          "at_s": 85.303,
+          "len_s": 9.0,
+          "gain_db": -6.89,
+          "pitch_shift": false,
+          "chord_index": 8,
+          "midi": 41,
+          "source_offset_s": 0.389,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.F2.aiff",
+          "layer": "pad",
+          "at_s": 78.5,
+          "len_s": 13.975,
+          "gain_db": -9.12,
+          "pitch_shift": false,
+          "chord_index": 8,
+          "midi": 41,
+          "source_offset_s": 0.639,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        },
+        {
+          "key": "iowa:Piano.pp.F2.aiff",
+          "layer": "drone",
+          "at_s": 78.0,
+          "len_s": 14.5,
+          "gain_db": 0.0,
+          "pitch_shift": false,
+          "midi": 41,
+          "source_offset_s": 0.639,
+          "source_len_s": 3.75,
+          "time_stretch": 4.0,
+          "role": "piano drone"
+        },
+        {
+          "key": "iowa:Piano.pp.F2.aiff",
+          "layer": "drone",
+          "at_s": 108.0,
+          "len_s": 14.976,
+          "gain_db": 0.0,
+          "pitch_shift": false,
+          "midi": 41,
+          "source_offset_s": 0.639,
+          "source_len_s": 3.75,
+          "time_stretch": 4.0,
+          "role": "piano drone"
+        },
+        {
+          "key": "iowa:Piano.pp.F2.aiff",
+          "layer": "drone",
+          "at_s": 119.0,
+          "len_s": 7.0,
+          "gain_db": 0.0,
+          "pitch_shift": false,
+          "midi": 41,
+          "source_offset_s": 0.639,
+          "source_len_s": 3.75,
+          "time_stretch": 4.0,
+          "role": "piano drone"
+        }
+      ]
+    },
+    {
+      "key": "iowa:Piano.pp.F3.aiff",
+      "source": "University of Iowa Musical Instrument Samples (MIS)",
+      "title": "Piano.pp.F3.aiff",
+      "source_url": "https://theremin.music.uiowa.edu/MISpiano.html",
+      "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+      "audio_used": {
+        "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.F3.aiff",
+        "what": "original AIFF (lossless), resampled to 48 kHz on decode, pitch unchanged",
+        "sha256": "6d3d07a58ca4499230d98d38aacd4111fa9c913a21a118fe3824789ab86e245e",
+        "size_bytes": 6244670
+      },
+      "supplier": {
+        "display_name": "University of Iowa Electronic Music Studios",
+        "primary_link": "https://theremin.music.uiowa.edu/MIS.html"
+      },
+      "license": {
+        "name": "Public domain equivalent (UIowa MIS: no restrictions)",
+        "uri": "https://theremin.music.uiowa.edu/MIS.html",
+        "terms_verbatim": "\"Since 1997, these recordings have been freely available on this website and may be downloaded and used for any projects, without restrictions.\" (theremin.music.uiowa.edu/MIS.html, read 2026-10-18)"
+      },
+      "credit_line": "Piano.pp.F3.aiff, University of Iowa Musical Instrument Samples, Electronic Music Studios (Lawrence Fritts), https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.F3.aiff",
+      "pitch_measured": null,
+      "roles": [
+        "piano drone",
+        "piano strike",
+        "stretched pad"
+      ],
+      "uses": 9,
+      "time_stretch_ratios": [
+        1.0,
+        3.7333,
+        4.0
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "iowa:Piano.pp.F3.aiff",
+          "layer": "keys",
+          "at_s": 80.361,
+          "len_s": 9.0,
+          "gain_db": -4.05,
+          "pitch_shift": false,
+          "chord_index": 8,
+          "midi": 53,
+          "source_offset_s": 0.768,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.F3.aiff",
+          "layer": "keys",
+          "at_s": 85.349,
+          "len_s": 9.0,
+          "gain_db": -8.53,
+          "pitch_shift": false,
+          "chord_index": 8,
+          "midi": 53,
+          "source_offset_s": 0.768,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.F3.aiff",
+          "layer": "pad",
+          "at_s": 78.5,
+          "len_s": 13.975,
+          "gain_db": -9.12,
+          "pitch_shift": false,
+          "chord_index": 8,
+          "midi": 53,
+          "source_offset_s": 1.018,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        },
+        {
+          "key": "iowa:Piano.pp.F3.aiff",
+          "layer": "keys",
+          "at_s": 110.336,
+          "len_s": 12.0,
+          "gain_db": -3.94,
+          "pitch_shift": false,
+          "chord_index": 11,
+          "midi": 53,
+          "source_offset_s": 0.768,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.F3.aiff",
+          "layer": "keys",
+          "at_s": 115.305,
+          "len_s": 12.0,
+          "gain_db": -7.12,
+          "pitch_shift": false,
+          "chord_index": 11,
+          "midi": 53,
+          "source_offset_s": 0.768,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.F3.aiff",
+          "layer": "pad",
+          "at_s": 108.5,
+          "len_s": 13.975,
+          "gain_db": -9.12,
+          "pitch_shift": false,
+          "chord_index": 11,
+          "midi": 53,
+          "source_offset_s": 1.018,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        },
+        {
+          "key": "iowa:Piano.pp.F3.aiff",
+          "layer": "drone",
+          "at_s": 78.0,
+          "len_s": 14.5,
+          "gain_db": -4.44,
+          "pitch_shift": false,
+          "midi": 53,
+          "source_offset_s": 1.018,
+          "source_len_s": 3.75,
+          "time_stretch": 4.0,
+          "role": "piano drone"
+        },
+        {
+          "key": "iowa:Piano.pp.F3.aiff",
+          "layer": "drone",
+          "at_s": 108.0,
+          "len_s": 14.976,
+          "gain_db": -4.44,
+          "pitch_shift": false,
+          "midi": 53,
+          "source_offset_s": 1.018,
+          "source_len_s": 3.75,
+          "time_stretch": 4.0,
+          "role": "piano drone"
+        },
+        {
+          "key": "iowa:Piano.pp.F3.aiff",
+          "layer": "drone",
+          "at_s": 119.0,
+          "len_s": 7.0,
+          "gain_db": -4.44,
+          "pitch_shift": false,
+          "midi": 53,
+          "source_offset_s": 1.018,
+          "source_len_s": 3.75,
+          "time_stretch": 4.0,
+          "role": "piano drone"
+        }
+      ]
+    },
+    {
+      "key": "iowa:Cello.arco.pp.sulC.C3C4.stereo.aif#4",
+      "source": "University of Iowa Musical Instrument Samples (MIS)",
+      "title": "Cello.arco.pp.sulC.C3C4.stereo.aif (note 5 of the run, 53)",
+      "source_url": "https://theremin.music.uiowa.edu/MIScello2012.html",
+      "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+      "audio_used": {
+        "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/cello2012/Cello.arco.pp.sulC.C3C4.stereo.aif",
+        "what": "original AIFF (lossless), resampled to 48 kHz on decode, pitch unchanged; trimmed to the run segment 30.36-36.897 s",
+        "sha256": "71d9ceaf937b1d85460b787e47452ed9e9ca69193d7b50da3cc08053cd57ddcd",
+        "size_bytes": 15547616
+      },
+      "supplier": {
+        "display_name": "University of Iowa Electronic Music Studios",
+        "primary_link": "https://theremin.music.uiowa.edu/MIS.html"
+      },
+      "license": {
+        "name": "Public domain equivalent (UIowa MIS: no restrictions)",
+        "uri": "https://theremin.music.uiowa.edu/MIS.html",
+        "terms_verbatim": "\"Since 1997, these recordings have been freely available on this website and may be downloaded and used for any projects, without restrictions.\" (theremin.music.uiowa.edu/MIS.html, read 2026-10-18)"
+      },
+      "credit_line": "Cello.arco.pp.sulC.C3C4.stereo.aif, University of Iowa Musical Instrument Samples, Electronic Music Studios (Lawrence Fritts), https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/cello2012/Cello.arco.pp.sulC.C3C4.stereo.aif",
+      "pitch_measured": {
+        "sounding": "F3",
+        "cents": 1.0,
+        "method": "NC pYIN (0.02-semitone resolution) on the note segment"
+      },
+      "roles": [
+        "cello"
+      ],
+      "uses": 2,
+      "time_stretch_ratios": [
+        2.3985
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "iowa:Cello.arco.pp.sulC.C3C4.stereo.aif#4",
+          "layer": "pad",
+          "at_s": 79.0,
+          "len_s": 14.0,
+          "gain_db": -9.12,
+          "pitch_shift": false,
+          "chord_index": 8,
+          "midi": 53,
+          "source_offset_s": 30.66,
+          "source_len_s": 5.837,
+          "time_stretch": 2.3985,
+          "role": "cello"
+        },
+        {
+          "key": "iowa:Cello.arco.pp.sulC.C3C4.stereo.aif#4",
+          "layer": "pad",
+          "at_s": 109.0,
+          "len_s": 14.0,
+          "gain_db": -9.12,
+          "pitch_shift": false,
+          "chord_index": 11,
+          "midi": 53,
+          "source_offset_s": 30.66,
+          "source_len_s": 5.837,
+          "time_stretch": 2.3985,
+          "role": "cello"
+        }
+      ]
+    },
+    {
+      "key": "iowa:Piano.pp.C5.aiff",
+      "source": "University of Iowa Musical Instrument Samples (MIS)",
+      "title": "Piano.pp.C5.aiff",
+      "source_url": "https://theremin.music.uiowa.edu/MISpiano.html",
+      "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+      "audio_used": {
+        "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.C5.aiff",
+        "what": "original AIFF (lossless), resampled to 48 kHz on decode, pitch unchanged",
+        "sha256": "7971a111ee9ca5940327f239e5971c8c96fcf28b3a823ee80f85770d228b8862",
+        "size_bytes": 4065978
+      },
+      "supplier": {
+        "display_name": "University of Iowa Electronic Music Studios",
+        "primary_link": "https://theremin.music.uiowa.edu/MIS.html"
+      },
+      "license": {
+        "name": "Public domain equivalent (UIowa MIS: no restrictions)",
+        "uri": "https://theremin.music.uiowa.edu/MIS.html",
+        "terms_verbatim": "\"Since 1997, these recordings have been freely available on this website and may be downloaded and used for any projects, without restrictions.\" (theremin.music.uiowa.edu/MIS.html, read 2026-10-18)"
+      },
+      "credit_line": "Piano.pp.C5.aiff, University of Iowa Musical Instrument Samples, Electronic Music Studios (Lawrence Fritts), https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.C5.aiff",
+      "pitch_measured": {
+        "sounding": "C5",
+        "cents": 7.0,
+        "method": "NC pYIN (0.02-semitone resolution) on the note segment"
+      },
+      "roles": [
+        "line",
+        "piano strike",
+        "stretched pad"
+      ],
+      "uses": 7,
+      "time_stretch_ratios": [
+        1.0,
+        3.7333
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "iowa:Piano.pp.C5.aiff",
+          "layer": "keys",
+          "at_s": 110.378,
+          "len_s": 12.0,
+          "gain_db": -3.85,
+          "pitch_shift": false,
+          "chord_index": 11,
+          "midi": 72,
+          "source_offset_s": 0.455,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.C5.aiff",
+          "layer": "keys",
+          "at_s": 115.39,
+          "len_s": 12.0,
+          "gain_db": -6.68,
+          "pitch_shift": false,
+          "chord_index": 11,
+          "midi": 72,
+          "source_offset_s": 0.455,
+          "time_stretch": 1.0,
+          "role": "piano strike"
+        },
+        {
+          "key": "iowa:Piano.pp.C5.aiff",
+          "layer": "pad",
+          "at_s": 108.5,
+          "len_s": 13.975,
+          "gain_db": -9.12,
+          "pitch_shift": false,
+          "chord_index": 11,
+          "midi": 72,
+          "source_offset_s": 0.705,
+          "source_len_s": 3.75,
+          "time_stretch": 3.7333,
+          "role": "stretched pad"
+        },
+        {
+          "key": "iowa:Piano.pp.C5.aiff",
+          "layer": "line",
+          "at_s": 5.093,
+          "len_s": 7.0,
+          "gain_db": -2.42,
+          "pitch_shift": false,
+          "midi": 72,
+          "pitch": "C5",
+          "kind": "line",
+          "timbre": "piano",
+          "source_offset_s": 0.455,
+          "time_stretch": 1.0,
+          "role": "line"
+        },
+        {
+          "key": "iowa:Piano.pp.C5.aiff",
+          "layer": "line",
+          "at_s": 44.776,
+          "len_s": 7.0,
+          "gain_db": -2.42,
+          "pitch_shift": false,
+          "midi": 72,
+          "pitch": "C5",
+          "kind": "line",
+          "timbre": "piano",
+          "source_offset_s": 0.455,
+          "time_stretch": 1.0,
+          "role": "line"
+        },
+        {
+          "key": "iowa:Piano.pp.C5.aiff",
+          "layer": "line",
+          "at_s": 79.801,
+          "len_s": 2.6,
+          "gain_db": -4.01,
+          "pitch_shift": false,
+          "midi": 72,
+          "pitch": "C5",
+          "kind": "triplet",
+          "timbre": "piano",
+          "source_offset_s": 0.455,
+          "time_stretch": 1.0,
+          "role": "line"
+        },
+        {
+          "key": "iowa:Piano.pp.C5.aiff",
+          "layer": "line",
+          "at_s": 84.796,
+          "len_s": 7.0,
+          "gain_db": -0.92,
+          "pitch_shift": false,
+          "midi": 72,
+          "pitch": "C5",
+          "kind": "line",
+          "timbre": "piano",
+          "source_offset_s": 0.455,
+          "time_stretch": 1.0,
+          "role": "line"
+        }
+      ]
+    },
+    {
+      "key": "fs:65728",
+      "source": "Freesound",
+      "title": "C_S Rhodes Mark II F2.aif",
+      "source_url": "https://freesound.org/people/tim.kahn/sounds/65728/",
+      "author": "tim.kahn",
+      "audio_used": {
+        "url": "https://cdn.freesound.org/previews/65/65728_7037-hq.ogg",
+        "what": "Freesound HQ preview (lossy Ogg Vorbis), resampled to 48 kHz on decode, pitch unchanged",
+        "sha256": "2f1367a1f8f61980affeecb9a685ca479e6219ec8f49021170eabea738e13545",
+        "size_bytes": 269711
+      },
+      "supplier": {
+        "display_name": "tim.kahn",
+        "primary_link": "https://freesound.org/people/tim.kahn/"
+      },
+      "license": {
+        "name": "CC BY 4.0",
+        "uri": "https://creativecommons.org/licenses/by/4.0/",
+        "verified_live": "2026-10-18, creativecommons.org/licenses/by/4.0"
+      },
+      "credit_line": "“C_S Rhodes Mark II F2.aif” by tim.kahn (https://freesound.org/people/tim.kahn/sounds/65728/), CC BY 4.0",
+      "pitch_measured": {
+        "sounding": "F3",
+        "cents": 6.7,
+        "method": "NC pYIN on the preview"
+      },
+      "roles": [
+        "rhodes strike"
+      ],
+      "uses": 2,
+      "time_stretch_ratios": [
+        1.0
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "fs:65728",
+          "layer": "keys",
+          "at_s": 110.319,
+          "len_s": 12.0,
+          "gain_db": -2.82,
+          "pitch_shift": false,
+          "chord_index": 11,
+          "midi": 53,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        },
+        {
+          "key": "fs:65728",
+          "layer": "keys",
+          "at_s": 115.301,
+          "len_s": 12.0,
+          "gain_db": -5.56,
+          "pitch_shift": false,
+          "chord_index": 11,
+          "midi": 53,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "rhodes strike"
+        }
+      ]
+    },
+    {
+      "key": "iowa:Piano.pp.C2.aiff",
+      "source": "University of Iowa Musical Instrument Samples (MIS)",
+      "title": "Piano.pp.C2.aiff",
+      "source_url": "https://theremin.music.uiowa.edu/MISpiano.html",
+      "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+      "audio_used": {
+        "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.C2.aiff",
+        "what": "original AIFF (lossless), resampled to 48 kHz on decode, pitch unchanged",
+        "sha256": "7ff5b7bd53e73ea7da25129d94a90998256a59aef65560caf8d324d36383a0ed",
+        "size_bytes": 8298822
+      },
+      "supplier": {
+        "display_name": "University of Iowa Electronic Music Studios",
+        "primary_link": "https://theremin.music.uiowa.edu/MIS.html"
+      },
+      "license": {
+        "name": "Public domain equivalent (UIowa MIS: no restrictions)",
+        "uri": "https://theremin.music.uiowa.edu/MIS.html",
+        "terms_verbatim": "\"Since 1997, these recordings have been freely available on this website and may be downloaded and used for any projects, without restrictions.\" (theremin.music.uiowa.edu/MIS.html, read 2026-10-18)"
+      },
+      "credit_line": "Piano.pp.C2.aiff, University of Iowa Musical Instrument Samples, Electronic Music Studios (Lawrence Fritts), https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.C2.aiff",
+      "pitch_measured": null,
+      "roles": [
+        "piano drone"
+      ],
+      "uses": 9,
+      "time_stretch_ratios": [
+        4.0
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "iowa:Piano.pp.C2.aiff",
+          "layer": "drone",
+          "at_s": 0.0,
+          "len_s": 14.976,
+          "gain_db": 0.0,
+          "pitch_shift": false,
+          "midi": 36,
+          "source_offset_s": 0.45,
+          "source_len_s": 3.75,
+          "time_stretch": 4.0,
+          "role": "piano drone"
+        },
+        {
+          "key": "iowa:Piano.pp.C2.aiff",
+          "layer": "drone",
+          "at_s": 11.0,
+          "len_s": 14.976,
+          "gain_db": 0.0,
+          "pitch_shift": false,
+          "midi": 36,
+          "source_offset_s": 0.45,
+          "source_len_s": 3.75,
+          "time_stretch": 4.0,
+          "role": "piano drone"
+        },
+        {
+          "key": "iowa:Piano.pp.C2.aiff",
+          "layer": "drone",
+          "at_s": 22.0,
+          "len_s": 14.976,
+          "gain_db": 0.0,
+          "pitch_shift": false,
+          "midi": 36,
+          "source_offset_s": 0.45,
+          "source_len_s": 3.75,
+          "time_stretch": 4.0,
+          "role": "piano drone"
+        },
+        {
+          "key": "iowa:Piano.pp.C2.aiff",
+          "layer": "drone",
+          "at_s": 33.0,
+          "len_s": 14.976,
+          "gain_db": 0.0,
+          "pitch_shift": false,
+          "midi": 36,
+          "source_offset_s": 0.45,
+          "source_len_s": 3.75,
+          "time_stretch": 4.0,
+          "role": "piano drone"
+        },
+        {
+          "key": "iowa:Piano.pp.C2.aiff",
+          "layer": "drone",
+          "at_s": 44.0,
+          "len_s": 14.976,
+          "gain_db": 0.0,
+          "pitch_shift": false,
+          "midi": 36,
+          "source_offset_s": 0.45,
+          "source_len_s": 3.75,
+          "time_stretch": 4.0,
+          "role": "piano drone"
+        },
+        {
+          "key": "iowa:Piano.pp.C2.aiff",
+          "layer": "drone",
+          "at_s": 55.0,
+          "len_s": 14.976,
+          "gain_db": 0.0,
+          "pitch_shift": false,
+          "midi": 36,
+          "source_offset_s": 0.45,
+          "source_len_s": 3.75,
+          "time_stretch": 4.0,
+          "role": "piano drone"
+        },
+        {
+          "key": "iowa:Piano.pp.C2.aiff",
+          "layer": "drone",
+          "at_s": 66.0,
+          "len_s": 8.0,
+          "gain_db": 0.0,
+          "pitch_shift": false,
+          "midi": 36,
+          "source_offset_s": 0.45,
+          "source_len_s": 3.75,
+          "time_stretch": 4.0,
+          "role": "piano drone"
+        },
+        {
+          "key": "iowa:Piano.pp.C2.aiff",
+          "layer": "drone",
+          "at_s": 88.0,
+          "len_s": 14.976,
+          "gain_db": 0.0,
+          "pitch_shift": false,
+          "midi": 36,
+          "source_offset_s": 0.45,
+          "source_len_s": 3.75,
+          "time_stretch": 4.0,
+          "role": "piano drone"
+        },
+        {
+          "key": "iowa:Piano.pp.C2.aiff",
+          "layer": "drone",
+          "at_s": 99.0,
+          "len_s": 5.0,
+          "gain_db": 0.0,
+          "pitch_shift": false,
+          "midi": 36,
+          "source_offset_s": 0.45,
+          "source_len_s": 3.75,
+          "time_stretch": 4.0,
+          "role": "piano drone"
+        }
+      ]
+    },
+    {
+      "key": "fs:587164",
+      "source": "Freesound",
+      "title": "Evening Ocean Waves along the Pacific Coast",
+      "source_url": "https://freesound.org/people/el_boss/sounds/587164/",
+      "author": "el_boss",
+      "audio_used": {
+        "url": "https://cdn.freesound.org/previews/587/587164_9129912-hq.ogg",
+        "what": "Freesound HQ preview (lossy Ogg Vorbis), resampled to 48 kHz on decode, pitch unchanged",
+        "sha256": "36ec2bd6cac746afeb83f767ccfe05b9e5d42293b3cbe4bd415229e674e43a87",
+        "size_bytes": 9791657
+      },
+      "supplier": {
+        "display_name": "el_boss",
+        "primary_link": "https://freesound.org/people/el_boss/"
+      },
+      "license": {
+        "name": "CC0 1.0",
+        "uri": "http://creativecommons.org/publicdomain/zero/1.0/",
+        "verified_live": "2026-10-18, creativecommons.org/publicdomain/zero/1.0"
+      },
+      "credit_line": "“Evening Ocean Waves along the Pacific Coast” by el_boss (https://freesound.org/people/el_boss/sounds/587164/), CC0 1.0",
+      "pitch_measured": null,
+      "roles": [
+        "field recording bed"
+      ],
+      "uses": 1,
+      "time_stretch_ratios": [
+        1.0
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "fs:587164",
+          "layer": "bed",
+          "at_s": 0.0,
+          "len_s": 120.0,
+          "gain_db": 0.0,
+          "pitch_shift": false,
+          "source_offset_s": 30.0,
+          "time_stretch": 1.0,
+          "role": "field recording bed"
+        }
+      ]
+    },
+    {
+      "key": "fs:857877",
+      "source": "Freesound",
+      "title": "Bowl Bell — C5",
+      "source_url": "https://freesound.org/people/bassimat/sounds/857877/",
+      "author": "bassimat",
+      "audio_used": {
+        "url": "https://cdn.freesound.org/previews/857/857877_15636277-hq.ogg",
+        "what": "Freesound HQ preview (lossy Ogg Vorbis), resampled to 48 kHz on decode, pitch unchanged",
+        "sha256": "30a4ab885289836e24392bd5838e2ec952f081f2e4f65e12a37fff87b2cfb4af",
+        "size_bytes": 630638
+      },
+      "supplier": {
+        "display_name": "bassimat",
+        "primary_link": "https://freesound.org/people/bassimat/"
+      },
+      "license": {
+        "name": "CC0 1.0",
+        "uri": "http://creativecommons.org/publicdomain/zero/1.0/",
+        "verified_live": "2026-10-18, creativecommons.org/publicdomain/zero/1.0"
+      },
+      "credit_line": "“Bowl Bell — C5” by bassimat (https://freesound.org/people/bassimat/sounds/857877/), CC0 1.0",
+      "pitch_measured": {
+        "sounding": "C5",
+        "cents": -0.3,
+        "method": "NC FFT peak on the preview; inharmonic partial at 1.43 kHz removed by a low-pass hack"
+      },
+      "roles": [
+        "bell accent"
+      ],
+      "uses": 4,
+      "time_stretch_ratios": [
+        1.0
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "fs:857877",
+          "layer": "bell",
+          "at_s": 45.0,
+          "len_s": 16.0,
+          "gain_db": -3.1,
+          "pitch_shift": false,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "bell accent"
+        },
+        {
+          "key": "fs:857877",
+          "layer": "bell",
+          "at_s": 52.5,
+          "len_s": 16.0,
+          "gain_db": -4.44,
+          "pitch_shift": false,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "bell accent"
+        },
+        {
+          "key": "fs:857877",
+          "layer": "bell",
+          "at_s": 58.0,
+          "len_s": 16.0,
+          "gain_db": 0.0,
+          "pitch_shift": false,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "bell accent"
+        },
+        {
+          "key": "fs:857877",
+          "layer": "bell",
+          "at_s": 90.2,
+          "len_s": 16.0,
+          "gain_db": -4.44,
+          "pitch_shift": false,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "bell accent"
+        }
+      ]
+    },
+    {
+      "key": "mm:fullchords-v4/C/00b_main-voicings_Cm7_shell_R-7-3",
+      "source": "musicmatter.art",
+      "title": "C minor 7th chord, shell R-7-3 (full chord set v4)",
+      "source_url": "https://musicmatter.art/sounds/fullchords-v4/C/00b_main-voicings_Cm7_shell_R-7-3.nc.json",
+      "author": "Peter",
+      "audio_used": {
+        "url": "https://fullchords.musicmatter.art/C/00b_main-voicings_Cm7_shell_R-7-3.flac",
+        "what": "lossless FLAC 24-bit/48 kHz (local copy, sha256 matches the manifest)",
+        "sha256": "f5f40f1c9a944897227d2e3ea3e2aaf5dfff6bac526042dc528d190e631afa98",
+        "size_bytes": 273159
+      },
+      "supplier": {
+        "display_name": "Peter",
+        "primary_link": "https://musicmatter.art/"
+      },
+      "license": {
+        "name": "CC BY-SA 4.0",
+        "uri": "https://creativecommons.org/licenses/by-sa/4.0/"
+      },
+      "credit_line": "“C minor 7th chord, shell R-7-3 (full chord set v4)” by Peter (https://fullchords.musicmatter.art/C/00b_main-voicings_Cm7_shell_R-7-3.flac), CC BY-SA 4.0",
+      "chord": {
+        "symbol": "Cm7",
+        "voicing": "shell_R-7-3",
+        "notes": [
+          "C3",
+          "A#3",
+          "D#4"
+        ]
+      },
+      "roles": [
+        "musicmatter chord, faint"
+      ],
+      "uses": 2,
+      "time_stretch_ratios": [
+        1.0
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "mm:C/00b_main-voicings_Cm7_shell_R-7-3",
+          "layer": "mm",
+          "at_s": 5.6,
+          "len_s": 4.364,
+          "gain_db": 0.0,
+          "pitch_shift": false,
+          "chord_index": 0,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "musicmatter chord, faint"
+        },
+        {
+          "key": "mm:C/00b_main-voicings_Cm7_shell_R-7-3",
+          "layer": "mm",
+          "at_s": 35.6,
+          "len_s": 4.364,
+          "gain_db": 0.0,
+          "pitch_shift": false,
+          "chord_index": 3,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "musicmatter chord, faint"
+        }
+      ]
+    },
+    {
+      "key": "mm:fullchords-v4/C/02_ninths_Cm9_inv3",
+      "source": "musicmatter.art",
+      "title": "C minor 9th chord, inv3 (full chord set v4)",
+      "source_url": "https://musicmatter.art/sounds/fullchords-v4/C/02_ninths_Cm9_inv3.nc.json",
+      "author": "Peter",
+      "audio_used": {
+        "url": "https://fullchords.musicmatter.art/C/02_ninths_Cm9_inv3.flac",
+        "what": "lossless FLAC 24-bit/48 kHz (local copy, sha256 matches the manifest)",
+        "sha256": "9a057f34c633e1d6ca682ade23bdcbef2a0234c1728117d218ef13ff6c1c78ec",
+        "size_bytes": 266367
+      },
+      "supplier": {
+        "display_name": "Peter",
+        "primary_link": "https://musicmatter.art/"
+      },
+      "license": {
+        "name": "CC BY-SA 4.0",
+        "uri": "https://creativecommons.org/licenses/by-sa/4.0/"
+      },
+      "credit_line": "“C minor 9th chord, inv3 (full chord set v4)” by Peter (https://fullchords.musicmatter.art/C/02_ninths_Cm9_inv3.flac), CC BY-SA 4.0",
+      "chord": {
+        "symbol": "Cm9",
+        "voicing": "inv3",
+        "notes": [
+          "A#3",
+          "C4",
+          "D#4",
+          "G4",
+          "D5"
+        ]
+      },
+      "roles": [
+        "musicmatter chord, faint"
+      ],
+      "uses": 2,
+      "time_stretch_ratios": [
+        1.0
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "mm:C/02_ninths_Cm9_inv3",
+          "layer": "mm",
+          "at_s": 15.6,
+          "len_s": 4.364,
+          "gain_db": 0.0,
+          "pitch_shift": false,
+          "chord_index": 1,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "musicmatter chord, faint"
+        },
+        {
+          "key": "mm:C/02_ninths_Cm9_inv3",
+          "layer": "mm",
+          "at_s": 45.6,
+          "len_s": 4.364,
+          "gain_db": 0.0,
+          "pitch_shift": false,
+          "chord_index": 4,
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "musicmatter chord, faint"
+        }
+      ]
+    },
+    {
+      "key": "iowa:Piano.pp.F5.aiff",
+      "source": "University of Iowa Musical Instrument Samples (MIS)",
+      "title": "Piano.pp.F5.aiff",
+      "source_url": "https://theremin.music.uiowa.edu/MISpiano.html",
+      "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+      "audio_used": {
+        "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.F5.aiff",
+        "what": "original AIFF (lossless), resampled to 48 kHz on decode, pitch unchanged",
+        "sha256": "e0cc155431b149825035265cdabe966a6c72f11ada4f3b5b46bfb7ef850008be",
+        "size_bytes": 4030014
+      },
+      "supplier": {
+        "display_name": "University of Iowa Electronic Music Studios",
+        "primary_link": "https://theremin.music.uiowa.edu/MIS.html"
+      },
+      "license": {
+        "name": "Public domain equivalent (UIowa MIS: no restrictions)",
+        "uri": "https://theremin.music.uiowa.edu/MIS.html",
+        "terms_verbatim": "\"Since 1997, these recordings have been freely available on this website and may be downloaded and used for any projects, without restrictions.\" (theremin.music.uiowa.edu/MIS.html, read 2026-10-18)"
+      },
+      "credit_line": "Piano.pp.F5.aiff, University of Iowa Musical Instrument Samples, Electronic Music Studios (Lawrence Fritts), https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.F5.aiff",
+      "pitch_measured": {
+        "sounding": "F5",
+        "cents": 9.0,
+        "method": "NC pYIN (0.02-semitone resolution) on the note segment"
+      },
+      "roles": [
+        "line"
+      ],
+      "uses": 4,
+      "time_stretch_ratios": [
+        1.0
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "iowa:Piano.pp.F5.aiff",
+          "layer": "line",
+          "at_s": 9.676,
+          "len_s": 7.0,
+          "gain_db": -2.42,
+          "pitch_shift": false,
+          "midi": 77,
+          "pitch": "F5",
+          "kind": "line",
+          "timbre": "piano",
+          "source_offset_s": 0.179,
+          "time_stretch": 1.0,
+          "role": "line"
+        },
+        {
+          "key": "iowa:Piano.pp.F5.aiff",
+          "layer": "line",
+          "at_s": 50.038,
+          "len_s": 7.0,
+          "gain_db": -2.42,
+          "pitch_shift": false,
+          "midi": 77,
+          "pitch": "F5",
+          "kind": "line",
+          "timbre": "piano",
+          "source_offset_s": 0.179,
+          "time_stretch": 1.0,
+          "role": "line"
+        },
+        {
+          "key": "iowa:Piano.pp.F5.aiff",
+          "layer": "line",
+          "at_s": 80.468,
+          "len_s": 2.6,
+          "gain_db": -4.01,
+          "pitch_shift": false,
+          "midi": 77,
+          "pitch": "F5",
+          "kind": "triplet",
+          "timbre": "piano",
+          "source_offset_s": 0.179,
+          "time_stretch": 1.0,
+          "role": "line"
+        },
+        {
+          "key": "iowa:Piano.pp.F5.aiff",
+          "layer": "line",
+          "at_s": 90.323,
+          "len_s": 7.0,
+          "gain_db": -0.92,
+          "pitch_shift": false,
+          "midi": 77,
+          "pitch": "F5",
+          "kind": "line",
+          "timbre": "piano",
+          "source_offset_s": 0.179,
+          "time_stretch": 1.0,
+          "role": "line"
+        }
+      ]
+    },
+    {
+      "key": "iowa:Piano.pp.G5.aiff",
+      "source": "University of Iowa Musical Instrument Samples (MIS)",
+      "title": "Piano.pp.G5.aiff",
+      "source_url": "https://theremin.music.uiowa.edu/MISpiano.html",
+      "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+      "audio_used": {
+        "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.G5.aiff",
+        "what": "original AIFF (lossless), resampled to 48 kHz on decode, pitch unchanged",
+        "sha256": "59d112635fd438f131f776a513cf048743a31d85259315b1a65f6f1c29a3e528",
+        "size_bytes": 3880486
+      },
+      "supplier": {
+        "display_name": "University of Iowa Electronic Music Studios",
+        "primary_link": "https://theremin.music.uiowa.edu/MIS.html"
+      },
+      "license": {
+        "name": "Public domain equivalent (UIowa MIS: no restrictions)",
+        "uri": "https://theremin.music.uiowa.edu/MIS.html",
+        "terms_verbatim": "\"Since 1997, these recordings have been freely available on this website and may be downloaded and used for any projects, without restrictions.\" (theremin.music.uiowa.edu/MIS.html, read 2026-10-18)"
+      },
+      "credit_line": "Piano.pp.G5.aiff, University of Iowa Musical Instrument Samples, Electronic Music Studios (Lawrence Fritts), https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.G5.aiff",
+      "pitch_measured": {
+        "sounding": "G5",
+        "cents": 13.0,
+        "method": "NC pYIN (0.02-semitone resolution) on the note segment"
+      },
+      "roles": [
+        "line"
+      ],
+      "uses": 4,
+      "time_stretch_ratios": [
+        1.0
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "iowa:Piano.pp.G5.aiff",
+          "layer": "line",
+          "at_s": 15.107,
+          "len_s": 7.0,
+          "gain_db": -2.42,
+          "pitch_shift": false,
+          "midi": 79,
+          "pitch": "G5",
+          "kind": "line",
+          "timbre": "piano",
+          "source_offset_s": 0.253,
+          "time_stretch": 1.0,
+          "role": "line"
+        },
+        {
+          "key": "iowa:Piano.pp.G5.aiff",
+          "layer": "line",
+          "at_s": 54.982,
+          "len_s": 7.0,
+          "gain_db": -2.42,
+          "pitch_shift": false,
+          "midi": 79,
+          "pitch": "G5",
+          "kind": "line",
+          "timbre": "piano",
+          "source_offset_s": 0.253,
+          "time_stretch": 1.0,
+          "role": "line"
+        },
+        {
+          "key": "iowa:Piano.pp.G5.aiff",
+          "layer": "line",
+          "at_s": 81.135,
+          "len_s": 2.6,
+          "gain_db": -4.01,
+          "pitch_shift": false,
+          "midi": 79,
+          "pitch": "G5",
+          "kind": "triplet",
+          "timbre": "piano",
+          "source_offset_s": 0.253,
+          "time_stretch": 1.0,
+          "role": "line"
+        },
+        {
+          "key": "iowa:Piano.pp.G5.aiff",
+          "layer": "line",
+          "at_s": 95.346,
+          "len_s": 7.0,
+          "gain_db": -0.92,
+          "pitch_shift": false,
+          "midi": 79,
+          "pitch": "G5",
+          "kind": "line",
+          "timbre": "piano",
+          "source_offset_s": 0.253,
+          "time_stretch": 1.0,
+          "role": "line"
+        }
+      ]
+    },
+    {
+      "key": "iowa:Violin.arco.pp.sulD.C5B5.stereo.aif#0",
+      "source": "University of Iowa Musical Instrument Samples (MIS)",
+      "title": "Violin.arco.pp.sulD.C5B5.stereo.aif (note 1 of the run, 72)",
+      "source_url": "https://theremin.music.uiowa.edu/MISviolin2012.html",
+      "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+      "audio_used": {
+        "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/violin2012/Violin.arco.pp.sulD.C5B5.stereo.aif",
+        "what": "original AIFF (lossless), resampled to 48 kHz on decode, pitch unchanged; trimmed to the run segment 0.824-7.802 s",
+        "sha256": "28aa3d8e66fe5919c43dd6000c6fc8bbe1829ab32a05a22d1f44e5ff396fbc42",
+        "size_bytes": 15809186
+      },
+      "supplier": {
+        "display_name": "University of Iowa Electronic Music Studios",
+        "primary_link": "https://theremin.music.uiowa.edu/MIS.html"
+      },
+      "license": {
+        "name": "Public domain equivalent (UIowa MIS: no restrictions)",
+        "uri": "https://theremin.music.uiowa.edu/MIS.html",
+        "terms_verbatim": "\"Since 1997, these recordings have been freely available on this website and may be downloaded and used for any projects, without restrictions.\" (theremin.music.uiowa.edu/MIS.html, read 2026-10-18)"
+      },
+      "credit_line": "Violin.arco.pp.sulD.C5B5.stereo.aif, University of Iowa Musical Instrument Samples, Electronic Music Studios (Lawrence Fritts), https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/violin2012/Violin.arco.pp.sulD.C5B5.stereo.aif",
+      "pitch_measured": {
+        "sounding": "C5",
+        "cents": 11.0,
+        "method": "NC pYIN (0.02-semitone resolution) on the note segment"
+      },
+      "roles": [
+        "line"
+      ],
+      "uses": 4,
+      "time_stretch_ratios": [
+        1.0
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "iowa:Violin.arco.pp.sulD.C5B5.stereo.aif#0",
+          "layer": "line",
+          "at_s": 25.274,
+          "len_s": 6.978,
+          "gain_db": -4.0,
+          "pitch_shift": false,
+          "midi": 72,
+          "pitch": "C5",
+          "kind": "line",
+          "timbre": "violin",
+          "source_offset_s": 0.824,
+          "time_stretch": 1.0,
+          "role": "line"
+        },
+        {
+          "key": "iowa:Violin.arco.pp.sulD.C5B5.stereo.aif#0",
+          "layer": "line",
+          "at_s": 64.85,
+          "len_s": 6.978,
+          "gain_db": -2.5,
+          "pitch_shift": false,
+          "midi": 72,
+          "pitch": "C5",
+          "kind": "line",
+          "timbre": "violin",
+          "source_offset_s": 0.824,
+          "time_stretch": 1.0,
+          "role": "line"
+        },
+        {
+          "key": "iowa:Violin.arco.pp.sulD.C5B5.stereo.aif#0",
+          "layer": "line",
+          "at_s": 84.796,
+          "len_s": 6.978,
+          "gain_db": -2.5,
+          "pitch_shift": false,
+          "midi": 72,
+          "pitch": "C5",
+          "kind": "line",
+          "timbre": "violin",
+          "source_offset_s": 0.824,
+          "time_stretch": 1.0,
+          "role": "line"
+        },
+        {
+          "key": "iowa:Violin.arco.pp.sulD.C5B5.stereo.aif#0",
+          "layer": "line",
+          "at_s": 105.106,
+          "len_s": 6.978,
+          "gain_db": -2.5,
+          "pitch_shift": false,
+          "midi": 72,
+          "pitch": "C5",
+          "kind": "line",
+          "timbre": "violin",
+          "source_offset_s": 0.824,
+          "time_stretch": 1.0,
+          "role": "line"
+        }
+      ]
+    },
+    {
+      "key": "iowa:Violin.arco.pp.sulD.C5B5.stereo.aif#5",
+      "source": "University of Iowa Musical Instrument Samples (MIS)",
+      "title": "Violin.arco.pp.sulD.C5B5.stereo.aif (note 6 of the run, 77)",
+      "source_url": "https://theremin.music.uiowa.edu/MISviolin2012.html",
+      "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+      "audio_used": {
+        "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/violin2012/Violin.arco.pp.sulD.C5B5.stereo.aif",
+        "what": "original AIFF (lossless), resampled to 48 kHz on decode, pitch unchanged; trimmed to the run segment 36.769-42.678 s",
+        "sha256": "28aa3d8e66fe5919c43dd6000c6fc8bbe1829ab32a05a22d1f44e5ff396fbc42",
+        "size_bytes": 15809186
+      },
+      "supplier": {
+        "display_name": "University of Iowa Electronic Music Studios",
+        "primary_link": "https://theremin.music.uiowa.edu/MIS.html"
+      },
+      "license": {
+        "name": "Public domain equivalent (UIowa MIS: no restrictions)",
+        "uri": "https://theremin.music.uiowa.edu/MIS.html",
+        "terms_verbatim": "\"Since 1997, these recordings have been freely available on this website and may be downloaded and used for any projects, without restrictions.\" (theremin.music.uiowa.edu/MIS.html, read 2026-10-18)"
+      },
+      "credit_line": "Violin.arco.pp.sulD.C5B5.stereo.aif, University of Iowa Musical Instrument Samples, Electronic Music Studios (Lawrence Fritts), https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/violin2012/Violin.arco.pp.sulD.C5B5.stereo.aif",
+      "pitch_measured": {
+        "sounding": "F5",
+        "cents": -9.0,
+        "method": "NC pYIN (0.02-semitone resolution) on the note segment"
+      },
+      "roles": [
+        "line"
+      ],
+      "uses": 4,
+      "time_stretch_ratios": [
+        1.0
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "iowa:Violin.arco.pp.sulD.C5B5.stereo.aif#5",
+          "layer": "line",
+          "at_s": 29.706,
+          "len_s": 5.909,
+          "gain_db": -0.48,
+          "pitch_shift": false,
+          "midi": 77,
+          "pitch": "F5",
+          "kind": "line",
+          "timbre": "violin",
+          "source_offset_s": 36.769,
+          "time_stretch": 1.0,
+          "role": "line"
+        },
+        {
+          "key": "iowa:Violin.arco.pp.sulD.C5B5.stereo.aif#5",
+          "layer": "line",
+          "at_s": 70.249,
+          "len_s": 5.909,
+          "gain_db": 1.02,
+          "pitch_shift": false,
+          "midi": 77,
+          "pitch": "F5",
+          "kind": "line",
+          "timbre": "violin",
+          "source_offset_s": 36.769,
+          "time_stretch": 1.0,
+          "role": "line"
+        },
+        {
+          "key": "iowa:Violin.arco.pp.sulD.C5B5.stereo.aif#5",
+          "layer": "line",
+          "at_s": 90.323,
+          "len_s": 5.909,
+          "gain_db": 1.02,
+          "pitch_shift": false,
+          "midi": 77,
+          "pitch": "F5",
+          "kind": "line",
+          "timbre": "violin",
+          "source_offset_s": 36.769,
+          "time_stretch": 1.0,
+          "role": "line"
+        },
+        {
+          "key": "iowa:Violin.arco.pp.sulD.C5B5.stereo.aif#5",
+          "layer": "line",
+          "at_s": 109.861,
+          "len_s": 5.909,
+          "gain_db": 1.02,
+          "pitch_shift": false,
+          "midi": 77,
+          "pitch": "F5",
+          "kind": "line",
+          "timbre": "violin",
+          "source_offset_s": 36.769,
+          "time_stretch": 1.0,
+          "role": "line"
+        }
+      ]
+    },
+    {
+      "key": "iowa:Violin.arco.pp.sulD.C5B5.stereo.aif#7",
+      "source": "University of Iowa Musical Instrument Samples (MIS)",
+      "title": "Violin.arco.pp.sulD.C5B5.stereo.aif (note 8 of the run, 79)",
+      "source_url": "https://theremin.music.uiowa.edu/MISviolin2012.html",
+      "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+      "audio_used": {
+        "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/violin2012/Violin.arco.pp.sulD.C5B5.stereo.aif",
+        "what": "original AIFF (lossless), resampled to 48 kHz on decode, pitch unchanged; trimmed to the run segment 51.49-56.018 s",
+        "sha256": "28aa3d8e66fe5919c43dd6000c6fc8bbe1829ab32a05a22d1f44e5ff396fbc42",
+        "size_bytes": 15809186
+      },
+      "supplier": {
+        "display_name": "University of Iowa Electronic Music Studios",
+        "primary_link": "https://theremin.music.uiowa.edu/MIS.html"
+      },
+      "license": {
+        "name": "Public domain equivalent (UIowa MIS: no restrictions)",
+        "uri": "https://theremin.music.uiowa.edu/MIS.html",
+        "terms_verbatim": "\"Since 1997, these recordings have been freely available on this website and may be downloaded and used for any projects, without restrictions.\" (theremin.music.uiowa.edu/MIS.html, read 2026-10-18)"
+      },
+      "credit_line": "Violin.arco.pp.sulD.C5B5.stereo.aif, University of Iowa Musical Instrument Samples, Electronic Music Studios (Lawrence Fritts), https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/violin2012/Violin.arco.pp.sulD.C5B5.stereo.aif",
+      "pitch_measured": {
+        "sounding": "G5",
+        "cents": 3.0,
+        "method": "NC pYIN (0.02-semitone resolution) on the note segment"
+      },
+      "roles": [
+        "line"
+      ],
+      "uses": 4,
+      "time_stretch_ratios": [
+        1.0
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "iowa:Violin.arco.pp.sulD.C5B5.stereo.aif#7",
+          "layer": "line",
+          "at_s": 35.149,
+          "len_s": 4.528,
+          "gain_db": -4.0,
+          "pitch_shift": false,
+          "midi": 79,
+          "pitch": "G5",
+          "kind": "line",
+          "timbre": "violin",
+          "source_offset_s": 51.49,
+          "time_stretch": 1.0,
+          "role": "line"
+        },
+        {
+          "key": "iowa:Violin.arco.pp.sulD.C5B5.stereo.aif#7",
+          "layer": "line",
+          "at_s": 74.787,
+          "len_s": 4.528,
+          "gain_db": -2.5,
+          "pitch_shift": false,
+          "midi": 79,
+          "pitch": "G5",
+          "kind": "line",
+          "timbre": "violin",
+          "source_offset_s": 51.49,
+          "time_stretch": 1.0,
+          "role": "line"
+        },
+        {
+          "key": "iowa:Violin.arco.pp.sulD.C5B5.stereo.aif#7",
+          "layer": "line",
+          "at_s": 95.346,
+          "len_s": 4.528,
+          "gain_db": -2.5,
+          "pitch_shift": false,
+          "midi": 79,
+          "pitch": "G5",
+          "kind": "line",
+          "timbre": "violin",
+          "source_offset_s": 51.49,
+          "time_stretch": 1.0,
+          "role": "line"
+        },
+        {
+          "key": "iowa:Violin.arco.pp.sulD.C5B5.stereo.aif#7",
+          "layer": "line",
+          "at_s": 114.69,
+          "len_s": 4.528,
+          "gain_db": -2.5,
+          "pitch_shift": false,
+          "midi": 79,
+          "pitch": "G5",
+          "kind": "line",
+          "timbre": "violin",
+          "source_offset_s": 51.49,
+          "time_stretch": 1.0,
+          "role": "line"
+        }
+      ]
+    },
+    {
+      "key": "fs:373563",
+      "source": "Freesound",
+      "title": "Harp - C5 (KSHarp_C5_mf.wav)",
+      "source_url": "https://freesound.org/people/sgossner/sounds/373563/",
+      "author": "sgossner",
+      "audio_used": {
+        "url": "https://cdn.freesound.org/previews/373/373563_2475994-hq.ogg",
+        "what": "Freesound HQ preview (lossy Ogg Vorbis), resampled to 48 kHz on decode, pitch unchanged",
+        "sha256": "00555f7e76d962b6b4cb854ff273e2f7688398a756d84f09caa6628bc706e72e",
+        "size_bytes": 137678
+      },
+      "supplier": {
+        "display_name": "sgossner",
+        "primary_link": "https://freesound.org/people/sgossner/"
+      },
+      "license": {
+        "name": "CC0 1.0",
+        "uri": "http://creativecommons.org/publicdomain/zero/1.0/",
+        "verified_live": "2026-10-18, creativecommons.org/publicdomain/zero/1.0"
+      },
+      "credit_line": "“Harp - C5 (KSHarp_C5_mf.wav)” by sgossner (https://freesound.org/people/sgossner/sounds/373563/), CC0 1.0",
+      "pitch_measured": {
+        "sounding": "C5",
+        "cents": -9.3,
+        "method": "NC pYIN on the preview"
+      },
+      "roles": [
+        "line"
+      ],
+      "uses": 2,
+      "time_stretch_ratios": [
+        1.0
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "fs:373563",
+          "layer": "line",
+          "at_s": 44.776,
+          "len_s": 6.987,
+          "gain_db": -7.52,
+          "pitch_shift": false,
+          "midi": 72,
+          "pitch": "C5",
+          "kind": "line",
+          "timbre": "harp",
+          "source_offset_s": 0.026,
+          "time_stretch": 1.0,
+          "role": "line"
+        },
+        {
+          "key": "fs:373563",
+          "layer": "line",
+          "at_s": 105.106,
+          "len_s": 6.987,
+          "gain_db": -6.02,
+          "pitch_shift": false,
+          "midi": 72,
+          "pitch": "C5",
+          "kind": "line",
+          "timbre": "harp",
+          "source_offset_s": 0.026,
+          "time_stretch": 1.0,
+          "role": "line"
+        }
+      ]
+    },
+    {
+      "key": "fs:373573",
+      "source": "Freesound",
+      "title": "Harp - F#5 (KSHarp_G5_mf.wav)",
+      "source_url": "https://freesound.org/people/sgossner/sounds/373573/",
+      "author": "sgossner",
+      "audio_used": {
+        "url": "https://cdn.freesound.org/previews/373/373573_2475994-hq.ogg",
+        "what": "Freesound HQ preview (lossy Ogg Vorbis), resampled to 48 kHz on decode, pitch unchanged",
+        "sha256": "d16de8e85c82cd277c1b41d4265a6f5b3dc438f5703c018beff83fb21852fce3",
+        "size_bytes": 116176
+      },
+      "supplier": {
+        "display_name": "sgossner",
+        "primary_link": "https://freesound.org/people/sgossner/"
+      },
+      "license": {
+        "name": "CC0 1.0",
+        "uri": "http://creativecommons.org/publicdomain/zero/1.0/",
+        "verified_live": "2026-10-18, creativecommons.org/publicdomain/zero/1.0"
+      },
+      "credit_line": "“Harp - F#5 (KSHarp_G5_mf.wav)” by sgossner (https://freesound.org/people/sgossner/sounds/373573/), CC0 1.0",
+      "pitch_measured": {
+        "sounding": "G5",
+        "cents": -5.3,
+        "method": "NC pYIN on the preview"
+      },
+      "roles": [
+        "line"
+      ],
+      "uses": 2,
+      "time_stretch_ratios": [
+        1.0
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "fs:373573",
+          "layer": "line",
+          "at_s": 54.982,
+          "len_s": 5.929,
+          "gain_db": -7.52,
+          "pitch_shift": false,
+          "midi": 79,
+          "pitch": "G5",
+          "kind": "line",
+          "timbre": "harp",
+          "source_offset_s": 0.022,
+          "time_stretch": 1.0,
+          "role": "line"
+        },
+        {
+          "key": "fs:373573",
+          "layer": "line",
+          "at_s": 114.69,
+          "len_s": 5.929,
+          "gain_db": -6.02,
+          "pitch_shift": false,
+          "midi": 79,
+          "pitch": "G5",
+          "kind": "line",
+          "timbre": "harp",
+          "source_offset_s": 0.022,
+          "time_stretch": 1.0,
+          "role": "line"
+        }
+      ]
+    },
+    {
+      "key": "fs:399493",
+      "source": "Freesound",
+      "title": "C5.wav",
+      "source_url": "https://freesound.org/people/Skamos66/sounds/399493/",
+      "author": "Skamos66",
+      "audio_used": {
+        "url": "https://cdn.freesound.org/previews/399/399493_7575123-hq.ogg",
+        "what": "Freesound HQ preview (lossy Ogg Vorbis), resampled to 48 kHz on decode, pitch unchanged",
+        "sha256": "5eaa42b248afc1e7cc030f9d91d96a59e627a816b2ba10f3423d7c1f6d351248",
+        "size_bytes": 15865
+      },
+      "supplier": {
+        "display_name": "Skamos66",
+        "primary_link": "https://freesound.org/people/Skamos66/"
+      },
+      "license": {
+        "name": "CC0 1.0",
+        "uri": "http://creativecommons.org/publicdomain/zero/1.0/",
+        "verified_live": "2026-10-18, creativecommons.org/publicdomain/zero/1.0"
+      },
+      "credit_line": "“C5.wav” by Skamos66 (https://freesound.org/people/Skamos66/sounds/399493/), CC0 1.0",
+      "pitch_measured": {
+        "sounding": "C5",
+        "cents": 0.7,
+        "method": "NC pYIN on the preview"
+      },
+      "roles": [
+        "line"
+      ],
+      "uses": 2,
+      "time_stretch_ratios": [
+        1.0
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "fs:399493",
+          "layer": "line",
+          "at_s": 60.015,
+          "len_s": 1.0,
+          "gain_db": -5.04,
+          "pitch_shift": false,
+          "midi": 72,
+          "pitch": "C5",
+          "kind": "triplet",
+          "timbre": "guitar",
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "line"
+        },
+        {
+          "key": "fs:399493",
+          "layer": "line",
+          "at_s": 100.069,
+          "len_s": 1.0,
+          "gain_db": -5.04,
+          "pitch_shift": false,
+          "midi": 72,
+          "pitch": "C5",
+          "kind": "triplet",
+          "timbre": "guitar",
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "line"
+        }
+      ]
+    },
+    {
+      "key": "fs:399505",
+      "source": "Freesound",
+      "title": "F5.wav",
+      "source_url": "https://freesound.org/people/Skamos66/sounds/399505/",
+      "author": "Skamos66",
+      "audio_used": {
+        "url": "https://cdn.freesound.org/previews/399/399505_7575123-hq.ogg",
+        "what": "Freesound HQ preview (lossy Ogg Vorbis), resampled to 48 kHz on decode, pitch unchanged",
+        "sha256": "22527ad60d4248f06fa80a6c73e035f5f9420d2bc637c8e9f4875bf99c901e7e",
+        "size_bytes": 17028
+      },
+      "supplier": {
+        "display_name": "Skamos66",
+        "primary_link": "https://freesound.org/people/Skamos66/"
+      },
+      "license": {
+        "name": "CC0 1.0",
+        "uri": "http://creativecommons.org/publicdomain/zero/1.0/",
+        "verified_live": "2026-10-18, creativecommons.org/publicdomain/zero/1.0"
+      },
+      "credit_line": "“F5.wav” by Skamos66 (https://freesound.org/people/Skamos66/sounds/399505/), CC0 1.0",
+      "pitch_measured": {
+        "sounding": "F5",
+        "cents": 0.7,
+        "method": "NC pYIN on the preview"
+      },
+      "roles": [
+        "line"
+      ],
+      "uses": 2,
+      "time_stretch_ratios": [
+        1.0
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "fs:399505",
+          "layer": "line",
+          "at_s": 60.681,
+          "len_s": 1.0,
+          "gain_db": -5.04,
+          "pitch_shift": false,
+          "midi": 77,
+          "pitch": "F5",
+          "kind": "triplet",
+          "timbre": "guitar",
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "line"
+        },
+        {
+          "key": "fs:399505",
+          "layer": "line",
+          "at_s": 100.736,
+          "len_s": 1.0,
+          "gain_db": -5.04,
+          "pitch_shift": false,
+          "midi": 77,
+          "pitch": "F5",
+          "kind": "triplet",
+          "timbre": "guitar",
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "line"
+        }
+      ]
+    },
+    {
+      "key": "fs:399476",
+      "source": "Freesound",
+      "title": "G5.wav",
+      "source_url": "https://freesound.org/people/Skamos66/sounds/399476/",
+      "author": "Skamos66",
+      "audio_used": {
+        "url": "https://cdn.freesound.org/previews/399/399476_7575123-hq.ogg",
+        "what": "Freesound HQ preview (lossy Ogg Vorbis), resampled to 48 kHz on decode, pitch unchanged",
+        "sha256": "a18cc2bf6f4cdebcdad0e27e38ce43567c19e7c4cd8709fe104e40455d795c9d",
+        "size_bytes": 16952
+      },
+      "supplier": {
+        "display_name": "Skamos66",
+        "primary_link": "https://freesound.org/people/Skamos66/"
+      },
+      "license": {
+        "name": "CC0 1.0",
+        "uri": "http://creativecommons.org/publicdomain/zero/1.0/",
+        "verified_live": "2026-10-18, creativecommons.org/publicdomain/zero/1.0"
+      },
+      "credit_line": "“G5.wav” by Skamos66 (https://freesound.org/people/Skamos66/sounds/399476/), CC0 1.0",
+      "pitch_measured": {
+        "sounding": "G5",
+        "cents": 0.7,
+        "method": "NC pYIN on the preview"
+      },
+      "roles": [
+        "line"
+      ],
+      "uses": 2,
+      "time_stretch_ratios": [
+        1.0
+      ],
+      "pitch_shift": false,
+      "spans": [
+        {
+          "key": "fs:399476",
+          "layer": "line",
+          "at_s": 61.348,
+          "len_s": 1.0,
+          "gain_db": -5.04,
+          "pitch_shift": false,
+          "midi": 79,
+          "pitch": "G5",
+          "kind": "triplet",
+          "timbre": "guitar",
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "line"
+        },
+        {
+          "key": "fs:399476",
+          "layer": "line",
+          "at_s": 101.403,
+          "len_s": 1.0,
+          "gain_db": -5.04,
+          "pitch_shift": false,
+          "midi": 79,
+          "pitch": "G5",
+          "kind": "triplet",
+          "timbre": "guitar",
+          "source_offset_s": 0.0,
+          "time_stretch": 1.0,
+          "role": "line"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "distinct_sounds": 46,
+    "authors": [
+      "Peter",
+      "Skamos66",
+      "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+      "bassimat",
+      "el_boss",
+      "sgossner",
+      "tim.kahn"
+    ],
+    "contributors": 7,
+    "sources": {
+      "Freesound": 18,
+      "University of Iowa Musical Instrument Samples (MIS)": 26,
+      "musicmatter.art": 2
+    },
+    "licenses": {
+      "CC BY 4.0": 11,
+      "Public domain equivalent (UIowa MIS: no restrictions)": 26,
+      "CC0 1.0": 7,
+      "CC BY-SA 4.0": 2
+    },
+    "total_events": 269,
+    "musicmatter_sounds": 2
+  },
+  "derived_inputs": {
+    "accepted_input_licenses": [
+      "CC0-1.0",
+      "CC-BY (2.0-4.0)",
+      "CC-BY-SA (2.0-4.0)",
+      "Public domain (incl. UIowa MIS no-restriction terms)"
+    ],
+    "present": [
+      "CC BY 4.0",
+      "CC BY-SA 4.0",
+      "CC0 1.0",
+      "Public domain equivalent (UIowa MIS: no restrictions)"
+    ],
+    "check": "OK: no NC, ND, Sampling+ or custom-restrictive licenses. CC BY 4.0 inputs credited; output CC BY-SA 4.0."
+  },
+  "attribution": "“Cm into Am and F, with a slow C–F–G line (ambient)”, NetComposer Performance perf_ambient-cm-02, composed by Peter. Performed by the NetComposer Algorithmic Performer (Astrid) with: University of Iowa Musical Instrument Samples (piano, cello, violin; Electronic Music Studios, Lawrence Fritts); Fender Rhodes Mark II notes by tim.kahn (CC BY 4.0); harp by sgossner (CC0); plucked guitar by Skamos66 (CC0); Bowl Bell C5 by bassimat (CC0); ocean waves by el_boss (CC0), all on Freesound; and two chord sounds by Peter from musicmatter.art (CC BY-SA 4.0). Licensed CC BY-SA 4.0, https://creativecommons.org/licenses/by-sa/4.0/",
+  "provenance_files": {
+    "render_script": {
+      "path": "nc_ambient_cm/render_ambient_cm_02.py",
+      "sha256": "5c8c2041e0e7c334966da64f74c7234f4ed5a318b74c879b6240059964c9479d"
+    },
+    "uses_log": {
+      "path": "nc_ambient_cm/work/uses_02.json",
+      "sha256": "9239526eb75c86934c707641614c43ca3be6a9a620d0a243cdc9743bc794b514"
+    },
+    "pitch_measurements": {
+      "iowa_meas2.json": {
+        "path": "nc_ambient_cm/src02/iowa_meas2.json",
+        "sha256": "f1be0c7e4a3170700d118b98bfec6cb2511f39f21aceaea4d588220c093f7225"
+      },
+      "fs_meas.json": {
+        "path": "nc_ambient_cm/src02/fs_meas.json",
+        "sha256": "ab236797a9966dc2bc7737ed1c9704211fd32c8d866229a09ac4c946644f7c7c"
+      },
+      "meas_iowa2.py": {
+        "path": "nc_ambient_cm/src02/meas_iowa2.py",
+        "sha256": "f0f4eba66b11062800129d14aca6346b40f36d75f7c62b7868aa71f9cc75d99c"
+      },
+      "meas_fs.py": {
+        "path": "nc_ambient_cm/src02/meas_fs.py",
+        "sha256": "9c71e3a32abe24fab20302090ada3cad19c2a4f4258c4a3762ae42984a3fe2d5"
+      },
+      "license_live.json": {
+        "path": "nc_ambient_cm/src02/license_live.json",
+        "sha256": "361f55789d17eea7ef0e7f12c75097ca67f264e86acd0e7dfed32229f6cbdd57"
+      }
+    },
+    "crawler": {
+      "path": "netcomposer/crawl_cache/fs_search.py",
+      "queries": [
+        "ocean waves gentle shore",
+        "soft wind field recording",
+        "choir aah sustained C",
+        "singing bowl C",
+        "string pad C minor",
+        "ambient pad sustained C3",
+        "rain on window soft",
+        "tanpura C drone",
+        "Melodrone multisample",
+        "Jovica pad multisample"
+      ],
+      "log": "netcomposer/crawl_cache/query_log.jsonl"
+    },
+    "record_builder": {
+      "path": "nc_ambient_cm/build_record_02.py",
+      "sha256": "3e24da1a571459a1bbe55e575fed9474f919079a3ea7a43b7b2d92a5ea9e37b3"
+    },
+    "composition": {
+      "path": "nc_ambient_cm/composition_ambient_cm.md",
+      "sha256": "70f714dcf1b6eef79451a1814095e4a8b05018417e5e1521971c6eadb2b49697"
+    }
+  },
+  "created_at": "2026-10-18T08:10:30-07:00",
+  "signature": {
+    "status": "UNSIGNED",
+    "signed_by": null,
+    "algorithm": null,
+    "key_id": null,
+    "value": null,
+    "note": "Placeholder. Open decision #33 (signed usage records) is not decided."
+  },
+  "amendments": [
+    {
+      "at": "2026-10-18T11:23:17-07:00",
+      "what": "Contributor display name changed from 'Petrus' to 'Peter' (Peter Semmelhack) for netcomposer.art, at his request. No audio, input, setting or other field changed.",
+      "previous_record_hash": "499545e43ea74efabec41f6d1148ee2430545aa401b81baf9cf60e67a077ec87",
+      "original_record": "unchanged in the NetComposer working files"
+    }
+  ],
+  "record_hash": {
+    "algorithm": "sha256",
+    "over": "canonical JSON (sorted keys, no whitespace) of the record without record_hash and signature",
+    "value": "4c31a567d0e20d7c8d1d8f265cceb01e7ecdb18893c25eb8fe3c52b49f2b39f0"
+  }
+}

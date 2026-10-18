@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+# renders and caches (audio is never committed)
+out/
+.cache/
+*.wav
+*.flac
+*.mp3
+*.ogg
+*.aif
+*.aiff
+stems/
+uses.json
+*.log
+# local secrets
+.env
+*.key

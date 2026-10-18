@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://netcomposer.art/schema/plan-0.1.json",
+  "title": "NetComposer Performance plan (plan.json), version 0.1 (draft)",
+  "description": "The structured output of INTERPRET and the only input of RENDER. Everything the render does is written here: chords and voicings, which sounds may play which notes (banks), the layers (orchestration), the line and its triplets, the hacks and the seed. Times are seconds from the start; notes are MIDI numbers (60 = C4). No field can ask for pitch-shifting: there is none.",
+  "type": "object",
+  "required": ["nc_plan_version", "title", "composition", "seed", "length_s", "chords", "sources", "banks", "layers", "master"],
+  "properties": {
+    "nc_plan_version": {"type": "string", "enum": ["0.1"]},
+    "id": {"type": "string", "description": "Short slug; the record id becomes perf_<id>."},
+    "title": {"type": "string"},
+    "composition": {
+      "type": "object", "required": ["title", "words_verbatim"],
+      "properties": {
+        "title": {"type": "string"}, "composer": {"type": "string"}, "file": {"type": "string"},
+        "words_verbatim": {"type": "object", "required": ["composition"], "properties": {"composition": {"type": "string"}, "performance": {"type": "string"}}}
+      }
+    },
+    "interpreter": {
+      "type": "object", "description": "Who turned the words into this plan. Copied into the record.",
+      "properties": {"kind": {"type": "string", "enum": ["llm", "human/agent-written plan", "stub"]}, "model": {"type": "string"}, "base_url": {"type": "string"}, "at": {"type": "string"}, "note": {"type": "string"}}
+    },
+    "seed": {"type": "integer", "description": "Seeds every random choice in the render (roll spreads, gain jitter, and the noise of the synthetic reverb engine)."},
+    "length_s": {"type": "number", "minimum": 5, "description": "Where the music ends."},
+    "tail_s": {"type": "number", "minimum": 0, "description": "Fade after length_s (default 4)."},
+    "pulse_bpm": {"type": "number"},
+    "pitch_tolerance_cents": {"type": "number", "minimum": 1, "maximum": 50},
+    "sections": {"type": "array", "items": {"type": "object", "required": ["id", "start_s", "end_s"], "properties": {"id": {"type": "string"}, "start_s": {"type": "number"}, "end_s": {"type": "number"}, "harmony": {"type": "string"}, "notes": {"type": "string"}}}},
+    "chords": {
+      "type": "array", "minItems": 1,
+      "items": {"type": "object", "required": ["t", "dur", "symbol", "voicing"],
+        "properties": {"t": {"type": "number", "minimum": 0}, "dur": {"type": "number", "minimum": 0.1}, "symbol": {"type": "string"}, "section": {"type": "string"},
+          "voicing": {"type": "array", "minItems": 1, "items": {"type": "integer", "minimum": 21, "maximum": 108}}}}
+    },
+    "sources": {
+      "type": "object", "description": "Every sound the render may fetch, by id. Licenses are checked live at fetch time; pitched sounds are measured before use.",
+      "additionalProperties": {"$ref": "#/$defs/source"}
+    },
+    "banks": {
+      "type": "object", "description": "Instruments: for each MIDI note, candidate source ids in order of preference. The render keeps the first one that MEASURES as that note.",
+      "additionalProperties": {"type": "object", "required": ["notes"], "properties": {"notes": {"type": "object", "additionalProperties": {"type": "array", "items": {"type": "string"}}}}}
+    },
+    "layers": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/layer"}},
+    "master": {
+      "type": "object", "required": ["buses"],
+      "properties": {
+        "buses": {"type": "object", "additionalProperties": {"$ref": "#/$defs/bus"}},
+        "reverb": {"type": "object", "description": "The reverb hack. engine: dragonfly (default; Dragonfly Hall, open source, GPL-3, run headless through pedalboard; falls back to synthetic with a warning if not installed), convolution (a measured space by id from the kit's IR list, CC BY, credited in the record), synthetic (kit 0.1 seeded-noise hall). The wet return is set by loudness: wet = dry + send_lu (LU, BS.1770 integrated).",
+          "properties": {
+            "engine": {"type": "string", "enum": ["dragonfly", "convolution", "synthetic"]},
+            "send_lu": {"type": "number", "minimum": -30, "maximum": 15, "description": "Wet return loudness relative to the dry mix, in LU (default 5.3)."},
+            "params": {"type": "object", "description": "dragonfly: any of dry_level, early_level, late_level, size_m, width, predelay_ms, diffuse, low_cut_hz, low_cross_hz, low_mult_x, high_cut_hz, high_cross_hz, high_mult_x, spin_hz, wander_ms, decay_s, early_send, modulation. Unset ones use the kit defaults.",
+              "properties": {"dry_level": {"type": "number", "minimum": 0, "maximum": 100}, "early_level": {"type": "number", "minimum": 0, "maximum": 100}, "late_level": {"type": "number", "minimum": 0, "maximum": 100},
+                "size_m": {"type": "number", "minimum": 10, "maximum": 60}, "width": {"type": "number", "minimum": 50, "maximum": 150}, "predelay_ms": {"type": "number", "minimum": 0, "maximum": 100},
+                "diffuse": {"type": "number", "minimum": 0, "maximum": 100}, "low_cut_hz": {"type": "number", "minimum": 0, "maximum": 200}, "low_cross_hz": {"type": "number", "minimum": 200, "maximum": 1200},
+                "low_mult_x": {"type": "number", "minimum": 0.5, "maximum": 2.5}, "high_cut_hz": {"type": "number", "minimum": 1000, "maximum": 16000}, "high_cross_hz": {"type": "number", "minimum": 1000, "maximum": 16000},
+                "high_mult_x": {"type": "number", "minimum": 0.2, "maximum": 1.2}, "spin_hz": {"type": "number", "minimum": 0, "maximum": 10}, "wander_ms": {"type": "number", "minimum": 0, "maximum": 40},
+                "decay_s": {"type": "number", "minimum": 0.1, "maximum": 10}, "early_send": {"type": "number", "minimum": 0, "maximum": 100}, "modulation": {"type": "number", "minimum": 0, "maximum": 100}}},
+            "vst3_path": {"type": "string", "description": "dragonfly: path to DragonflyHallReverb.vst3 if it is not in a standard VST3 folder (or set NC_DRAGONFLY_VST3)."},
+            "ir": {"type": ["string", "object"], "description": "convolution: an id from ncperf/data/irs.json (e.g. openair-stpauls-nave), or an object of the same shape with a pinned sha256 per position and a CC0/CC BY/CC BY-SA license."},
+            "decode": {"type": "object", "properties": {"pattern": {"type": "number", "minimum": 0, "maximum": 1}, "az_deg": {"type": "number"}, "lf_dipole_shelf_db": {"type": "number"}, "lf_dipole_shelf_hz": {"type": "number"}}},
+            "decay_reshape_s": {"type": ["array", "null"], "items": {"type": "number"}, "minItems": 2, "maxItems": 2, "description": "convolution: [measured RT, target RT] in seconds."},
+            "direct_remove_ms": {"type": "number", "minimum": 0}, 
+            "return_eq": {"type": "object", "properties": {"hp_hz": {"type": ["number", "null"]}, "lp_hz": {"type": ["number", "null"]}, "octave_db": {"type": "object", "additionalProperties": {"type": "number", "minimum": -12, "maximum": 12}}}},
+            "send_rule": {"type": "string", "enum": ["loudness", "legacy_peak"], "description": "legacy_peak (synthetic only) reproduces kit 0.1 renders exactly."},
+            "rt60_s": {"type": "number", "description": "synthetic: decay. dragonfly: used as decay_s when params.decay_s is not set."}, "predelay_ms": {"type": "number", "description": "synthetic only."},
+            "wet": {"type": "number", "minimum": 0, "maximum": 1, "description": "Legacy. Without send_lu it maps to send_lu = 5.3 + 20*log10(wet/0.38)."}, "lp_hz": {"type": "number", "description": "synthetic only."}, "hp_hz": {"type": "number", "description": "synthetic only."}}},
+        "hp_hz": {"type": "number"},
+        "lp_blend": {"type": "object", "properties": {"hz": {"type": "number"}, "mix": {"type": "number"}}, "description": "Legacy top-end softening. With tone_filter=shelf (default) it becomes a high shelf at hz with gain 20*log10(1-mix) dB."},
+        "tone_filter": {"type": "string", "enum": ["shelf", "lp_blend"], "description": "shelf (default): RBJ high shelf. lp_blend: kit 0.1 blend of the mix with a low-passed copy."},
+        "high_shelf": {"type": "object", "required": ["hz", "db"], "properties": {"hz": {"type": "number"}, "db": {"type": "number", "minimum": -18, "maximum": 6}, "slope": {"type": "number"}}},
+        "loudness": {"type": "object", "properties": {"lufs": {"type": "number", "minimum": -18, "maximum": -16}, "tp": {"type": "number", "maximum": -1, "description": "True-peak ceiling (dBTP, 4x oversampled)."}, "lra": {"type": "number", "description": "loudnorm only."},
+          "method": {"type": "string", "enum": ["linear_tp_limiter", "loudnorm"], "description": "linear_tp_limiter (default): linear gain to lufs, then a 4x-oversampled stereo-linked lookahead true-peak limiter at tp. loudnorm: kit 0.1 ffmpeg two-pass (can go dynamic). The record says which mode actually ran."}}}
+      }
+    },
+    "quality": {"type": "object", "description": "Engine choices for the time-stretch and resampling hacks. The record says what actually ran.",
+      "properties": {"stretch_engine": {"type": "string", "enum": ["auto", "rubberband-r3", "ffmpeg-rubberband"], "description": "auto (default): rubberband CLI R3 (--fine) when installed, else the ffmpeg rubberband filter (R2). Pitch never changes."},
+        "resampler": {"type": "string", "enum": ["soxr", "swr"], "description": "soxr (default, precision 28) when ffmpeg has it; swr is ffmpeg's default resampler."}}},
+    "notes": {"type": "array", "items": {"type": "string"}, "description": "Intent and known compromises; copied into the record."}
+  },
+  "$defs": {
+    "source": {
+      "type": "object", "required": ["kind"],
+      "properties": {
+        "kind": {"type": "string", "enum": ["supplier", "freesound", "uiowa_mis", "url"], "description": "supplier: a manifest from a registered Supplier (suppliers.json). freesound: a sound id (license read from the live page, HQ preview used). uiowa_mis: a UIowa MIS file URL (terms checked live). url: any other file with a declared license, checked on its page when given."},
+        "manifest": {"type": "string"}, "id": {"type": "string"}, "url": {"type": "string"}, "page": {"type": "string"},
+        "license": {"type": "string", "description": "kind=url only: CC0-1.0, CC-BY-x.y, CC-BY-SA-x.y or PD."},
+        "author": {"type": "string"}, "title": {"type": "string"}, "source": {"type": "string"},
+        "range_bytes": {"type": "integer", "minimum": 1000, "description": "Fetch only the first N bytes (for long field recordings)."},
+        "segment": {"type": "object", "required": ["index"], "properties": {"index": {"type": "integer", "minimum": 0}, "drop_db": {"type": "number"}}, "description": "Multi-note run: use the index-th note found by silence segmentation."},
+        "expect_midi": {"type": "integer", "description": "For pitched clips used outside banks: the note it must measure as."},
+        "pitch_method": {"type": "string", "enum": ["pyin", "fft"]}, "fft_hi_hz": {"type": "number"},
+        "pitched": {"type": "boolean"}
+      }
+    },
+    "layer": {
+      "type": "object", "required": ["id", "type"],
+      "properties": {
+        "id": {"type": "string"}, "bus": {"type": "string"}, "role": {"type": "string"},
+        "type": {"type": "string", "enum": ["chord_notes", "chord_pad", "chord_under", "drone", "clips", "notes"],
+          "description": "chord_notes: strike or roll the voicing (per_chord). chord_pad: stretched sustain of each voicing note. chord_under: extra held notes per chord (notes_by_chord). drone: tiled stretched notes (spans). clips: unpitched or fixed-pitch clips (events). notes: single notes such as a line, with triplets (events)."},
+        "bank": {"type": "string"}, "fallback_banks": {"type": "array", "items": {"type": "string"}},
+        "style": {"type": "string", "enum": ["roll", "strike"]}, "spread_s": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2}, "jitter_s": {"type": "number"},
+        "per_chord": {"type": "array", "items": {"type": "object", "required": ["chord"], "properties": {"chord": {"type": "integer", "minimum": 0}, "strikes_at": {"type": "array", "items": {"type": "number"}}}}},
+        "notes_by_chord": {"type": "object", "additionalProperties": {"type": "array", "items": {"type": "integer"}}},
+        "spans": {"type": "array", "items": {"type": "object", "required": ["start_s", "dur_s", "midi"], "properties": {"start_s": {"type": "number"}, "dur_s": {"type": "number"}, "midi": {"type": "array", "items": {"type": "integer"}}}}},
+        "events": {"type": "array", "items": {"type": "object", "required": ["t"],
+          "properties": {"t": {"type": "number", "minimum": 0}, "source": {"type": "string"}, "midi": {"type": "integer"}, "dur_s": {"type": "number"}, "kind": {"type": "string", "enum": ["line", "triplet"]},
+            "timbres": {"type": "array", "items": {"type": "object", "required": ["bank"], "properties": {"bank": {"type": "string"}, "gain": {"type": "number"}, "fade_in_s": {"type": "number"}, "fade_out_s": {"type": "number"}, "max_s": {"type": "number"}, "pre_s": {"type": "number"}}}},
+            "offset_s": {"type": "number"}, "from_onset": {"type": "boolean"}, "stretch_to_s": {"type": "number", "description": "clips only: time-stretch the clip (pitch unchanged) to this length."}, "src_window_s": {"type": "array", "items": {"type": "number"}}, "fade_in_s": {"type": "number"}, "fade_out_s": {"type": "number"}, "gain": {"type": "number"}, "role": {"type": "string"}}}},
+        "gain": {"type": "number"}, "first_gain": {"type": "number"}, "restrike_gain": {"type": "number"}, "offset_s": {"type": "number"},
+        "src_window_s": {}, "overlap_s": {"type": "number"}, "lead_s": {"type": "number"}, "gain_total": {"type": "number"}, "flatten": {"type": "boolean"},
+        "piece_s": {"type": "number"}, "hop_s": {"type": "number"}, "level_match_rms": {"type": ["number", "null"]}, "first_half_db": {"type": "number"}, "half_s": {"type": "number"},
+        "triplet_gain": {"type": "number"}, "triplet_fade_out_s": {"type": "number"}, "fade_out_s": {"type": "number"}
+      }
+    },
+    "bus": {
+      "type": "object",
+      "properties": {
+        "lufs": {"type": "number", "description": "Bus loudness target before the master (LUFS match hack)."},
+        "pan": {"type": "number", "minimum": -1, "maximum": 1},
+        "filters": {"type": "array", "items": {"type": "object", "required": ["type", "hz"], "properties": {"type": {"type": "string", "enum": ["lp", "hp"]}, "hz": {"type": "number"}, "order": {"type": "integer"}}}},
+        "brighten": {"type": "object", "required": ["dark_hz", "bright_hz", "t", "mix"], "properties": {"dark_hz": {"type": "number"}, "bright_hz": {"type": "number"}, "t": {"type": "array", "items": {"type": "number"}}, "mix": {"type": "array", "items": {"type": "number"}}}},
+        "gain_db_curve": {"type": "object", "required": ["t", "db"], "properties": {"t": {"type": "array", "items": {"type": "number"}}, "db": {"type": "array", "items": {"type": "number"}}}},
+        "delay": {"type": "object", "required": ["time_s", "feedback"], "properties": {"time_s": {"type": "number"}, "feedback": {"type": "number", "maximum": 0.9}, "taps": {"type": "integer"}, "tone_hz": {"type": "number"}, "mix": {"type": "number"}}}
+      }
+    }
+  }
+}

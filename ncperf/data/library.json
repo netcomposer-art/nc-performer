@@ -1,0 +1,544 @@
+{
+ "nc_library_version": "0.1",
+ "description": "Sounds the NetComposer Performer has already used, with their banks. Every license is still checked live, and every pitch is measured again, at render time. Notes are MIDI (60 = C4).",
+ "sources": {
+  "piano-C2": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.C2.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-F2": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.F2.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-A2": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.A2.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-C3": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.C3.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html",
+   "expect_midi": 48
+  },
+  "piano-D3": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.D3.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-Eb3": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.Eb3.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-E3": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.E3.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-F3": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.F3.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-G3": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.G3.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-A3": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.A3.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-Bb3": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.Bb3.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-C4": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.C4.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-D4": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.D4.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-Eb4": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.Eb4.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-E4": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.E4.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-F4": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.F4.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-G4": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.G4.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-A4": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.A4.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-Bb4": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.Bb4.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-C5": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.C5.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-Eb5": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.Eb5.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-E5": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.E5.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-F5": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.F5.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-G5": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.G5.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "rhodes-65719": {
+   "kind": "freesound",
+   "id": "65719"
+  },
+  "rhodes-65721": {
+   "kind": "freesound",
+   "id": "65721"
+  },
+  "rhodes-65725": {
+   "kind": "freesound",
+   "id": "65725"
+  },
+  "rhodes-65728": {
+   "kind": "freesound",
+   "id": "65728"
+  },
+  "rhodes-65730": {
+   "kind": "freesound",
+   "id": "65730"
+  },
+  "rhodes-65715": {
+   "kind": "freesound",
+   "id": "65715"
+  },
+  "rhodes-65714": {
+   "kind": "freesound",
+   "id": "65714"
+  },
+  "rhodes-65720": {
+   "kind": "freesound",
+   "id": "65720"
+  },
+  "rhodes-65724": {
+   "kind": "freesound",
+   "id": "65724"
+  },
+  "rhodes-65722": {
+   "kind": "freesound",
+   "id": "65722"
+  },
+  "rhodes-65726": {
+   "kind": "freesound",
+   "id": "65726"
+  },
+  "cello-C2B2-0": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/cello2012/Cello.arco.pp.sulC.C2B2.stereo.aif",
+   "page": "https://theremin.music.uiowa.edu/MIScello2012.html",
+   "segment": {
+    "index": 0
+   }
+  },
+  "cello-C2B2-4": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/cello2012/Cello.arco.pp.sulC.C2B2.stereo.aif",
+   "page": "https://theremin.music.uiowa.edu/MIScello2012.html",
+   "segment": {
+    "index": 4
+   }
+  },
+  "cello-C3C4-4": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/cello2012/Cello.arco.pp.sulC.C3C4.stereo.aif",
+   "page": "https://theremin.music.uiowa.edu/MIScello2012.html",
+   "segment": {
+    "index": 4
+   }
+  },
+  "cello-C3C4-6": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/cello2012/Cello.arco.pp.sulC.C3C4.stereo.aif",
+   "page": "https://theremin.music.uiowa.edu/MIScello2012.html",
+   "segment": {
+    "index": 6
+   }
+  },
+  "cello-C3C4-9": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/cello2012/Cello.arco.pp.sulC.C3C4.stereo.aif",
+   "page": "https://theremin.music.uiowa.edu/MIScello2012.html",
+   "segment": {
+    "index": 9
+   }
+  },
+  "violin-C5B5-0": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/violin2012/Violin.arco.pp.sulD.C5B5.stereo.aif",
+   "page": "https://theremin.music.uiowa.edu/MISviolin2012.html",
+   "segment": {
+    "index": 0
+   }
+  },
+  "violin-C5B5-5": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/violin2012/Violin.arco.pp.sulD.C5B5.stereo.aif",
+   "page": "https://theremin.music.uiowa.edu/MISviolin2012.html",
+   "segment": {
+    "index": 5
+   }
+  },
+  "violin-C5B5-7": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/violin2012/Violin.arco.pp.sulD.C5B5.stereo.aif",
+   "page": "https://theremin.music.uiowa.edu/MISviolin2012.html",
+   "segment": {
+    "index": 7
+   }
+  },
+  "fs-399493": {
+   "kind": "freesound",
+   "id": "399493"
+  },
+  "fs-399505": {
+   "kind": "freesound",
+   "id": "399505"
+  },
+  "fs-399476": {
+   "kind": "freesound",
+   "id": "399476"
+  },
+  "harp-C5": {
+   "kind": "freesound",
+   "id": "373563",
+   "expect_midi": 72
+  },
+  "harp-G5": {
+   "kind": "freesound",
+   "id": "373573",
+   "expect_midi": 79
+  },
+  "bed-waves": {
+   "kind": "freesound",
+   "id": "587164",
+   "pitched": false
+  },
+  "bell-C5": {
+   "kind": "freesound",
+   "id": "857877",
+   "expect_midi": 72,
+   "pitch_method": "fft",
+   "fft_hi_hz": 900.0
+  },
+  "mm-C-00b_main-voicings_Cm7_shell_R-7-3": {
+   "kind": "supplier",
+   "manifest": "https://musicmatter.art/sounds/fullchords-v4/C/00b_main-voicings_Cm7_shell_R-7-3.nc.json",
+   "pitched": false
+  },
+  "mm-C-02_ninths_Cm9_inv3": {
+   "kind": "supplier",
+   "manifest": "https://musicmatter.art/sounds/fullchords-v4/C/02_ninths_Cm9_inv3.nc.json",
+   "pitched": false
+  },
+  "altoflute-C5": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS%20Pitches%20-%202014/Woodwinds/Alto%20Flute/AltoFlute.vib.ff.C5.stereo.aif",
+   "page": "https://theremin.music.uiowa.edu/MIS-Pitches-2012/MISaltoflute2012.html"
+  },
+  "fs-467667": {
+   "kind": "freesound",
+   "id": "467667"
+  },
+  "fs-467684": {
+   "kind": "freesound",
+   "id": "467684"
+  },
+  "fs-467689": {
+   "kind": "freesound",
+   "id": "467689"
+  },
+  "bed-pineforest": {
+   "kind": "freesound",
+   "id": "173031",
+   "range_bytes": 6000001,
+   "pitched": false
+  },
+  "bed-rain": {
+   "kind": "freesound",
+   "id": "398425",
+   "range_bytes": 6000001,
+   "pitched": false
+  },
+  "mm-C-Cm7_5_root_8va": {
+   "kind": "supplier",
+   "manifest": "https://musicmatter.art/sounds/fullchords-v4/C/00a_main_Cm7_5_root_8va.nc.json",
+   "pitched": false
+  },
+  "mm-A-Am_6_inv2_8va": {
+   "kind": "supplier",
+   "manifest": "https://musicmatter.art/sounds/fullchords-v4/A/00a_main_Am_6_inv2_8va.nc.json",
+   "pitched": false
+  }
+ },
+ "banks": {
+  "piano": {
+   "notes": {
+    "36": [
+     "piano-C2"
+    ],
+    "41": [
+     "piano-F2"
+    ],
+    "45": [
+     "piano-A2"
+    ],
+    "48": [
+     "piano-C3"
+    ],
+    "50": [
+     "piano-D3"
+    ],
+    "51": [
+     "piano-Eb3"
+    ],
+    "52": [
+     "piano-E3"
+    ],
+    "53": [
+     "piano-F3"
+    ],
+    "55": [
+     "piano-G3"
+    ],
+    "57": [
+     "piano-A3"
+    ],
+    "58": [
+     "piano-Bb3"
+    ],
+    "60": [
+     "piano-C4"
+    ],
+    "62": [
+     "piano-D4"
+    ],
+    "63": [
+     "piano-Eb4"
+    ],
+    "64": [
+     "piano-E4"
+    ],
+    "65": [
+     "piano-F4"
+    ],
+    "67": [
+     "piano-G4"
+    ],
+    "69": [
+     "piano-A4"
+    ],
+    "70": [
+     "piano-Bb4"
+    ],
+    "72": [
+     "piano-C5"
+    ],
+    "75": [
+     "piano-Eb5"
+    ],
+    "76": [
+     "piano-E5"
+    ],
+    "77": [
+     "piano-F5"
+    ],
+    "79": [
+     "piano-G5"
+    ]
+   }
+  },
+  "rhodes": {
+   "notes": {
+    "48": [
+     "rhodes-65719"
+    ],
+    "51": [
+     "rhodes-65721"
+    ],
+    "52": [
+     "rhodes-65725"
+    ],
+    "53": [
+     "rhodes-65728"
+    ],
+    "55": [
+     "rhodes-65730"
+    ],
+    "57": [
+     "rhodes-65715"
+    ],
+    "58": [
+     "rhodes-65714"
+    ],
+    "60": [
+     "rhodes-65720"
+    ],
+    "62": [
+     "rhodes-65724"
+    ],
+    "63": [
+     "rhodes-65722"
+    ],
+    "64": [
+     "rhodes-65726"
+    ]
+   }
+  },
+  "cello": {
+   "notes": {
+    "36": [
+     "cello-C2B2-0"
+    ],
+    "40": [
+     "cello-C2B2-4"
+    ],
+    "53": [
+     "cello-C3C4-4"
+    ],
+    "55": [
+     "cello-C3C4-6"
+    ],
+    "58": [
+     "cello-C3C4-9"
+    ]
+   }
+  },
+  "violin": {
+   "notes": {
+    "72": [
+     "violin-C5B5-0"
+    ],
+    "77": [
+     "violin-C5B5-5"
+    ],
+    "79": [
+     "violin-C5B5-7"
+    ]
+   }
+  },
+  "harp": {
+   "notes": {
+    "72": [
+     "harp-C5"
+    ],
+    "79": [
+     "harp-G5"
+    ]
+   }
+  },
+  "altoflute": {
+   "notes": {
+    "72": [
+     "altoflute-C5"
+    ]
+   }
+  },
+  "guitar": {
+   "notes": {
+    "72": [
+     "fs-467667",
+     "fs-399493"
+    ],
+    "77": [
+     "fs-467684",
+     "fs-399505"
+    ],
+    "79": [
+     "fs-467689",
+     "fs-399476"
+    ]
+   }
+  }
+ },
+ "extras": {
+  "bed-waves": {
+   "kind": "freesound",
+   "id": "587164",
+   "pitched": false
+  },
+  "bell-C5": {
+   "kind": "freesound",
+   "id": "857877",
+   "expect_midi": 72,
+   "pitch_method": "fft",
+   "fft_hi_hz": 900.0
+  },
+  "mm-C-00b_main-voicings_Cm7_shell_R-7-3": {
+   "kind": "supplier",
+   "manifest": "https://musicmatter.art/sounds/fullchords-v4/C/00b_main-voicings_Cm7_shell_R-7-3.nc.json",
+   "pitched": false
+  },
+  "mm-C-02_ninths_Cm9_inv3": {
+   "kind": "supplier",
+   "manifest": "https://musicmatter.art/sounds/fullchords-v4/C/02_ninths_Cm9_inv3.nc.json",
+   "pitched": false
+  },
+  "bed-pineforest": {
+   "kind": "freesound",
+   "id": "173031",
+   "range_bytes": 6000001,
+   "pitched": false
+  },
+  "bed-rain": {
+   "kind": "freesound",
+   "id": "398425",
+   "range_bytes": 6000001,
+   "pitched": false
+  },
+  "mm-C-Cm7_5_root_8va": {
+   "kind": "supplier",
+   "manifest": "https://musicmatter.art/sounds/fullchords-v4/C/00a_main_Cm7_5_root_8va.nc.json",
+   "pitched": false
+  },
+  "mm-A-Am_6_inv2_8va": {
+   "kind": "supplier",
+   "manifest": "https://musicmatter.art/sounds/fullchords-v4/A/00a_main_Am_6_inv2_8va.nc.json",
+   "pitched": false
+  }
+ }
+}

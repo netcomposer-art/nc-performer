@@ -1,0 +1,1633 @@
+{
+ "nc_plan_version": "0.1",
+ "title": "Cm into Am and F, with a slow C–F–G line (ambient): take 2, open-commons palette",
+ "id": "ambient-cm-02",
+ "composition": {
+  "title": "Cm into Am and F, with a slow C–F–G line (ambient)",
+  "composer": "Peter",
+  "words_verbatim": {
+   "composition": "2 mins - half Cm, Cm7, Cm9. Second half Cm7, Am, F.",
+   "performance": "ambient vibe, no harsh tones, randomly alt between Cm chord structure in first half, build to second half and follow Cm, Am, F pattern. Don't rush it. Over the top of it all play a slow C, F, G pattern. Include an occasional triplet"
+  },
+  "file": "composition.md"
+ },
+ "interpreter": {
+  "kind": "human/agent-written plan",
+  "note": "written by Astrid (NetComposer Performer agent) for perf02; generalized from render_ambient_cm_02.py"
+ },
+ "seed": 1018,
+ "length_s": 120.0,
+ "tail_s": 4.0,
+ "pulse_bpm": 60,
+ "pitch_tolerance_cents": 15.0,
+ "sections": [
+  {
+   "id": "A",
+   "start_s": 0,
+   "end_s": 60,
+   "harmony": "random alternation of Cm / Cm7 / Cm9",
+   "notes": "slow changes, long crossfades"
+  },
+  {
+   "id": "build",
+   "start_s": 38,
+   "end_s": 62,
+   "harmony": "(continues A)",
+   "notes": "rising level, opening tone, more motion"
+  },
+  {
+   "id": "B",
+   "start_s": 60,
+   "end_s": 120,
+   "harmony": "Cm7 -> Am -> F, twice",
+   "notes": "slow, even changes"
+  },
+  {
+   "id": "line",
+   "start_s": 5,
+   "end_s": 120,
+   "harmony": "single notes C5, F5, G5",
+   "notes": "slow; an occasional triplet"
+  }
+ ],
+ "chords": [
+  {
+   "t": 0.0,
+   "dur": 10.0,
+   "symbol": "Cm7",
+   "voicing": [
+    51,
+    55,
+    58,
+    60,
+    63
+   ],
+   "section": "A"
+  },
+  {
+   "t": 10.0,
+   "dur": 10.0,
+   "symbol": "Cm9",
+   "voicing": [
+    48,
+    55,
+    58,
+    62,
+    63
+   ],
+   "section": "A"
+  },
+  {
+   "t": 20.0,
+   "dur": 10.0,
+   "symbol": "Cm",
+   "voicing": [
+    51,
+    60,
+    67
+   ],
+   "section": "A"
+  },
+  {
+   "t": 30.0,
+   "dur": 10.0,
+   "symbol": "Cm7",
+   "voicing": [
+    48,
+    58,
+    63
+   ],
+   "section": "A"
+  },
+  {
+   "t": 40.0,
+   "dur": 10.0,
+   "symbol": "Cm9",
+   "voicing": [
+    51,
+    58,
+    62,
+    67
+   ],
+   "section": "build"
+  },
+  {
+   "t": 50.0,
+   "dur": 10.0,
+   "symbol": "Cm",
+   "voicing": [
+    48,
+    55,
+    60,
+    63
+   ],
+   "section": "build"
+  },
+  {
+   "t": 60.0,
+   "dur": 10.0,
+   "symbol": "Cm7",
+   "voicing": [
+    48,
+    55,
+    58,
+    63
+   ],
+   "section": "B"
+  },
+  {
+   "t": 70.0,
+   "dur": 10.0,
+   "symbol": "Am",
+   "voicing": [
+    45,
+    52,
+    57,
+    60,
+    64
+   ],
+   "section": "B"
+  },
+  {
+   "t": 80.0,
+   "dur": 10.0,
+   "symbol": "F",
+   "voicing": [
+    41,
+    53,
+    57,
+    60
+   ],
+   "section": "B"
+  },
+  {
+   "t": 90.0,
+   "dur": 10.0,
+   "symbol": "Cm",
+   "voicing": [
+    48,
+    55,
+    60,
+    63
+   ],
+   "section": "B"
+  },
+  {
+   "t": 100.0,
+   "dur": 10.0,
+   "symbol": "Am",
+   "voicing": [
+    52,
+    57,
+    60,
+    64
+   ],
+   "section": "B"
+  },
+  {
+   "t": 110.0,
+   "dur": 10.0,
+   "symbol": "F",
+   "voicing": [
+    53,
+    57,
+    60,
+    72
+   ],
+   "section": "B"
+  }
+ ],
+ "sources": {
+  "piano-C2": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.C2.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-F2": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.F2.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-A2": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.A2.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-C3": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.C3.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-D3": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.D3.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-Eb3": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.Eb3.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-E3": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.E3.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-F3": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.F3.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-G3": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.G3.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-A3": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.A3.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-Bb3": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.Bb3.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-C4": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.C4.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-D4": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.D4.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-Eb4": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.Eb4.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-E4": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.E4.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-F4": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.F4.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-G4": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.G4.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-A4": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.A4.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-Bb4": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.Bb4.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-C5": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.C5.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-Eb5": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.Eb5.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-E5": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.E5.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-F5": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.F5.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "piano-G5": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/piano/Piano.pp.G5.aiff",
+   "page": "https://theremin.music.uiowa.edu/MISpiano.html"
+  },
+  "rhodes-65719": {
+   "kind": "freesound",
+   "id": "65719"
+  },
+  "rhodes-65721": {
+   "kind": "freesound",
+   "id": "65721"
+  },
+  "rhodes-65725": {
+   "kind": "freesound",
+   "id": "65725"
+  },
+  "rhodes-65728": {
+   "kind": "freesound",
+   "id": "65728"
+  },
+  "rhodes-65730": {
+   "kind": "freesound",
+   "id": "65730"
+  },
+  "rhodes-65715": {
+   "kind": "freesound",
+   "id": "65715"
+  },
+  "rhodes-65714": {
+   "kind": "freesound",
+   "id": "65714"
+  },
+  "rhodes-65720": {
+   "kind": "freesound",
+   "id": "65720"
+  },
+  "rhodes-65724": {
+   "kind": "freesound",
+   "id": "65724"
+  },
+  "rhodes-65722": {
+   "kind": "freesound",
+   "id": "65722"
+  },
+  "rhodes-65726": {
+   "kind": "freesound",
+   "id": "65726"
+  },
+  "cello-C2B2-0": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/cello2012/Cello.arco.pp.sulC.C2B2.stereo.aif",
+   "page": "https://theremin.music.uiowa.edu/MIScello2012.html",
+   "segment": {
+    "index": 0
+   }
+  },
+  "cello-C2B2-4": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/cello2012/Cello.arco.pp.sulC.C2B2.stereo.aif",
+   "page": "https://theremin.music.uiowa.edu/MIScello2012.html",
+   "segment": {
+    "index": 4
+   }
+  },
+  "cello-C3C4-4": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/cello2012/Cello.arco.pp.sulC.C3C4.stereo.aif",
+   "page": "https://theremin.music.uiowa.edu/MIScello2012.html",
+   "segment": {
+    "index": 4
+   }
+  },
+  "cello-C3C4-6": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/cello2012/Cello.arco.pp.sulC.C3C4.stereo.aif",
+   "page": "https://theremin.music.uiowa.edu/MIScello2012.html",
+   "segment": {
+    "index": 6
+   }
+  },
+  "cello-C3C4-9": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/cello2012/Cello.arco.pp.sulC.C3C4.stereo.aif",
+   "page": "https://theremin.music.uiowa.edu/MIScello2012.html",
+   "segment": {
+    "index": 9
+   }
+  },
+  "violin-C5B5-0": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/violin2012/Violin.arco.pp.sulD.C5B5.stereo.aif",
+   "page": "https://theremin.music.uiowa.edu/MISviolin2012.html",
+   "segment": {
+    "index": 0
+   }
+  },
+  "violin-C5B5-5": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/violin2012/Violin.arco.pp.sulD.C5B5.stereo.aif",
+   "page": "https://theremin.music.uiowa.edu/MISviolin2012.html",
+   "segment": {
+    "index": 5
+   }
+  },
+  "violin-C5B5-7": {
+   "kind": "uiowa_mis",
+   "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/violin2012/Violin.arco.pp.sulD.C5B5.stereo.aif",
+   "page": "https://theremin.music.uiowa.edu/MISviolin2012.html",
+   "segment": {
+    "index": 7
+   }
+  },
+  "fs-399493": {
+   "kind": "freesound",
+   "id": "399493"
+  },
+  "fs-399505": {
+   "kind": "freesound",
+   "id": "399505"
+  },
+  "fs-399476": {
+   "kind": "freesound",
+   "id": "399476"
+  },
+  "harp-C5": {
+   "kind": "freesound",
+   "id": "373563",
+   "expect_midi": 72
+  },
+  "harp-G5": {
+   "kind": "freesound",
+   "id": "373573",
+   "expect_midi": 79
+  },
+  "bed-waves": {
+   "kind": "freesound",
+   "id": "587164",
+   "pitched": false
+  },
+  "bell-C5": {
+   "kind": "freesound",
+   "id": "857877",
+   "expect_midi": 72,
+   "pitch_method": "fft",
+   "fft_hi_hz": 900.0
+  },
+  "mm-C-00b_main-voicings_Cm7_shell_R-7-3": {
+   "kind": "supplier",
+   "manifest": "https://musicmatter.art/sounds/fullchords-v4/C/00b_main-voicings_Cm7_shell_R-7-3.nc.json",
+   "pitched": false
+  },
+  "mm-C-02_ninths_Cm9_inv3": {
+   "kind": "supplier",
+   "manifest": "https://musicmatter.art/sounds/fullchords-v4/C/02_ninths_Cm9_inv3.nc.json",
+   "pitched": false
+  }
+ },
+ "banks": {
+  "piano": {
+   "notes": {
+    "36": [
+     "piano-C2"
+    ],
+    "41": [
+     "piano-F2"
+    ],
+    "45": [
+     "piano-A2"
+    ],
+    "48": [
+     "piano-C3"
+    ],
+    "50": [
+     "piano-D3"
+    ],
+    "51": [
+     "piano-Eb3"
+    ],
+    "52": [
+     "piano-E3"
+    ],
+    "53": [
+     "piano-F3"
+    ],
+    "55": [
+     "piano-G3"
+    ],
+    "57": [
+     "piano-A3"
+    ],
+    "58": [
+     "piano-Bb3"
+    ],
+    "60": [
+     "piano-C4"
+    ],
+    "62": [
+     "piano-D4"
+    ],
+    "63": [
+     "piano-Eb4"
+    ],
+    "64": [
+     "piano-E4"
+    ],
+    "65": [
+     "piano-F4"
+    ],
+    "67": [
+     "piano-G4"
+    ],
+    "69": [
+     "piano-A4"
+    ],
+    "70": [
+     "piano-Bb4"
+    ],
+    "72": [
+     "piano-C5"
+    ],
+    "75": [
+     "piano-Eb5"
+    ],
+    "76": [
+     "piano-E5"
+    ],
+    "77": [
+     "piano-F5"
+    ],
+    "79": [
+     "piano-G5"
+    ]
+   }
+  },
+  "rhodes": {
+   "notes": {
+    "48": [
+     "rhodes-65719"
+    ],
+    "51": [
+     "rhodes-65721"
+    ],
+    "52": [
+     "rhodes-65725"
+    ],
+    "53": [
+     "rhodes-65728"
+    ],
+    "55": [
+     "rhodes-65730"
+    ],
+    "57": [
+     "rhodes-65715"
+    ],
+    "58": [
+     "rhodes-65714"
+    ],
+    "60": [
+     "rhodes-65720"
+    ],
+    "62": [
+     "rhodes-65724"
+    ],
+    "63": [
+     "rhodes-65722"
+    ],
+    "64": [
+     "rhodes-65726"
+    ]
+   }
+  },
+  "cello": {
+   "notes": {
+    "36": [
+     "cello-C2B2-0"
+    ],
+    "40": [
+     "cello-C2B2-4"
+    ],
+    "53": [
+     "cello-C3C4-4"
+    ],
+    "55": [
+     "cello-C3C4-6"
+    ],
+    "58": [
+     "cello-C3C4-9"
+    ]
+   }
+  },
+  "violin": {
+   "notes": {
+    "72": [
+     "violin-C5B5-0"
+    ],
+    "77": [
+     "violin-C5B5-5"
+    ],
+    "79": [
+     "violin-C5B5-7"
+    ]
+   }
+  },
+  "harp": {
+   "notes": {
+    "72": [
+     "harp-C5"
+    ],
+    "79": [
+     "harp-G5"
+    ]
+   }
+  },
+  "guitar": {
+   "notes": {
+    "72": [
+     "fs-399493"
+    ],
+    "77": [
+     "fs-399505"
+    ],
+    "79": [
+     "fs-399476"
+    ]
+   }
+  }
+ },
+ "layers": [
+  {
+   "id": "keys-rhodes",
+   "type": "chord_notes",
+   "bus": "keys",
+   "bank": "rhodes",
+   "style": "strike",
+   "jitter_s": 0.09,
+   "first_gain": 0.9,
+   "restrike_gain": 0.55,
+   "gain": 1.0,
+   "offset_s": 0.3,
+   "per_chord": [
+    {
+     "chord": 0,
+     "strikes_at": [
+      0.0
+     ]
+    },
+    {
+     "chord": 1,
+     "strikes_at": [
+      0.0
+     ]
+    },
+    {
+     "chord": 2,
+     "strikes_at": [
+      0.0
+     ]
+    },
+    {
+     "chord": 3,
+     "strikes_at": [
+      0.0
+     ]
+    },
+    {
+     "chord": 4,
+     "strikes_at": [
+      0.0,
+      5.0
+     ]
+    },
+    {
+     "chord": 5,
+     "strikes_at": [
+      0.0,
+      2.5,
+      5.0,
+      7.5
+     ]
+    },
+    {
+     "chord": 7,
+     "strikes_at": [
+      0.0,
+      5.0
+     ]
+    },
+    {
+     "chord": 9,
+     "strikes_at": [
+      0.0,
+      5.0
+     ]
+    },
+    {
+     "chord": 11,
+     "strikes_at": [
+      0.0,
+      5.0
+     ]
+    }
+   ],
+   "role": "rhodes strike"
+  },
+  {
+   "id": "keys-piano",
+   "type": "chord_notes",
+   "bus": "keys",
+   "bank": "piano",
+   "style": "strike",
+   "jitter_s": 0.09,
+   "first_gain": 0.9,
+   "restrike_gain": 0.55,
+   "gain": 0.85,
+   "offset_s": 0.3,
+   "per_chord": [
+    {
+     "chord": 4,
+     "strikes_at": [
+      0.0,
+      5.0
+     ]
+    },
+    {
+     "chord": 5,
+     "strikes_at": [
+      0.0,
+      2.5,
+      5.0,
+      7.5
+     ]
+    },
+    {
+     "chord": 6,
+     "strikes_at": [
+      0.0,
+      5.0
+     ]
+    },
+    {
+     "chord": 7,
+     "strikes_at": [
+      0.0,
+      5.0
+     ]
+    },
+    {
+     "chord": 8,
+     "strikes_at": [
+      0.0,
+      5.0
+     ]
+    },
+    {
+     "chord": 9,
+     "strikes_at": [
+      0.0,
+      5.0
+     ]
+    },
+    {
+     "chord": 10,
+     "strikes_at": [
+      0.0,
+      5.0
+     ]
+    },
+    {
+     "chord": 11,
+     "strikes_at": [
+      0.0,
+      5.0
+     ]
+    }
+   ],
+   "role": "piano strike"
+  },
+  {
+   "id": "pad",
+   "type": "chord_pad",
+   "bus": "pad",
+   "bank": "piano",
+   "src_window_s": {
+    "piano": [
+     0.25,
+     4.0
+    ]
+   },
+   "overlap_s": 4.0,
+   "lead_s": 1.5,
+   "gain_total": 0.7,
+   "flatten": true,
+   "role": "stretched pad"
+  },
+  {
+   "id": "cello",
+   "type": "chord_under",
+   "bus": "pad",
+   "bank": "cello",
+   "notes_by_chord": {
+    "0": [
+     36,
+     58
+    ],
+    "1": [
+     36,
+     58
+    ],
+    "2": [
+     36,
+     55
+    ],
+    "3": [
+     36,
+     58
+    ],
+    "4": [
+     36,
+     58
+    ],
+    "5": [
+     36,
+     55
+    ],
+    "6": [
+     36,
+     58
+    ],
+    "7": [
+     40
+    ],
+    "8": [
+     53
+    ],
+    "9": [
+     36,
+     55
+    ],
+    "10": [
+     40
+    ],
+    "11": [
+     53
+    ]
+   },
+   "gain": 0.35,
+   "gain_low": 0.45,
+   "lead_s": 1.0,
+   "first_t_s": 0.5,
+   "role": "cello"
+  },
+  {
+   "id": "drone",
+   "type": "drone",
+   "bus": "drone",
+   "bank": "piano",
+   "piece_s": 15.0,
+   "hop_s": 11.0,
+   "src_window_s": [
+    0.25,
+    4.0
+   ],
+   "flatten": true,
+   "gain_by_midi": {
+    "36": 1.0,
+    "48": 0.6,
+    "41": 1.0,
+    "53": 0.6
+   },
+   "spans": [
+    {
+     "start_s": 0.0,
+     "dur_s": 72.0,
+     "midi": [
+      36,
+      48
+     ]
+    },
+    {
+     "start_s": 88.0,
+     "dur_s": 14.0,
+     "midi": [
+      36,
+      48
+     ]
+    },
+    {
+     "start_s": 78.0,
+     "dur_s": 12.5,
+     "midi": [
+      41,
+      53
+     ]
+    },
+    {
+     "start_s": 108.0,
+     "dur_s": 16.0,
+     "midi": [
+      41,
+      53
+     ]
+    }
+   ],
+   "role": "piano drone"
+  },
+  {
+   "id": "bed",
+   "type": "clips",
+   "bus": "bed",
+   "events": [
+    {
+     "t": 0.0,
+     "source": "bed-waves",
+     "offset_s": 30.0,
+     "dur_s": 120.0,
+     "fade_in_s": 8.0,
+     "fade_out_s": 12.0,
+     "gain": 1.0,
+     "role": "field recording bed"
+    }
+   ]
+  },
+  {
+   "id": "bells",
+   "type": "clips",
+   "bus": "bell",
+   "events": [
+    {
+     "t": 45.0,
+     "source": "bell-C5",
+     "offset_s": 0.0,
+     "dur_s": 16.0,
+     "fade_in_s": 0.01,
+     "fade_out_s": 6.0,
+     "gain": 0.7,
+     "role": "bell accent"
+    },
+    {
+     "t": 52.5,
+     "source": "bell-C5",
+     "offset_s": 0.0,
+     "dur_s": 16.0,
+     "fade_in_s": 0.01,
+     "fade_out_s": 6.0,
+     "gain": 0.6,
+     "role": "bell accent"
+    },
+    {
+     "t": 58.0,
+     "source": "bell-C5",
+     "offset_s": 0.0,
+     "dur_s": 16.0,
+     "fade_in_s": 0.01,
+     "fade_out_s": 6.0,
+     "gain": 1.0,
+     "role": "bell accent"
+    },
+    {
+     "t": 90.2,
+     "source": "bell-C5",
+     "offset_s": 0.0,
+     "dur_s": 16.0,
+     "fade_in_s": 0.01,
+     "fade_out_s": 6.0,
+     "gain": 0.6,
+     "role": "bell accent"
+    }
+   ]
+  },
+  {
+   "id": "musicmatter",
+   "type": "clips",
+   "bus": "mm",
+   "events": [
+    {
+     "t": 5.6,
+     "source": "mm-C-00b_main-voicings_Cm7_shell_R-7-3",
+     "fade_in_s": 0.05,
+     "fade_out_s": 1.0,
+     "gain": 1.0,
+     "role": "musicmatter chord, faint"
+    },
+    {
+     "t": 15.6,
+     "source": "mm-C-02_ninths_Cm9_inv3",
+     "fade_in_s": 0.05,
+     "fade_out_s": 1.0,
+     "gain": 1.0,
+     "role": "musicmatter chord, faint"
+    },
+    {
+     "t": 35.6,
+     "source": "mm-C-00b_main-voicings_Cm7_shell_R-7-3",
+     "fade_in_s": 0.05,
+     "fade_out_s": 1.0,
+     "gain": 1.0,
+     "role": "musicmatter chord, faint"
+    },
+    {
+     "t": 45.6,
+     "source": "mm-C-02_ninths_Cm9_inv3",
+     "fade_in_s": 0.05,
+     "fade_out_s": 1.0,
+     "gain": 1.0,
+     "role": "musicmatter chord, faint"
+    }
+   ]
+  },
+  {
+   "id": "line",
+   "type": "notes",
+   "bus": "line",
+   "level_match_rms": null,
+   "first_half_db": -1.5,
+   "half_s": 60.0,
+   "fade_out_s": 2.5,
+   "triplet_fade_out_s": 0.6,
+   "triplet_gain": 0.7,
+   "events": [
+    {
+     "t": 5.093,
+     "midi": 72,
+     "dur_s": 7.0,
+     "kind": "line",
+     "timbres": [
+      {
+       "bank": "piano",
+       "gain": 0.9,
+       "fade_in_s": 0.05
+      }
+     ]
+    },
+    {
+     "t": 9.676,
+     "midi": 77,
+     "dur_s": 7.0,
+     "kind": "line",
+     "timbres": [
+      {
+       "bank": "piano",
+       "gain": 0.9,
+       "fade_in_s": 0.05
+      }
+     ]
+    },
+    {
+     "t": 15.107,
+     "midi": 79,
+     "dur_s": 7.0,
+     "kind": "line",
+     "timbres": [
+      {
+       "bank": "piano",
+       "gain": 0.9,
+       "fade_in_s": 0.05
+      }
+     ]
+    },
+    {
+     "t": 25.274,
+     "midi": 72,
+     "dur_s": 7.0,
+     "kind": "line",
+     "timbres": [
+      {
+       "bank": "violin",
+       "gain": 0.75,
+       "fade_in_s": 0.25
+      }
+     ]
+    },
+    {
+     "t": 29.706,
+     "midi": 77,
+     "dur_s": 7.0,
+     "kind": "line",
+     "timbres": [
+      {
+       "bank": "violin",
+       "gain": 1.125,
+       "fade_in_s": 0.25
+      }
+     ]
+    },
+    {
+     "t": 35.149,
+     "midi": 79,
+     "dur_s": 7.0,
+     "kind": "line",
+     "timbres": [
+      {
+       "bank": "violin",
+       "gain": 0.75,
+       "fade_in_s": 0.25
+      }
+     ]
+    },
+    {
+     "t": 44.776,
+     "midi": 72,
+     "dur_s": 7.0,
+     "kind": "line",
+     "timbres": [
+      {
+       "bank": "piano",
+       "gain": 0.9,
+       "fade_in_s": 0.05
+      },
+      {
+       "bank": "harp",
+       "gain": 0.5,
+       "fade_in_s": 0.05
+      }
+     ]
+    },
+    {
+     "t": 50.038,
+     "midi": 77,
+     "dur_s": 7.0,
+     "kind": "line",
+     "timbres": [
+      {
+       "bank": "piano",
+       "gain": 0.9,
+       "fade_in_s": 0.05
+      }
+     ]
+    },
+    {
+     "t": 54.982,
+     "midi": 79,
+     "dur_s": 7.0,
+     "kind": "line",
+     "timbres": [
+      {
+       "bank": "piano",
+       "gain": 0.9,
+       "fade_in_s": 0.05
+      },
+      {
+       "bank": "harp",
+       "gain": 0.5,
+       "fade_in_s": 0.05
+      }
+     ]
+    },
+    {
+     "t": 60.015,
+     "midi": 72,
+     "dur_s": 2.6,
+     "kind": "triplet",
+     "timbres": [
+      {
+       "bank": "guitar",
+       "gain": 0.8,
+       "fade_in_s": 0.03
+      }
+     ]
+    },
+    {
+     "t": 60.681,
+     "midi": 77,
+     "dur_s": 2.6,
+     "kind": "triplet",
+     "timbres": [
+      {
+       "bank": "guitar",
+       "gain": 0.8,
+       "fade_in_s": 0.03
+      }
+     ]
+    },
+    {
+     "t": 61.348,
+     "midi": 79,
+     "dur_s": 2.6,
+     "kind": "triplet",
+     "timbres": [
+      {
+       "bank": "guitar",
+       "gain": 0.8,
+       "fade_in_s": 0.03
+      }
+     ]
+    },
+    {
+     "t": 64.85,
+     "midi": 72,
+     "dur_s": 7.0,
+     "kind": "line",
+     "timbres": [
+      {
+       "bank": "violin",
+       "gain": 0.75,
+       "fade_in_s": 0.25
+      }
+     ]
+    },
+    {
+     "t": 70.249,
+     "midi": 77,
+     "dur_s": 7.0,
+     "kind": "line",
+     "timbres": [
+      {
+       "bank": "violin",
+       "gain": 1.125,
+       "fade_in_s": 0.25
+      }
+     ]
+    },
+    {
+     "t": 74.787,
+     "midi": 79,
+     "dur_s": 7.0,
+     "kind": "line",
+     "timbres": [
+      {
+       "bank": "violin",
+       "gain": 0.75,
+       "fade_in_s": 0.25
+      }
+     ]
+    },
+    {
+     "t": 79.801,
+     "midi": 72,
+     "dur_s": 2.6,
+     "kind": "triplet",
+     "timbres": [
+      {
+       "bank": "piano",
+       "gain": 0.9,
+       "fade_in_s": 0.03
+      }
+     ]
+    },
+    {
+     "t": 80.468,
+     "midi": 77,
+     "dur_s": 2.6,
+     "kind": "triplet",
+     "timbres": [
+      {
+       "bank": "piano",
+       "gain": 0.9,
+       "fade_in_s": 0.03
+      }
+     ]
+    },
+    {
+     "t": 81.135,
+     "midi": 79,
+     "dur_s": 2.6,
+     "kind": "triplet",
+     "timbres": [
+      {
+       "bank": "piano",
+       "gain": 0.9,
+       "fade_in_s": 0.03
+      }
+     ]
+    },
+    {
+     "t": 84.796,
+     "midi": 72,
+     "dur_s": 7.0,
+     "kind": "line",
+     "timbres": [
+      {
+       "bank": "piano",
+       "gain": 0.9,
+       "fade_in_s": 0.05
+      },
+      {
+       "bank": "violin",
+       "gain": 0.75,
+       "fade_in_s": 0.25
+      }
+     ]
+    },
+    {
+     "t": 90.323,
+     "midi": 77,
+     "dur_s": 7.0,
+     "kind": "line",
+     "timbres": [
+      {
+       "bank": "piano",
+       "gain": 0.9,
+       "fade_in_s": 0.05
+      },
+      {
+       "bank": "violin",
+       "gain": 1.125,
+       "fade_in_s": 0.25
+      }
+     ]
+    },
+    {
+     "t": 95.346,
+     "midi": 79,
+     "dur_s": 7.0,
+     "kind": "line",
+     "timbres": [
+      {
+       "bank": "piano",
+       "gain": 0.9,
+       "fade_in_s": 0.05
+      },
+      {
+       "bank": "violin",
+       "gain": 0.75,
+       "fade_in_s": 0.25
+      }
+     ]
+    },
+    {
+     "t": 100.069,
+     "midi": 72,
+     "dur_s": 2.6,
+     "kind": "triplet",
+     "timbres": [
+      {
+       "bank": "guitar",
+       "gain": 0.8,
+       "fade_in_s": 0.03
+      }
+     ]
+    },
+    {
+     "t": 100.736,
+     "midi": 77,
+     "dur_s": 2.6,
+     "kind": "triplet",
+     "timbres": [
+      {
+       "bank": "guitar",
+       "gain": 0.8,
+       "fade_in_s": 0.03
+      }
+     ]
+    },
+    {
+     "t": 101.403,
+     "midi": 79,
+     "dur_s": 2.6,
+     "kind": "triplet",
+     "timbres": [
+      {
+       "bank": "guitar",
+       "gain": 0.8,
+       "fade_in_s": 0.03
+      }
+     ]
+    },
+    {
+     "t": 105.106,
+     "midi": 72,
+     "dur_s": 7.0,
+     "kind": "line",
+     "timbres": [
+      {
+       "bank": "violin",
+       "gain": 0.75,
+       "fade_in_s": 0.25
+      },
+      {
+       "bank": "harp",
+       "gain": 0.5,
+       "fade_in_s": 0.05
+      }
+     ]
+    },
+    {
+     "t": 109.861,
+     "midi": 77,
+     "dur_s": 7.0,
+     "kind": "line",
+     "timbres": [
+      {
+       "bank": "violin",
+       "gain": 1.125,
+       "fade_in_s": 0.25
+      }
+     ]
+    },
+    {
+     "t": 114.69,
+     "midi": 79,
+     "dur_s": 9.0,
+     "kind": "line",
+     "timbres": [
+      {
+       "bank": "violin",
+       "gain": 0.75,
+       "fade_in_s": 0.25
+      },
+      {
+       "bank": "harp",
+       "gain": 0.5,
+       "fade_in_s": 0.05
+      }
+     ]
+    }
+   ],
+   "role": "line"
+  }
+ ],
+ "master": {
+  "buses": {
+   "pad": {
+    "brighten": {
+     "dark_hz": 1200,
+     "bright_hz": 3200,
+     "t": [
+      0,
+      40,
+      60,
+      105,
+      130
+     ],
+     "mix": [
+      0,
+      0,
+      1,
+      1,
+      0.3
+     ]
+    },
+    "lufs": -22.0,
+    "pan": -0.08,
+    "gain_db_curve": {
+     "t": [
+      0,
+      38,
+      62
+     ],
+     "db": [
+      -6.0,
+      -6.0,
+      0.0
+     ]
+    }
+   },
+   "keys": {
+    "brighten": {
+     "dark_hz": 1800,
+     "bright_hz": 4200,
+     "t": [
+      0,
+      40,
+      60,
+      105,
+      130
+     ],
+     "mix": [
+      0,
+      0,
+      1,
+      1,
+      0.3
+     ]
+    },
+    "lufs": -22.0,
+    "pan": 0.1,
+    "gain_db_curve": {
+     "t": [
+      0,
+      38,
+      62
+     ],
+     "db": [
+      -6.0,
+      -6.0,
+      0.0
+     ]
+    }
+   },
+   "mm": {
+    "brighten": {
+     "dark_hz": 1500,
+     "bright_hz": 3000,
+     "t": [
+      0,
+      40,
+      60,
+      105,
+      130
+     ],
+     "mix": [
+      0,
+      0,
+      1,
+      1,
+      0.3
+     ]
+    },
+    "lufs": -31.0,
+    "pan": -0.15
+   },
+   "drone": {
+    "filters": [
+     {
+      "type": "hp",
+      "hz": 50,
+      "order": 2
+     },
+     {
+      "type": "lp",
+      "hz": 280,
+      "order": 4
+     }
+    ],
+    "lufs": -28.0,
+    "pan": 0.0,
+    "gain_db_curve": {
+     "t": [
+      0,
+      38,
+      62
+     ],
+     "db": [
+      -6.0,
+      -6.0,
+      0.0
+     ]
+    }
+   },
+   "bed": {
+    "filters": [
+     {
+      "type": "hp",
+      "hz": 120,
+      "order": 2
+     },
+     {
+      "type": "lp",
+      "hz": 2600,
+      "order": 2
+     }
+    ],
+    "lufs": -29.0,
+    "pan": 0.0,
+    "gain_db_curve": {
+     "t": [
+      0,
+      40,
+      60,
+      100,
+      130
+     ],
+     "db": [
+      0,
+      0,
+      2.5,
+      0,
+      -3
+     ]
+    }
+   },
+   "bell": {
+    "filters": [
+     {
+      "type": "lp",
+      "hz": 750,
+      "order": 4
+     },
+     {
+      "type": "lp",
+      "hz": 750,
+      "order": 4
+     }
+    ],
+    "lufs": -31.0,
+    "pan": -0.2
+   },
+   "line": {
+    "filters": [
+     {
+      "type": "hp",
+      "hz": 180,
+      "order": 2
+     },
+     {
+      "type": "lp",
+      "hz": 5500,
+      "order": 2
+     }
+    ],
+    "delay": {
+     "time_s": 0.75,
+     "feedback": 0.3,
+     "taps": 5,
+     "tone_hz": 2200,
+     "mix": 0.5
+    },
+    "lufs": -22.0,
+    "pan": 0.15
+   }
+  },
+  "reverb": {
+   "engine": "dragonfly",
+   "send_lu": 5.3
+  },
+  "hp_hz": 30,
+  "loudness": {
+   "lufs": -17,
+   "tp": -1.5
+  },
+  "high_shelf": {
+   "hz": 9000,
+   "db": -4.4
+  }
+ },
+ "notes": []
+}
