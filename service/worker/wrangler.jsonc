@@ -12,6 +12,9 @@
     "NC_LLM_MODEL": "grok-4.3",
     "NC_SUPPLIERS_JSON": "https://netcomposer.art/suppliers.json"
   },
+  // RenderContainer is the sqlite Durable Object that runs the image.
+  // ContainerProxy is exported from src/index.ts. It is a WorkerEntrypoint from
+  // @cloudflare/containers, not a Durable Object, so it is not in migrations.
   "containers": [
     {
       "class_name": "RenderContainer",

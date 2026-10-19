@@ -68,6 +68,13 @@ RUN pip install --no-cache-dir . \
  && useradd --uid 10001 --create-home --shell /usr/sbin/nologin nc \
  && chown -R nc:nc /data
 
+COPY service/container-entrypoint.sh /usr/local/bin/nc-perform-entrypoint
+# Run as nc: the script must be able to write the CA bundle before Python starts.
+RUN chmod 755 /usr/local/bin/nc-perform-entrypoint \
+ && su -s /bin/sh nc -c '/usr/local/bin/nc-perform-entrypoint true'
+
 USER nc
 EXPOSE 8080
+# The script is a no-op when the Cloudflare CA is absent (self-host, Modal).
+ENTRYPOINT ["/usr/local/bin/nc-perform-entrypoint"]
 CMD ["python3", "-m", "nc_perform"]

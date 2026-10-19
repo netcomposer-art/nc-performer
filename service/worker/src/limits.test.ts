@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import {
   applyPerformHit,
   BURST_LIMIT,
+  publicInternalError,
   BURST_PERIOD_S,
   PER_10MIN,
   PER_DAY,
@@ -77,6 +78,16 @@ test("the next UTC day starts a new daily count inside an open 10-minute window"
   assert.equal(later.window.n, 1);
   assert.equal(later.dayHit.day, "2026-10-20");
   assert.equal(later.dayHit.n, 1);
+});
+
+test("internal failures stay a short sentence and keep the job id", () => {
+  const id = "h-abcdefghjkmn";
+  const shown = publicInternalError(id);
+  assert.match(shown, /Something went wrong while performing/);
+  assert.match(shown, new RegExp(id));
+  assert.equal(shown.includes("ContainerProxy"), false);
+  assert.equal(shown.includes("undefined"), false);
+  assert.equal(publicInternalError(null).includes("("), false);
 });
 
 function parseJsonc(text: string): Record<string, unknown> {

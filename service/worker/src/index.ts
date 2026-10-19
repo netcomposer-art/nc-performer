@@ -13,9 +13,14 @@
  * that base https://api.x.ai/v1 and the model grok-4.3. See service/nc_perform/config.py.
  */
 import { DurableObject } from "cloudflare:workers";
-import { Container, getContainer } from "@cloudflare/containers";
+import { Container, ContainerProxy, getContainer } from "@cloudflare/containers";
 import pageHtml from "../../web/index.html";
-import { applyPerformHit, BURST_MESSAGE, claimToken, newId, PER_10MIN, PER_DAY, rejectPlan, wordsTooLong } from "./policy";
+import { applyPerformHit, BURST_MESSAGE, claimToken, newId, PER_10MIN, PER_DAY, publicInternalError, rejectPlan, wordsTooLong } from "./policy";
+
+// @cloudflare/containers 0.3.7 looks up this exact export on ctx.exports when
+// allowedHosts is set. It is a WorkerEntrypoint, not a Durable Object, so it
+// is not listed in wrangler migrations.
+export { ContainerProxy };
 import { publicJwk, recordHashOf, signatureFor, signerFrom, verifyHash, type Signer } from "./sign";
 
 const ALLOWED_HOSTS = [
@@ -104,7 +109,11 @@ export class RenderContainer extends Container<Env> {
   requiredPorts = [8080];
   sleepAfter = "15m";
   enableInternet = false;
+  // HTTPS to allowedHosts is intercepted by ContainerProxy. The image entrypoint
+  // appends the runtime CA before Python starts. Other hosts stay blocked.
+  interceptHttps = true;
   allowedHosts = ALLOWED_HOSTS;
+  entrypoint = ["/usr/local/bin/nc-perform-entrypoint", "python3", "-m", "nc_perform"];
 }
 
 export class JobDO extends DurableObject<Env> {
@@ -281,8 +290,7 @@ export default {
     try {
       return await route(request, env);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return json({ error: message, code: "error" }, 500);
+      return json({ error: logInternal(null, err), code: "error" }, 500);
     }
   },
 
@@ -297,8 +305,8 @@ export default {
         await runContainer(env, id);
         msg.ack();
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        await jobs(env, id).patch({ state: "failed", stage: "failed", percent: 100, error: message, error_code: "container" });
+        const error = logInternal(id, err);
+        await jobs(env, id).patch({ state: "failed", stage: "failed", percent: 100, error, error_code: "container" });
         msg.retry();
       }
     }
@@ -433,9 +441,9 @@ async function perform(request: Request, env: Env, base: string): Promise<Respon
     await env.PERFORM_JOBS.send({ id });
   } catch (err) {
     await b.dequeue(id);
-    const message = err instanceof Error ? err.message : String(err);
-    await jobs(env, id).patch({ state: "failed", stage: "failed", percent: 100, error: message, error_code: "queue" });
-    throw err;
+    const error = logInternal(id, err);
+    await jobs(env, id).patch({ state: "failed", stage: "failed", percent: 100, error, error_code: "queue" });
+    return json({ error, id, code: "error" }, 500);
   }
   return json({
     id,
@@ -1100,6 +1108,12 @@ function publicBase(request: Request, env: Env): string {
   const set = (env.NC_PUBLIC_BASE_URL || "").replace(/\/$/, "");
   if (set) return set;
   return new URL(request.url).origin;
+}
+
+function logInternal(id: string | null, err: unknown): string {
+  const detail = err instanceof Error ? err.stack || err.message : String(err);
+  console.error(JSON.stringify({ event: "perform_failed", id, detail }));
+  return publicInternalError(id);
 }
 
 function clientIp(request: Request): string {

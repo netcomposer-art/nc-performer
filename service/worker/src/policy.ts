@@ -100,6 +100,12 @@ export function dayMessage(limit: number): string {
   return `Daily limit reached (${limit} Performs from this network). It resets tomorrow.`;
 }
 
+/** Shown for Worker faults. The real error is logged; the id is how to find it. */
+export function publicInternalError(id: string | null): string {
+  const sentence = "Something went wrong while performing. Please try again.";
+  return id ? `${sentence} (${id})` : sentence;
+}
+
 export type Counter = { start: number; n: number };
 export type DayCounter = { day: string; n: number };
 
