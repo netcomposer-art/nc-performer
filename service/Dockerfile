@@ -69,9 +69,11 @@ RUN pip install --no-cache-dir . \
  && chown -R nc:nc /data
 
 COPY service/container-entrypoint.sh /usr/local/bin/nc-perform-entrypoint
-# Run as nc: the script must be able to write the CA bundle before Python starts.
+# Run as nc: the script must be able to write the CA bundle, and TMPDIR, before Python starts.
+# /tmp in this base image is not writable by nc. 1777 covers tools that ignore TMPDIR.
 RUN chmod 755 /usr/local/bin/nc-perform-entrypoint \
- && su -s /bin/sh nc -c '/usr/local/bin/nc-perform-entrypoint true'
+ && chmod 1777 /tmp \
+ && su -s /bin/sh nc -c '/usr/local/bin/nc-perform-entrypoint sh -c "test -w \"\$TMPDIR\" && test -w \"\$NC_CACHE\" && test -s \"\$SSL_CERT_FILE\""'
 
 USER nc
 EXPOSE 8080

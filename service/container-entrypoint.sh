@@ -5,8 +5,19 @@
 set -eu
 sys_ca="${NC_SYSTEM_CA:-/etc/ssl/certs/ca-certificates.crt}"
 cf_ca="${NC_CLOUDFLARE_CA:-/etc/cloudflare/certs/cloudflare-containers-ca.crt}"
-# /home/nc is writable by the runtime user. /tmp is not, in this image.
-bundle="${NC_CA_BUNDLE:-/home/nc/nc-ca-bundle.crt}"
+# /home/nc is writable by the runtime user. /tmp is not, in this image, and the
+# platform may set TMPDIR=/tmp. tempfile and the kit cache both follow these.
+home="${HOME:-/home/nc}"
+if [ ! -d "$home" ]; then
+  mkdir -p "$home" 2>/dev/null || true
+fi
+if [ ! -d "$home" ] || [ ! -w "$home" ]; then
+  home=/home/nc
+fi
+mkdir -p "$home/tmp" "$home/.cache/nc_kit"
+export TMPDIR="$home/tmp"
+export NC_CACHE="$home/.cache/nc_kit"
+bundle="${NC_CA_BUNDLE:-$home/nc-ca-bundle.crt}"
 if [ -r "$sys_ca" ]; then
   cat "$sys_ca" > "$bundle"
 else

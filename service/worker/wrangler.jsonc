@@ -21,6 +21,12 @@
       "image": "../Dockerfile",
       "image_build_context": "../..",
       "max_instances": 3,
+      // standard-3 is 2 vCPU, 8 GiB RAM, 16 GB disk. basic (1 GiB) and standard-1
+      // (4 GiB) are too small for DragonflyHallReverb plus librosa, scipy, and
+      // pedalboard. Active use is about $0.00006/s (2 * $0.000020/vCPU-s + 8 *
+      // $0.0000025/GiB-s), about $0.22/hour while the instance is awake.
+      // sleepAfter in the container class is 15 minutes, so idle time after the
+      // last request is billed until the instance sleeps.
       "instance_type": "standard-3"
     }
   ],

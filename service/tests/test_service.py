@@ -31,6 +31,7 @@ from nc_perform.config import Settings, load
 from nc_perform.ids import ID_RE, new_id
 from nc_perform.limits import Reject, check_plan
 from nc_perform.planner import needs_llm
+from nc_perform.runner import egress_guard
 from nc_perform.sign import Signer, verify_signature
 from nc_perform.storage import S3Storage, sign_v4
 from nc_perform.api import build_app, serve
@@ -112,6 +113,44 @@ class ServiceTest(unittest.TestCase):
         with self.assertRaises(Reject) as cm:
             check_plan(plan, s, {"suppliers": []})
         self.assertIn("kind=url", str(cm.exception))
+
+    def test_chord_audio_host_is_allowed(self):
+        s = Settings()
+        self.assertTrue(s.host_allowed("audio.musicmatter.art"))
+        self.assertTrue(s.host_allowed("musicmatter.art"))
+        self.assertFalse(s.host_allowed("evil.example"))
+
+    def test_egress_guard_rechecks_redirects(self):
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path == "/hop":
+                    self.send_response(302)
+                    self.send_header("Location", "http://evil.example/no")
+                    self.end_headers()
+                    return
+                self.send_response(520)
+                self.end_headers()
+
+            def log_message(self, fmt, *args):
+                return
+
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        port = httpd.server_address[1]
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        settings = Settings(allowed_hosts=("127.0.0.1",))
+        try:
+            with egress_guard(settings):
+                with self.assertRaises(Reject) as blocked:
+                    urllib.request.urlopen(f"http://127.0.0.1:{port}/hop", timeout=5)
+                self.assertIn("evil.example", str(blocked.exception))
+                with self.assertRaises(urllib.error.HTTPError) as failed:
+                    urllib.request.urlopen(f"http://127.0.0.1:{port}/err", timeout=5)
+                self.assertEqual(failed.exception.code, 520)
+                self.assertIn("520", str(failed.exception))
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
 
     def test_config_xai_defaults(self):
         old = {k: os.environ.get(k) for k in ("XAI_API_KEY", "NC_LLM_BASE_URL", "NC_LLM_MODEL", "NC_LLM_API_KEY")}

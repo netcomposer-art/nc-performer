@@ -106,6 +106,36 @@ export function publicInternalError(id: string | null): string {
   return id ? `${sentence} (${id})` : sentence;
 }
 
+/**
+ * ContainerProxy matches hosts exactly, or with `*` globs. `musicmatter.art`
+ * does not match `audio.musicmatter.art`. Add the wildcard beside each exact name.
+ * A name that is already a glob is kept as written.
+ */
+export function proxyHosts(hosts: readonly string[]): string[] {
+  const out = new Set<string>();
+  for (const raw of hosts) {
+    const h = raw.trim().toLowerCase().replace(/\.$/, "");
+    if (!h || h.includes("://") || h.includes("/") || h.includes(":")) continue;
+    out.add(h);
+    if (!h.includes("*")) out.add(`*.${h}`);
+  }
+  return [...out];
+}
+
+/** True when the text is an internal fault. License and schema rejections stay visible. */
+export function isInternalFailure(message: string): boolean {
+  return /HTTP Error [45]\d\d\b/.test(message)
+    || /ContainerProxy|Origin is disallowed|Network connection lost|container did not finish|container rejected|container HTTP \d{3}/.test(message)
+    || /SSLCertVerificationError|CERTIFICATE_VERIFY_FAILED|Permission denied|\[Errno \d+\]/.test(message)
+    || message.includes("Traceback");
+}
+
+/** Swap an internal fault for the public sentence. Leave a rejection message as it is. */
+export function forPage(id: string | null, error: string | null): string | null {
+  if (!error) return null;
+  return isInternalFailure(error) ? publicInternalError(id) : error;
+}
+
 export type Counter = { start: number; n: number };
 export type DayCounter = { day: string; n: number };
 

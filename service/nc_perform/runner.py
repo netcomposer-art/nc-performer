@@ -18,6 +18,7 @@ import tempfile
 import threading
 import time
 import traceback
+import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
@@ -51,7 +52,12 @@ def _iso_plus(days: int) -> str:
 
 @contextlib.contextmanager
 def egress_guard(settings: Settings):
-    """Block the kit (and the LLM call) from any host outside the allowlist."""
+    """Block the kit (and the LLM call) from any host outside the allowlist.
+
+    urllib follows redirects inside urlopen, so each hop is checked again.
+    A 5xx (including the proxy's 520 Origin is disallowed) is logged with the
+    URL before it is stored on the job as ``HTTP Error …``.
+    """
     orig_http = fetch.http
     orig_urlopen = urllib.request.urlopen
 
@@ -60,14 +66,31 @@ def egress_guard(settings: Settings):
         if not settings.host_allowed(host):
             raise Reject(f"Egress blocked for host {host}. It is not on NC_ALLOWED_HOSTS.")
 
+    class _RecheckRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            check(newurl)
+            return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+    opener = urllib.request.build_opener(_RecheckRedirect)
+
     def http(url, *a, **kw):
         check(url)
         return orig_http(url, *a, **kw)
 
     def urlopen(req, *a, **kw):
         url = req.full_url if hasattr(req, "full_url") else req
-        check(url)
-        return orig_urlopen(req, *a, **kw)
+        check(url if isinstance(url, str) else str(url))
+        try:
+            return opener.open(req, *a, **kw)
+        except urllib.error.HTTPError as e:
+            if e.code >= 500:
+                print(json.dumps({
+                    "event": "egress_http",
+                    "url": e.geturl() or url,
+                    "status": e.code,
+                    "reason": str(e.reason),
+                }), flush=True)
+            raise
 
     fetch.http = http
     urllib.request.urlopen = urlopen

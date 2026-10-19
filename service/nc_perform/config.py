@@ -23,6 +23,8 @@ from dataclasses import dataclass, field
 
 DEFAULT_HOSTS = (
     "musicmatter.art",
+    # Live chord files are served here. The registry host is musicmatter.art.
+    "audio.musicmatter.art",
     "fullchords.musicmatter.art",
     "netcomposer.art",
     "freesound.org",

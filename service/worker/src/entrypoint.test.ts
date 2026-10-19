@@ -168,11 +168,14 @@ test("the exported ContainerProxy is what the container start path calls for egr
   const props = seen[0] as { allowedHosts?: string[]; enableInternet?: boolean };
   assert.equal(props.enableInternet, false);
   assert.ok(props.allowedHosts?.includes("musicmatter.art"));
+  assert.ok(props.allowedHosts?.includes("*.musicmatter.art"));
+  assert.ok(props.allowedHosts?.includes("audio.musicmatter.art"));
   assert.ok(props.allowedHosts?.includes("api.x.ai"));
 });
 
-test("the container entrypoint appends the runtime CA before exec", () => {
+test("the container entrypoint appends the runtime CA and keeps temp off /tmp", () => {
   const dir = mkdtempSync(join(tmpdir(), "nc-ca-"));
+  const home = join(dir, "home");
   const sys = join(dir, "system.crt");
   const extra = join(dir, "cloudflare.crt");
   const bundle = join(dir, "bundle.crt");
@@ -180,12 +183,17 @@ test("the container entrypoint appends the runtime CA before exec", () => {
   writeFileSync(extra, "CLOUDFLARE-CA\n");
   const script = join(repoRoot, "service/container-entrypoint.sh");
   chmodSync(script, 0o755);
-  const ran = spawnSync(script, ["sh", "-c", "printf %s \"$SSL_CERT_FILE\""], {
-    env: { ...process.env, NC_SYSTEM_CA: sys, NC_CLOUDFLARE_CA: extra, NC_CA_BUNDLE: bundle },
+  const env = { ...process.env, HOME: home, TMPDIR: "/tmp", NC_SYSTEM_CA: sys, NC_CLOUDFLARE_CA: extra, NC_CA_BUNDLE: bundle };
+  delete env.NC_CACHE;
+  const ran = spawnSync(script, ["sh", "-c", "printf '%s\\n' \"$SSL_CERT_FILE\" \"$TMPDIR\" \"$NC_CACHE\""], {
+    env,
     encoding: "utf8",
   });
   assert.equal(ran.status, 0, ran.stderr);
-  assert.equal(ran.stdout, bundle);
+  const [cert, tmp, cache] = ran.stdout.split("\n");
+  assert.equal(cert, bundle);
+  assert.equal(tmp, join(home, "tmp"));
+  assert.equal(cache, join(home, ".cache", "nc_kit"));
   const text = readFileSync(bundle, "utf8");
   assert.match(text, /SYSTEM-CA/);
   assert.match(text, /CLOUDFLARE-CA/);
