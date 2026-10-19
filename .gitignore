@@ -21,3 +21,6 @@ uses.json
 # local secrets
 .env
 *.key
+*.pem
+node_modules/
+.wrangler/

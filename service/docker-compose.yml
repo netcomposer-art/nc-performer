@@ -1,0 +1,24 @@
+# Self-hosted Perform. From this directory: docker compose up --build
+# Then open http://localhost:8080
+services:
+  perform:
+    build:
+      context: ..
+      dockerfile: service/Dockerfile
+    image: nc-perform
+    ports:
+      - "8080:8080"
+    environment:
+      NC_ROLE: all
+      NC_STORAGE: file:///data
+      NC_PUBLIC_BASE_URL: http://localhost:8080
+      NC_INSTANCE_NAME: nc-perform (self-hosted)
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - perform-data:/data
+    restart: unless-stopped
+
+volumes:
+  perform-data:

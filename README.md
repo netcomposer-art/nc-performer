@@ -188,6 +188,19 @@ suppliers.json). This channel is proposed and may change. For a Performance: pro
 rules, settings) as an issue, or publish your record in the same format and link it there:
 https://github.com/netcomposer-art/netcomposer.art/issues
 
+## Hosted Perform
+
+[`service/`](service/README.md) is an optional MIT wrapper around this kit: a page, a queue, and a
+record for each Performance. Run it yourself with Docker. It does not need an account on
+netcomposer.art, and it does not assume that domain's DNS.
+
+```
+nc submit out/glass-garden.record.json --audio-dir out/ --api http://localhost:8080
+```
+
+`nc submit` checks the record locally, then asks that instance to check it again. There is no default
+host. A kit record stored this way gets a `k-` id. The instance does not re-render it and does not sign it.
+
 ## For agents
 
 [`skill/SKILL.md`](skill/SKILL.md) (and a plain-text [`skill/SKILL.txt`](skill/SKILL.txt)) teaches any

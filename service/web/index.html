@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Perform · NetComposer</title>
+<style>
+  :root { color-scheme: light; }
+  body { font: 17px/1.45 Georgia, serif; margin: 0; background: #f6f3ec; color: #1c1915; }
+  main { max-width: 40rem; margin: 0 auto; padding: 1.4rem 1rem 4rem; }
+  h1 { font-weight: 500; letter-spacing: -0.02em; }
+  label { display: block; font: 13px sans-serif; margin: .9rem 0 .25rem; }
+  textarea, input, select { width: 100%; box-sizing: border-box; font: 16px/1.4 sans-serif; padding: .55rem .6rem; border: 1px solid #c9c1b4; border-radius: 8px; background: #fff; }
+  textarea { min-height: 7rem; }
+  button, .btn { background: #1c1915; color: #f6f3ec; border: 0; border-radius: 999px; padding: .55rem 1rem; font: 15px sans-serif; cursor: pointer; text-decoration: none; display: inline-block; }
+  button[disabled] { opacity: .45; }
+  .row { display: flex; flex-wrap: wrap; gap: .5rem; margin: .8rem 0; }
+  .muted { color: #5c564c; font: 14px/1.4 sans-serif; }
+  progress { width: 100%; height: .6rem; }
+  audio { width: 100%; margin: .6rem 0; }
+  .error { background: #f3ddd4; padding: .6rem .8rem; border-radius: 8px; }
+  footer { margin-top: 2rem; font: 13px sans-serif; color: #5c564c; }
+  a { color: #6b3a1f; }
+</style>
+</head>
+<body data-perform-api="">
+<main>
+  <h1>Perform</h1>
+  <p>Write a Composition, then press Perform. A minute or two later the Performance plays here. You can keep the FLAC and the record. Pitch is never shifted.</p>
+  <form id="form">
+    <label for="title">Title</label>
+    <input id="title" name="title" value="Glass garden">
+    <label for="composer">Your name <span class="muted">(leave blank for anonymous)</span></label>
+    <input id="composer" name="composer" autocomplete="name">
+    <label for="composition">Composition</label>
+    <textarea id="composition" name="composition">1 min. Ebsus2, Cm-add9, Ab6/9, Bb7sus4, Eb6.</textarea>
+    <label for="performance">Performance</label>
+    <textarea id="performance" name="performance">Clear and open, like light through glass. Gentle strikes, a little space between chords.</textarea>
+    <label for="visibility">Who can find it</label>
+    <select id="visibility" name="visibility">
+      <option value="unlisted" selected>Unlisted (link only, audio kept 90 days)</option>
+      <option value="public">Public (listed after a day, audio kept)</option>
+    </select>
+    <div id="turnstile" style="margin-top:.8rem"></div>
+    <p class="row"><button id="go" type="submit">Perform</button></p>
+  </form>
+  <section id="status" hidden>
+    <p id="stage" class="muted">Queued…</p>
+    <progress id="bar" max="100" value="0"></progress>
+    <p id="err" class="error" hidden></p>
+  </section>
+  <section id="done" hidden>
+    <h2 id="done-title"></h2>
+    <audio id="player" controls></audio>
+    <div class="row">
+      <a class="btn" id="flac" href="#">Download FLAC</a>
+      <a class="btn" id="mp3" href="#">Download MP3</a>
+      <a class="btn" id="record" href="#">Download record</a>
+      <a class="btn" id="plan" href="#">Download plan</a>
+      <button type="button" id="copy">Copy link</button>
+      <button type="button" id="keep">Keep audio</button>
+    </div>
+    <p id="credits"></p>
+    <p class="muted">Output is <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>. The sound is shaped by hacks: time-stretch, reverb, and a loudness limiter. Pitch is never shifted.</p>
+    <details><summary>Full record</summary><pre id="full"></pre></details>
+  </section>
+  <footer>Peter Semmelhack · NetComposer · code MIT · performances CC BY-SA 4.0</footer>
+</main>
+<script>
+const apiBase = document.body.dataset.performApi || "";
+const $ = (id) => document.getElementById(id);
+let claim = sessionStorage.getItem("nc-claim") || "";
+let jobId = "";
+
+async function config() {
+  const r = await fetch(apiBase + "/api/config");
+  const c = await r.json();
+  if (c.turnstile_required && c.turnstile_sitekey) {
+    const s = document.createElement("script");
+    s.src = "https://challenges.cloudflare.com/turnstile/v0/api.js";
+    s.async = true;
+    document.head.appendChild(s);
+    const box = $("turnstile");
+    box.className = "cf-turnstile";
+    box.dataset.sitekey = c.turnstile_sitekey;
+  }
+  if (!c.perform_enabled) {
+    $("go").disabled = true;
+    $("err").hidden = false;
+    $("err").textContent = "Perform is resting until tomorrow.";
+    $("status").hidden = false;
+  }
+}
+config();
+
+$("form").onsubmit = async (ev) => {
+  ev.preventDefault();
+  $("done").hidden = true;
+  $("err").hidden = true;
+  $("status").hidden = false;
+  $("go").disabled = true;
+  const token = document.querySelector("[name=cf-turnstile-response]");
+  const body = {
+    title: $("title").value,
+    composer: $("composer").value,
+    composition: $("composition").value,
+    performance: $("performance").value,
+    visibility: $("visibility").value,
+    turnstile_token: token ? token.value : undefined,
+    perform_again: !!jobId
+  };
+  try {
+    const r = await fetch(apiBase + "/api/perform", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || r.statusText);
+    jobId = j.id;
+    if (j.claim_token) {
+      claim = j.claim_token;
+      sessionStorage.setItem("nc-claim:" + jobId, claim);
+    }
+    poll();
+  } catch (e) {
+    $("err").hidden = false;
+    $("err").textContent = e.message;
+    $("go").disabled = false;
+  }
+};
+
+async function poll() {
+  const r = await fetch(apiBase + "/api/jobs/" + jobId);
+  const j = await r.json();
+  $("stage").textContent = j.stage_line || j.stage || j.state;
+  $("bar").value = j.percent || 0;
+  if (j.state === "done") { show(j); return; }
+  if (j.state === "failed" || j.state === "rejected") {
+    $("err").hidden = false;
+    $("err").textContent = j.error || j.state;
+    $("go").disabled = false;
+    return;
+  }
+  setTimeout(poll, 2000);
+}
+
+async function show(j) {
+  $("status").hidden = true;
+  $("done").hidden = false;
+  $("go").disabled = false;
+  $("done-title").textContent = $("title").value || "Performance";
+  const root = apiBase || "";
+  $("player").src = root + "/api/jobs/" + jobId + "/files/preview.mp3";
+  $("flac").href = root + "/api/jobs/" + jobId + "/files/performance.flac";
+  $("mp3").href = root + "/api/jobs/" + jobId + "/files/preview.mp3";
+  $("record").href = root + "/records/" + jobId + ".json";
+  $("plan").href = root + "/api/jobs/" + jobId + "/files/plan.json";
+  const rec = await (await fetch(root + "/records/" + jobId + ".json")).json();
+  $("credits").textContent = rec.attribution || "";
+  $("full").textContent = JSON.stringify(rec, null, 1);
+}
+
+$("copy").onclick = () => navigator.clipboard.writeText(location.origin + apiBase + "/records/" + jobId);
+$("keep").onclick = async () => {
+  const token = sessionStorage.getItem("nc-claim:" + jobId) || claim;
+  const r = await fetch(apiBase + "/api/jobs/" + jobId + "/keep", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({claim_token: token})});
+  const j = await r.json();
+  $("keep").textContent = j.keep ? "Audio kept" : (j.error || "Could not keep");
+};
+</script>
+</body>
+</html>

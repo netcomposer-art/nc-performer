@@ -5,6 +5,7 @@
   nc render         plan.json -> FLAC + MP3 + record (deterministic)
   nc perform        interpret + render in one go
   nc verify-record  check a performance record
+  nc submit         send a record to a Perform instance (any host)
 """
 import argparse, json, os, sys, datetime
 from . import __version__
@@ -82,6 +83,19 @@ def cmd_perform(a):
     cf = a.composition if a.composition and os.path.exists(a.composition) else None
     sys.exit(0 if _render(plan, pp, a.out, a.name or plan.get('id', 'performance'), cf, a.performer) else 1)
 
+def cmd_submit(a):
+    api = a.api or os.environ.get('NC_PERFORM_API')
+    if not api:
+        sys.exit('nc submit needs --api or NC_PERFORM_API (the Perform instance). There is no default host.')
+    from . import record as R
+    ok, lines = R.verify(a.record, audio_dir=a.audio_dir, check_files=not a.no_files)
+    print('\n'.join(lines))
+    if not ok:
+        sys.exit('FAILED locally; not submitted')
+    from .submit import submit
+    out = submit(a.record, a.audio_dir, api, a.plan)
+    print(json.dumps(out, indent=1))
+
 def cmd_verify(a):
     from . import record as R
     ok, lines = R.verify(a.record, audio_dir=a.audio_dir, check_files=not a.no_files, strict_loudness=a.strict_loudness)
@@ -104,6 +118,10 @@ def main(argv=None):
     f = s.add_parser('perform', help='interpret + render'); interp_args(f); f.add_argument('-o', '--out', default='out'); f.add_argument('--name'); f.add_argument('--performer'); f.set_defaults(f=cmd_perform)
     v = s.add_parser('verify-record', help='check a record'); v.add_argument('record'); v.add_argument('--audio-dir'); v.add_argument('--no-files', action='store_true', help='skip output file checks')
     v.add_argument('--strict-loudness', action='store_true', help='fail (not warn) outside -16..-18 LUFS / -1 dBTP'); v.set_defaults(f=cmd_verify)
+    u = s.add_parser('submit', help='send a verified record to a Perform instance')
+    u.add_argument('record'); u.add_argument('--audio-dir'); u.add_argument('--plan', help='plan.json (default: <audio-dir>/plan.json)')
+    u.add_argument('--api', help='Perform base URL (or set NC_PERFORM_API). No default host.')
+    u.add_argument('--no-files', action='store_true'); u.set_defaults(f=cmd_submit)
     a = p.parse_args(argv)
     if a.cmd == 'interpret' and not (a.plan or a.composition): p.error('give a composition.md, or --plan FILE')
     a.f(a)

@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nc-perform"
+version = "0.2.0"
+description = "Hosted and self-hosted NetComposer Perform. A thin wrapper around the nc-performer kit."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Peter Semmelhack" }]
+dependencies = ["cryptography>=42"]
+
+[project.scripts]
+nc-perform = "nc_perform.api:main"
+
+[tool.setuptools]
+packages = ["nc_perform"]

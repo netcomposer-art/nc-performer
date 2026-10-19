@@ -1,0 +1,55 @@
+{
+  "name": "nc-perform-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-04-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "observability": { "enabled": true },
+  "vars": {
+    "NC_INSTANCE_NAME": "netcomposer.art hosted Performer (nc-performer 0.2.0)",
+    "TURNSTILE_SITEKEY": "0x4AAAAAAFbvFabFcwn6LUki",
+    "PERFORM_ENABLED": "1",
+    "NC_LLM_MODEL": "grok-4.3",
+    "NC_SUPPLIERS_JSON": "https://netcomposer.art/suppliers.json"
+  },
+  "containers": [
+    {
+      "class_name": "RenderContainer",
+      "image": "../Dockerfile",
+      "image_build_context": "../..",
+      "max_instances": 3,
+      "instance_type": "standard-3"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      { "name": "JOBS", "class_name": "JobDO" },
+      { "name": "BUDGET", "class_name": "BudgetDO" },
+      { "name": "RENDER", "class_name": "RenderContainer" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["JobDO", "BudgetDO", "RenderContainer"] }
+  ],
+  "queues": {
+    "producers": [{ "binding": "PERFORM_JOBS", "queue": "perform-jobs" }],
+    "consumers": [
+      {
+        "queue": "perform-jobs",
+        "max_batch_size": 1,
+        "max_concurrency": 3,
+        "max_retries": 1
+      }
+    ]
+  },
+  "r2_buckets": [{ "binding": "PERFORMANCES", "bucket_name": "nc-performances" }],
+  "ratelimits": [
+    {
+      "name": "PERFORM_RATE",
+      "namespace_id": "1001",
+      "simple": { "limit": 3, "period": 600 }
+    }
+  ],
+  "triggers": { "crons": ["15 4 * * *"] },
+  "rules": [{ "type": "Text", "globs": ["**/*.html"], "fallthrough": true }]
+}
