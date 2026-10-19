@@ -43,11 +43,13 @@
     ]
   },
   "r2_buckets": [{ "binding": "PERFORMANCES", "bucket_name": "nc-performances" }],
+  // Burst guard only. Wrangler accepts period 10 or 60 (seconds), not a 10-minute window.
+  // 3 Performs / 10 minutes and 10 / day are counted in BudgetDO.
   "ratelimits": [
     {
       "name": "PERFORM_RATE",
       "namespace_id": "1001",
-      "simple": { "limit": 3, "period": 600 }
+      "simple": { "limit": 3, "period": 10 }
     }
   ],
   "triggers": { "crons": ["15 4 * * *"] },

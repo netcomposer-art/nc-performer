@@ -61,7 +61,7 @@ Unlisted is the default. Unlisted audio is kept 90 days unless someone presses K
 | `POST /admin/hide` | Body `{id}`. Removes it from the feed. |
 | `POST /admin/takedown` | Body `{id, reason}`. `410` and a tombstone. |
 
-`503` means resting or the queue is full. `429` means this network has hit 3 Performs in 10 minutes or 10 in a day. `403` means the Turnstile check failed. Turnstile is off when `TURNSTILE_SECRET_KEY` is unset.
+`503` means resting or the queue is full. `429` means this network sent a short burst (more than 3 Performs in 10 seconds), or has hit 3 Performs in 10 minutes or 10 in a day. The 10-minute and daily windows are counted in the service's own state. `403` means the Turnstile check failed. Turnstile is off when `TURNSTILE_SECRET_KEY` is unset.
 
 ## Self-host with Docker
 

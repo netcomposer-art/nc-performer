@@ -15,7 +15,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { Container, getContainer } from "@cloudflare/containers";
 import pageHtml from "../../web/index.html";
-import { claimToken, newId, rejectPlan, wordsTooLong } from "./policy";
+import { applyPerformHit, BURST_MESSAGE, claimToken, newId, PER_10MIN, PER_DAY, rejectPlan, wordsTooLong } from "./policy";
 import { publicJwk, recordHashOf, signatureFor, signerFrom, verifyHash, type Signer } from "./sign";
 
 const ALLOWED_HOSTS = [
@@ -173,36 +173,35 @@ export class BudgetDO extends DurableObject<Env> {
     );
   }
 
-  /** 10-minute window used only when the rate-limit binding is unavailable. */
-  async hitWindow(ip: string, limit = 3): Promise<string | null> {
+  /**
+   * 3 Performs per 10 minutes and 10 per day for one network.
+   * Checked together so a daily rejection does not consume the 10-minute window.
+   */
+  async hit(ip: string, per10min = PER_10MIN, perDay = PER_DAY): Promise<string | null> {
     const now = Date.now() / 1000;
-    const rows = this.ctx.storage.sql.exec("SELECT start, n FROM win_hits WHERE ip = ?", ip).toArray();
-    let start = now;
-    let n = 0;
-    if (rows.length && now - Number(rows[0].start) < 600) {
-      start = Number(rows[0].start);
-      n = Number(rows[0].n);
-    }
-    if (n >= limit) return `Too many Performs from this network (${limit} every 10 minutes). Try again in a few minutes.`;
+    const today = day();
+    const winRows = this.ctx.storage.sql.exec("SELECT start, n FROM win_hits WHERE ip = ?", ip).toArray();
+    const dayRows = this.ctx.storage.sql.exec("SELECT day, n FROM day_hits WHERE ip = ? AND day = ?", ip, today).toArray();
+    const decision = applyPerformHit(
+      now,
+      today,
+      winRows.length ? { start: Number(winRows[0].start), n: Number(winRows[0].n) } : null,
+      dayRows.length ? { day: String(dayRows[0].day), n: Number(dayRows[0].n) } : null,
+      per10min,
+      perDay,
+    );
+    if (decision.error) return decision.error;
     this.ctx.storage.sql.exec(
       "INSERT INTO win_hits (ip, start, n) VALUES (?, ?, ?) ON CONFLICT(ip) DO UPDATE SET start = excluded.start, n = excluded.n",
       ip,
-      start,
-      n + 1,
+      decision.window.start,
+      decision.window.n,
     );
-    return null;
-  }
-
-  async hitDay(ip: string, limit = 10): Promise<string | null> {
-    const d = day();
-    const rows = this.ctx.storage.sql.exec("SELECT n FROM day_hits WHERE ip = ? AND day = ?", ip, d).toArray();
-    const n = rows.length ? Number(rows[0].n) : 0;
-    if (n >= limit) return `Daily limit reached (${limit} Performs from this network). It resets tomorrow.`;
     this.ctx.storage.sql.exec(
       "INSERT INTO day_hits (ip, day, n) VALUES (?, ?, ?) ON CONFLICT(ip, day) DO UPDATE SET n = excluded.n",
       ip,
-      d,
-      n + 1,
+      decision.dayHit.day,
+      decision.dayHit.n,
     );
     return null;
   }
@@ -963,15 +962,16 @@ async function turnstile(env: Env, token: unknown, ip: string): Promise<boolean>
 }
 
 async function rateLimit(env: Env, ipHash: string): Promise<string | null> {
-  let windowErr: string | null = null;
+  // Binding period is 10 seconds (Wrangler allows only 10 or 60). It stops a
+  // burst before those requests touch the counters below. The 10-minute and
+  // daily caps always run in BudgetDO, including when the binding is absent.
   try {
     const result = await env.PERFORM_RATE.limit({ key: ipHash });
-    if (!result.success) windowErr = "Too many Performs from this network (3 every 10 minutes). Try again in a few minutes.";
+    if (!result.success) return BURST_MESSAGE;
   } catch {
-    windowErr = await budget(env).hitWindow(ipHash, 3);
+    // Local tests have no binding. The Durable Object still enforces both windows.
   }
-  if (windowErr) return windowErr;
-  return budget(env).hitDay(ipHash, 10);
+  return budget(env).hit(ipHash);
 }
 
 function compositionFrom(body: Record<string, unknown>): Record<string, unknown> {

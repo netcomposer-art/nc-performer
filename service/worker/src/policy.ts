@@ -74,3 +74,62 @@ export function wordsTooLong(text: string, max = DEFAULT_LIMITS.maxWords): strin
   if (text.length > max) return `Those words are ${text.length} characters. The limit is ${max}.`;
   return null;
 }
+
+/**
+ * Product limits: 3 Performs per 10 minutes and 10 per day, per network.
+ * Cloudflare's rate-limit binding cannot express either window. Wrangler only
+ * accepts a period of 10 or 60 seconds, so the binding is a short burst guard
+ * and these counters live in BudgetDO (and in the Python store for self-host).
+ */
+export const PER_10MIN = 3;
+export const WINDOW_S = 600;
+export const PER_DAY = 10;
+
+/** Edge burst guard. `period` in wrangler.jsonc must stay 10 or 60. */
+export const BURST_LIMIT = 3;
+export const BURST_PERIOD_S = 10;
+
+export const BURST_MESSAGE =
+  "Too many Performs from this network in a few seconds. Wait a moment and try again.";
+
+export function windowMessage(limit: number): string {
+  return `Too many Performs from this network (${limit} every 10 minutes). Try again in a few minutes.`;
+}
+
+export function dayMessage(limit: number): string {
+  return `Daily limit reached (${limit} Performs from this network). It resets tomorrow.`;
+}
+
+export type Counter = { start: number; n: number };
+export type DayCounter = { day: string; n: number };
+
+/**
+ * One Perform against the 10-minute and daily windows.
+ * Both caps are checked before either count increases, so a rejection
+ * does not consume the other window. `now` is unix seconds.
+ * The 10-minute window is fixed from its first hit and lasts WINDOW_S.
+ */
+export function applyPerformHit(
+  now: number,
+  day: string,
+  window: Counter | null,
+  dayHit: DayCounter | null,
+  per10min = PER_10MIN,
+  perDay = PER_DAY,
+): { error: string | null; window: Counter; dayHit: DayCounter } {
+  const open = window != null && now - window.start < WINDOW_S;
+  const start = open ? window.start : now;
+  const winN = open ? window.n : 0;
+  const dayN = dayHit != null && dayHit.day === day ? dayHit.n : 0;
+  if (winN >= per10min) {
+    return { error: windowMessage(per10min), window: { start, n: winN }, dayHit: { day, n: dayN } };
+  }
+  if (dayN >= perDay) {
+    return { error: dayMessage(perDay), window: { start, n: winN }, dayHit: { day, n: dayN } };
+  }
+  return {
+    error: null,
+    window: { start, n: winN + 1 },
+    dayHit: { day, n: dayN + 1 },
+  };
+}
