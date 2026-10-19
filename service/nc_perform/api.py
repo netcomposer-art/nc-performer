@@ -1,0 +1,813 @@
+"""HTTP API for the nc-perform image.
+
+Public routes are what a browser and ``nc submit`` call. ``/internal/*`` is
+what the Cloudflare queue consumer calls on the container. Both use the same
+runner.
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+import threading
+import urllib.parse
+import urllib.request
+from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+from ncperf import record as R
+
+from . import pages
+from .config import Settings, load
+from .ids import ID_RE, claim_token, new_id, sha256_text
+from .jobs import Store
+from .limits import Reject, check_words
+from .runner import Runner, claim_matches, store_kit_submission
+from .sign import Signer
+from .storage import Storage, open_storage
+
+def web_index() -> str:
+    """The Perform page. Dev layout keeps it in service/web. The image copies
+    it next to the installed package so ``python -m nc_perform`` still finds it.
+    """
+    override = os.environ.get("NC_WEB_INDEX")
+    if override and os.path.exists(override):
+        return override
+    here = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.path.join(os.path.dirname(here), "web", "index.html"),
+        os.path.join(here, "web", "index.html"),
+        "/opt/nc-performer/service/web/index.html",
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return candidates[0]
+
+# Cloudflare's published Turnstile test secrets. They are not real credentials.
+# https://developers.cloudflare.com/turnstile/troubleshooting/testing/
+_TURNSTILE_TEST = {
+    "1x0000000000000000000000000000000AA": True,   # always passes
+    "2x0000000000000000000000000000000AA": False,  # always fails
+    "3x0000000000000000000000000000000AA": False,  # interactive; no widget here, so fail
+}
+_DUMMY_TOKEN = "XXXX.DUMMY.TOKEN.XXXX"
+
+FILE_TYPES = {
+    "performance.flac": "audio/flac",
+    "preview.mp3": "audio/mpeg",
+    "record.json": "application/json",
+    "plan.json": "application/json",
+    "uses.json": "application/json",
+    "composition.md": "text/markdown; charset=utf-8",
+    "meta.json": "application/json",
+    "status.json": "application/json",
+}
+
+
+def verify_turnstile(settings: Settings, token: str | None, ip: str) -> bool:
+    """Return True if the bot gate is off, or if Turnstile accepts the token.
+
+    The three documented test secrets are decided locally so a self-check does
+    not need to reach Cloudflare. Any other secret is posted to siteverify
+    (or to TURNSTILE_VERIFY_URL).
+    """
+    secret = settings.turnstile_secret
+    if not secret:
+        return True
+    if secret in _TURNSTILE_TEST:
+        return _TURNSTILE_TEST[secret] and token == _DUMMY_TOKEN
+    if not token:
+        return False
+    data = urllib.parse.urlencode({
+        "secret": secret,
+        "response": token,
+        "remoteip": ip,
+    }).encode()
+    req = urllib.request.Request(settings.turnstile_verify_url, data=data, method="POST")
+    with urllib.request.urlopen(req, timeout=15) as r:
+        body = json.loads(r.read().decode())
+    return bool(body.get("success"))
+
+
+def _json_error(handler, status: int, message: str, code: str = "error"):
+    handler._send(status, {"error": message, "code": code}, "application/json")
+
+
+class App:
+    def __init__(self, settings: Settings, store: Store, storage: Storage, signer: Signer | None, runner: Runner):
+        self.settings = settings
+        self.store = store
+        self.storage = storage
+        self.signer = signer
+        self.runner = runner
+
+    def perform_enabled(self) -> bool:
+        flag = self.store.flag("perform_enabled")
+        if flag is None:
+            return self.settings.perform_enabled
+        return flag == "1"
+
+
+def make_handler(app: App):
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, fmt, *args):
+            return
+
+        def _cors(self):
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+
+        def _send(self, status, body, content_type="application/json", extra=None):
+            if isinstance(body, str):
+                raw = body.encode()
+            elif isinstance(body, (dict, list)):
+                raw = json.dumps(body, ensure_ascii=False).encode()
+            else:
+                raw = body
+            self.send_response(status)
+            self._cors()
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(raw)))
+            if not (extra or {}).get("Cache-Control"):
+                self.send_header("Cache-Control", "no-store")
+            for k, v in (extra or {}).items():
+                self.send_header(k, v)
+            self.end_headers()
+            self.wfile.write(raw)
+
+        def _read(self, limit: int) -> bytes:
+            n = int(self.headers.get("Content-Length") or 0)
+            if n > limit:
+                raise Reject(f"Request is too large ({n} bytes).")
+            return self.rfile.read(n) if n else b""
+
+        def _ip(self) -> str:
+            fwd = self.headers.get("CF-Connecting-IP") or self.headers.get("X-Forwarded-For") or ""
+            return fwd.split(",")[0].strip() or (self.client_address[0] if self.client_address else "")
+
+        def _ip_hash(self) -> str:
+            import hashlib
+            return hashlib.sha256(f"{app.settings.ip_hash_salt}:{self._ip()}".encode()).hexdigest()
+
+        def do_OPTIONS(self):
+            self._send(204, b"")
+
+        def do_GET(self):
+            try:
+                self._get()
+            except Reject as e:
+                _json_error(self, 400, str(e), e.code)
+            except Exception as e:
+                _json_error(self, 500, str(e))
+
+        def do_POST(self):
+            try:
+                self._post()
+            except Reject as e:
+                _json_error(self, 400, str(e), e.code)
+            except Exception as e:
+                _json_error(self, 500, str(e))
+
+        def _get(self):
+            path = urllib.parse.urlparse(self.path).path
+            if path in ("/", "/create", "/create/"):
+                page = open(web_index(), encoding="utf-8").read()
+                # data-perform-api stays empty when the page is served by this process.
+                self._send(200, page, "text/html; charset=utf-8")
+                return
+            if path == "/health":
+                from . import __version__
+                self._send(200, {"ok": True, "service": "nc-perform", "version": __version__})
+                return
+            if path == "/api/config":
+                s = app.settings
+                self._send(200, {
+                    "turnstile_sitekey": s.turnstile_sitekey or None,
+                    "turnstile_required": s.turnstile_required,
+                    "max_words": s.max_words,
+                    "max_length_s": s.max_length_s,
+                    "instance": s.instance_name,
+                    "perform_enabled": app.perform_enabled(),
+                    "llm": bool(s.llm_configured),
+                    "llm_model": s.llm_model or None,
+                })
+                return
+            if path == "/.well-known/nc-record-keys.json":
+                keys = []
+                if app.signer:
+                    keys.append(app.signer.jwk())
+                self._send(200, {"keys": keys})
+                return
+            if path == "/api/feed":
+                self._send(200, {"performances": _feed(app)})
+                return
+            if path == "/admin":
+                if not _admin_ok(app, self):
+                    return self._send(401, {"error": "admin token required"})
+                self._send(200, pages.admin_page(app.store.summary_today(), app.perform_enabled()), "text/html; charset=utf-8")
+                return
+            m = re.fullmatch(r"/api/jobs/([hk]-[0-9a-z]+)", path)
+            if m:
+                return self._job(m.group(1))
+            m = re.fullmatch(r"/api/jobs/([hk]-[0-9a-z]+)/files/([a-z0-9._-]+)", path)
+            if m:
+                return self._file(m.group(1), m.group(2))
+            m = re.fullmatch(r"/api/jobs/([hk]-[0-9a-z]+)/events", path)
+            if m:
+                return self._events(m.group(1))
+            m = re.fullmatch(r"/api/verify/([hk]-[0-9a-z]+)", path)
+            if m:
+                return self._verify(m.group(1))
+            m = re.fullmatch(r"/records/(sha256/[0-9a-f]{64})", path)
+            if m:
+                return self._alias(m.group(1).split("/", 1)[1])
+            m = re.fullmatch(r"/records/([hk]-[0-9a-z]+)(\.json)?", path)
+            if m:
+                return self._record(m.group(1), bool(m.group(2)))
+            if path.startswith("/internal/"):
+                return self._internal_get(path)
+            self._send(404, {"error": "not found"})
+
+        def _post(self):
+            path = urllib.parse.urlparse(self.path).path
+            if path == "/api/perform":
+                return self._perform()
+            m = re.fullmatch(r"/api/jobs/([hk]-[0-9a-z]+)/(keep|visibility)", path)
+            if m:
+                return self._meta_post(m.group(1), m.group(2))
+            if path == "/api/submit":
+                return self._submit()
+            if path == "/admin/enabled":
+                return self._admin_enabled()
+            if path == "/admin/hide" or path == "/admin/takedown":
+                return self._admin_moderation(path.rsplit("/", 1)[1])
+            if path == "/internal/jobs":
+                return self._internal_post()
+            self._send(404, {"error": "not found"})
+
+        def _perform(self):
+            s = app.settings
+            if not app.perform_enabled() or app.store.spend_today() >= s.daily_hard_usd:
+                return self._send(503, {"error": "Perform is resting until tomorrow.", "code": "resting"})
+            body = json.loads(self._read(s.max_plan_bytes + 8000).decode() or "{}")
+            if s.turnstile_required and not verify_turnstile(s, body.get("turnstile_token"), self._ip()):
+                return self._send(403, {"error": "The bot check failed. Reload the page and try again.", "code": "turnstile"})
+            comp = _composition(body)
+            check_words(comp, s)
+            plan = body.get("plan")
+            if plan is not None and not isinstance(plan, dict):
+                raise Reject("plan must be a JSON object.")
+            limit = app.store.hit(self._ip_hash(), s.rate_per_10min, s.rate_per_ip_day)
+            if limit:
+                return self._send(429, {"error": limit, "code": "rate"})
+            if app.store.queued_count() >= s.max_queue:
+                return self._send(503, {"error": "Busy, try in a minute.", "code": "busy"})
+            visibility = body.get("visibility") or "unlisted"
+            if visibility not in ("unlisted", "public"):
+                raise Reject("visibility must be unlisted or public.")
+            # Same words and the same seed reuse a cached plan. "Perform again"
+            # changes the seed on purpose so the next plan is new.
+            if body.get("perform_again"):
+                import secrets as _secrets
+                seed = _secrets.randbelow(2**31 - 1) or 1
+            elif body.get("seed") is None:
+                seed = 1
+            else:
+                seed = body.get("seed")
+            token = claim_token()
+            job_id = new_id("h")
+            req = {
+                "composition": comp,
+                "plan": plan,
+                "visibility": visibility,
+                "seed": int(seed),
+                "keep": bool(body.get("keep")),
+                "claim_hash": sha256_text(token),
+            }
+            app.store.create({
+                "id": job_id,
+                "state": "queued",
+                "stage": "queued",
+                "request": req,
+                "ip_hash": self._ip_hash(),
+                "claim_hash": req["claim_hash"],
+            })
+            pos = app.store.position(job_id)
+            self._send(202, {
+                "id": job_id,
+                "status": "queued",
+                "position": pos,
+                "poll": f"/api/jobs/{job_id}",
+                "claim_token": token,
+                "record_url": f"{s.public_base_url}/records/{job_id}.json",
+                "note": "Save claim_token. It is not shown again. A later account can use it to adopt this Performance. v1 has no accounts.",
+            })
+
+        def _job(self, job_id):
+            if not ID_RE.match(job_id):
+                return self._send(404, {"error": "not found"})
+            job = app.store.get(job_id)
+            if not job:
+                meta = _read_json(app.storage, f"performances/{job_id}/meta.json")
+                status = _read_json(app.storage, f"performances/{job_id}/status.json") or _read_json(app.storage, f"jobs/{job_id}/status.json")
+                if not meta and not status:
+                    return self._send(404, {"error": "not found"})
+                state = (status or {}).get("state") or "done"
+                return self._send(200, _public_job(job_id, state, state, 100 if state == "done" else 0, None, app))
+            pos = app.store.position(job_id) if job["state"] == "queued" else None
+            self._send(200, _public_job(job_id, job["state"], job["stage"], job["percent"], job.get("error"), app, pos))
+
+        def _file(self, job_id, name):
+            if not re.fullmatch(r"[A-Za-z0-9._-]{1,80}", name):
+                return self._send(404, {"error": "not found"})
+            if name not in FILE_TYPES and not _named_in_record(app, job_id, name):
+                return self._send(404, {"error": "not found"})
+            if _expired_audio(app, job_id, name):
+                return self._send(410, {"error": "This audio has expired. The record is still here.", "code": "expired"})
+            if _tombstone(app, job_id) and _is_audio(name):
+                return self._send(410, {"error": "This Performance was taken down.", "code": "gone"})
+            data = app.storage.get(f"performances/{job_id}/{name}")
+            if data is None:
+                return self._send(404, {"error": "not found"})
+            extra = {}
+            meta = _read_json(app.storage, f"performances/{job_id}/meta.json") or {}
+            if meta.get("visibility") != "public":
+                extra["X-Robots-Tag"] = "noindex"
+            self._send(200, data, _ctype(name), extra)
+
+        def _record(self, job_id, as_json: bool):
+            meta = _read_json(app.storage, f"performances/{job_id}/meta.json") or {}
+            tomb = meta.get("tombstone")
+            raw = app.storage.get(f"performances/{job_id}/record.json")
+            if tomb:
+                body = {"tombstone": True, "id": job_id, "record_hash": tomb.get("record_hash"), "reason": tomb.get("reason")}
+                return self._send(410, body if as_json else pages_tomb(job_id, tomb), "application/json" if as_json else "text/html; charset=utf-8")
+            if raw is None:
+                return self._send(404, {"error": "not found"})
+            extra = {"Cache-Control": "public, max-age=31536000, immutable"}
+            if meta.get("visibility") != "public":
+                extra["X-Robots-Tag"] = "noindex"
+            if as_json:
+                return self._send(200, raw, "application/json", extra)
+            rec = json.loads(raw)
+            self._send(200, pages.record_page(rec, meta, job_id), "text/html; charset=utf-8", extra)
+
+        def _alias(self, digest: str):
+            job_id = app.storage.get(f"aliases/sha256/{digest}")
+            if not job_id:
+                return self._send(404, {"error": "not found"})
+            ident = job_id.decode().strip()
+            self.send_response(302)
+            self._cors()
+            self.send_header("Location", f"/records/{ident}")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def _verify(self, job_id):
+            raw = app.storage.get(f"performances/{job_id}/record.json")
+            if raw is None:
+                return self._send(404, {"error": "not found"})
+            import tempfile
+            import shutil
+            d = tempfile.mkdtemp(prefix="nc-verify-")
+            try:
+                path = os.path.join(d, "record.json")
+                open(path, "wb").write(raw)
+                rec = json.loads(raw)
+                names = [os.path.basename(o.get("file") or "") for o in (rec.get("performance") or {}).get("outputs") or []]
+                names += ["performance.flac", "preview.mp3"]
+                for name in names:
+                    if not name:
+                        continue
+                    blob = app.storage.get(f"performances/{job_id}/{name}")
+                    if blob and not os.path.exists(os.path.join(d, name)):
+                        open(os.path.join(d, name), "wb").write(blob)
+                ok, lines = R.verify(path, audio_dir=d)
+            finally:
+                shutil.rmtree(d, ignore_errors=True)
+            signed = False
+            rec = json.loads(raw)
+            if app.signer:
+                from .sign import verify_signature
+                signed = verify_signature(rec, app.signer.public)
+            self._send(200, {"ok": ok, "lines": lines, "signature_ok": signed, "id": job_id})
+
+        def _events(self, job_id):
+            self.send_response(200)
+            self._cors()
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            last = None
+            for _ in range(settings_timeout_loops(app)):
+                job = app.store.get(job_id)
+                if not job:
+                    break
+                snap = (job["state"], job["stage"], job["percent"])
+                if snap != last:
+                    payload = json.dumps(_public_job(job_id, job["state"], job["stage"], job["percent"], job.get("error"), app))
+                    self.wfile.write(f"data: {payload}\n\n".encode())
+                    self.wfile.flush()
+                    last = snap
+                if job["state"] in ("done", "failed", "rejected"):
+                    break
+                app.runner._stop.wait(1.0)
+            self.close_connection = True
+
+        def _meta_post(self, job_id, action):
+            body = json.loads(self._read(8000).decode() or "{}")
+            meta = _read_json(app.storage, f"performances/{job_id}/meta.json")
+            if not meta:
+                return self._send(404, {"error": "not found"})
+            if not claim_matches(meta.get("claim_token_sha256"), body.get("claim_token")):
+                return self._send(403, {"error": "claim_token does not match this Performance."})
+            if action == "keep":
+                meta["keep"] = True
+                meta["retention"] = "forever"
+                meta["audio_expires_at"] = None
+            else:
+                vis = body.get("visibility")
+                if vis not in ("unlisted", "public"):
+                    raise Reject("visibility must be unlisted or public.")
+                meta["visibility"] = vis
+                if vis == "public":
+                    from datetime import timedelta
+                    meta["public_after"] = (datetime.now(timezone.utc) + timedelta(hours=app.settings.public_delay_hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+                    meta["audio_expires_at"] = None
+                    meta["keep"] = True
+                    meta["retention"] = "forever"
+                else:
+                    meta["public_after"] = None
+            app.storage.put(f"performances/{job_id}/meta.json", json.dumps(meta, indent=1).encode(), "application/json")
+            self._send(200, {"id": job_id, "visibility": meta["visibility"], "keep": meta["keep"], "audio_expires_at": meta["audio_expires_at"]})
+
+        def _submit(self):
+            s = app.settings
+            raw = self._read(s.max_submit_bytes)
+            ctype = self.headers.get("Content-Type") or ""
+            parts = _parse_multipart(raw, ctype)
+            rec_bytes = parts.get("record")
+            if not rec_bytes:
+                raise Reject("Attach the record as the form field 'record'.")
+            try:
+                rec = json.loads(rec_bytes)
+            except json.JSONDecodeError as e:
+                raise Reject(f"record is not JSON: {e}") from e
+            import tempfile
+            import shutil
+            d = tempfile.mkdtemp(prefix="nc-submit-")
+            try:
+                open(os.path.join(d, "record.json"), "wb").write(rec_bytes)
+                outputs = (rec.get("performance") or {}).get("outputs") or []
+                by_name = {k: v for k, v in parts.items() if k not in ("record",)}
+                for o in outputs:
+                    name = os.path.basename(o.get("file") or "")
+                    blob = by_name.get(name) or by_name.get(name.lower())
+                    if blob is None and "flac" in (o.get("format") or "").lower():
+                        blob = by_name.get("flac")
+                    if blob is None and "mp3" in (o.get("format") or "").lower():
+                        blob = by_name.get("mp3")
+                    if blob is None:
+                        raise Reject(f"Missing audio for {name}. Send it as a form field named {name}.")
+                    open(os.path.join(d, name), "wb").write(blob)
+                if parts.get("plan"):
+                    open(os.path.join(d, "plan.json"), "wb").write(parts["plan"])
+                ok, lines = R.verify(os.path.join(d, "record.json"), audio_dir=d)
+                if not ok:
+                    raise Reject("This record did not verify:\n" + "\n".join(lines), "verify")
+                sig = rec.get("signature") or {}
+                if sig.get("status") == "SIGNED" and sig.get("signed_by") == s.instance_name:
+                    raise Reject("A kit submission cannot carry this instance's signature. Submit the unsigned record.")
+                files = {"record.json": rec_bytes}
+                if parts.get("plan"):
+                    files["plan.json"] = parts["plan"]
+                for o in outputs:
+                    name = os.path.basename(o.get("file") or "")
+                    blob = open(os.path.join(d, name), "rb").read()
+                    files[name] = blob
+                    fmt = (o.get("format") or name).lower()
+                    if "flac" in fmt:
+                        files["performance.flac"] = blob
+                    elif "mp3" in fmt:
+                        files["preview.mp3"] = blob
+            finally:
+                shutil.rmtree(d, ignore_errors=True)
+            token = claim_token()
+            job_id = new_id("k")
+            store_kit_submission(s, app.storage, job_id, files, sha256_text(token))
+            self._send(201, {
+                "id": job_id,
+                "status": "verified",
+                "note": "Kit render, verified by hash; not re-rendered. Not signed by this instance.",
+                "claim_token": token,
+                "record_url": f"{s.public_base_url}/records/{job_id}.json",
+                "page_url": f"{s.public_base_url}/records/{job_id}",
+            })
+
+        def _admin_enabled(self):
+            if not _admin_ok(app, self):
+                return
+            body = json.loads(self._read(2000).decode() or "{}")
+            app.store.set_flag("perform_enabled", "1" if body.get("enabled", True) else "0")
+            self._send(200, {"perform_enabled": app.perform_enabled()})
+
+        def _admin_moderation(self, action):
+            if not _admin_ok(app, self):
+                return
+            body = json.loads(self._read(4000).decode() or "{}")
+            job_id = body.get("id") or ""
+            if not ID_RE.match(job_id):
+                raise Reject("id must be an h- or k- record id.")
+            meta = _read_json(app.storage, f"performances/{job_id}/meta.json")
+            if not meta:
+                return self._send(404, {"error": "not found"})
+            if action == "hide":
+                meta["hidden"] = True
+                meta["visibility"] = "unlisted"
+                meta["public_after"] = None
+                app.storage.put(f"performances/{job_id}/meta.json", json.dumps(meta, indent=1).encode(), "application/json")
+                return self._send(200, {"id": job_id, "hidden": True})
+            raw = app.storage.get(f"performances/{job_id}/record.json")
+            rec = json.loads(raw) if raw else {}
+            rh = (rec.get("record_hash") or {}).get("value")
+            if raw:
+                try:
+                    app.storage.put(f"sealed/{job_id}/record.json", raw, "application/json", overwrite=False)
+                except FileExistsError:
+                    pass
+            reason = body.get("reason") or "taken down"
+            tomb = {"record_hash": rh, "reason": reason, "at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+            meta["tombstone"] = tomb
+            app.storage.put(f"performances/{job_id}/meta.json", json.dumps(meta, indent=1).encode(), "application/json")
+            app.storage.put(f"performances/{job_id}/record.json", json.dumps({
+                "tombstone": True, "id": job_id, "record_hash": rh, "reason": reason,
+            }).encode(), "application/json")
+            for name in ("performance.flac", "preview.mp3"):
+                app.storage.delete(f"performances/{job_id}/{name}")
+            self._send(200, {"id": job_id, "tombstone": tomb})
+
+        def _internal_post(self):
+            if not _internal_ok(app, self):
+                return self._send(401, {"error": "internal token required"})
+            body = json.loads(self._read(app.settings.max_plan_bytes + 20000).decode() or "{}")
+            # The Worker already created the id and the claim hash.
+            job_id = body.get("id") or new_id("h")
+            if not ID_RE.match(job_id):
+                raise Reject("bad id")
+            if not app.store.get(job_id):
+                app.store.create({
+                    "id": job_id,
+                    "state": "queued",
+                    "request": body.get("request") or body,
+                    "ip_hash": body.get("ip_hash"),
+                    "claim_hash": (body.get("request") or body).get("claim_hash"),
+                })
+            threading.Thread(target=lambda: _run_claimed(app, job_id), daemon=True).start()
+            self._send(202, {"id": job_id, "state": "queued"})
+
+        def _internal_get(self, path):
+            if not _internal_ok(app, self):
+                return self._send(401, {"error": "internal token required"})
+            m = re.fullmatch(r"/internal/jobs/([hk]-[0-9a-z]+)", path)
+            if m:
+                job = app.store.get(m.group(1))
+                if not job:
+                    return self._send(404, {"error": "not found"})
+                return self._send(200, {
+                    "id": job["id"], "state": job["state"], "stage": job["stage"],
+                    "percent": job["percent"], "error": job.get("error"),
+                    "cost_usd": job.get("cost_usd") or 0,
+                })
+            m = re.fullmatch(r"/internal/jobs/([hk]-[0-9a-z]+)/files/([a-z0-9._-]+)", path)
+            if m:
+                return self._file(m.group(1), m.group(2))
+            self._send(404, {"error": "not found"})
+
+    return Handler
+
+
+def _run_claimed(app: App, job_id: str):
+    """claim_next might grab a different job. Run this id if it is still queued."""
+    job = app.store.get(job_id)
+    if job and job["state"] == "queued":
+        app.store.update(job_id, state="planning", stage="planning", percent=5)
+        app.runner.run_job(job_id)
+
+
+def settings_timeout_loops(app: App) -> int:
+    return max(1, app.settings.job_timeout_s)
+
+
+def _admin_ok(app: App, handler) -> bool:
+    token = app.settings.admin_token
+    if not token:
+        handler._send(404, {"error": "admin is off until NC_ADMIN_TOKEN is set"})
+        return False
+    got = handler.headers.get("Authorization") or ""
+    import hmac
+    if not hmac.compare_digest(got, f"Bearer {token}"):
+        handler._send(401, {"error": "admin token required"})
+        return False
+    return True
+
+
+def _internal_ok(app: App, handler) -> bool:
+    token = app.settings.internal_token
+    if not token:
+        return True
+    got = handler.headers.get("Authorization") or ""
+    import hmac
+    return hmac.compare_digest(got, f"Bearer {token}")
+
+
+def _composition(body: dict) -> dict:
+    from ncperf import interpret as I
+    if body.get("words"):
+        comp = I.read_composition(body["words"])
+    else:
+        comp = {"title": body.get("title") or "Untitled", "composition": body.get("composition") or "",
+                "performance": body.get("performance") or "", "composer": None, "file": None}
+    if body.get("title"):
+        comp["title"] = body["title"]
+    if body.get("composition"):
+        comp["composition"] = body["composition"]
+    if body.get("performance") is not None and "performance" in body:
+        comp["performance"] = body["performance"]
+    # Never invent a person's name. Blank stays anonymous.
+    typed = body["composer"] if "composer" in body else comp.get("composer")
+    comp["composer"] = (typed or "").strip() or "anonymous"
+    return comp
+
+
+def _public_job(job_id, state, stage, percent, error, app: App, position=None) -> dict:
+    lines = {
+        "queued": "Queued" + (f" (position {position})" if position else ""),
+        "planning": "Planning the Performance…",
+        "fetching": "Fetching sounds, licenses checked…",
+        "measuring": "Measuring pitch…",
+        "rendering": "Rendering layers, time-stretch (pitch unchanged)…",
+        "reverb": "Reverb hack…",
+        "mastering": "Mastering to -17 LUFS…",
+        "verifying": "Checking the record…",
+        "storing": "Storing the Performance…",
+        "done": "Done",
+        "failed": "Failed",
+        "rejected": "Rejected",
+    }
+    out = {
+        "id": job_id,
+        "state": state,
+        "stage": stage,
+        "stage_line": lines.get(stage, stage),
+        "percent": percent or 0,
+        "position": position,
+        "error": error,
+    }
+    if state == "done":
+        base = app.settings.public_base_url
+        out["files"] = {
+            "flac": f"{base}/api/jobs/{job_id}/files/performance.flac",
+            "mp3": f"{base}/api/jobs/{job_id}/files/preview.mp3",
+            "record": f"{base}/records/{job_id}.json",
+            "plan": f"{base}/api/jobs/{job_id}/files/plan.json",
+            "page": f"{base}/records/{job_id}",
+        }
+    return out
+
+
+def _read_json(storage: Storage, key: str):
+    raw = storage.get(key)
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+
+
+def _tombstone(app: App, job_id: str) -> bool:
+    meta = _read_json(app.storage, f"performances/{job_id}/meta.json") or {}
+    return bool(meta.get("tombstone"))
+
+
+def _is_audio(name: str) -> bool:
+    low = name.lower()
+    return low.endswith(".flac") or low.endswith(".mp3") or low.endswith(".wav")
+
+
+def _ctype(name: str) -> str:
+    if name in FILE_TYPES:
+        return FILE_TYPES[name]
+    low = name.lower()
+    if low.endswith(".flac"):
+        return "audio/flac"
+    if low.endswith(".mp3"):
+        return "audio/mpeg"
+    if low.endswith(".json"):
+        return "application/json"
+    return "application/octet-stream"
+
+
+def _named_in_record(app: App, job_id: str, name: str) -> bool:
+    rec = _read_json(app.storage, f"performances/{job_id}/record.json") or {}
+    for o in (rec.get("performance") or {}).get("outputs") or []:
+        if os.path.basename(o.get("file") or "") == name:
+            return True
+    return False
+
+
+def _expired_audio(app: App, job_id: str, name: str) -> bool:
+    if name not in ("performance.flac", "preview.mp3") and not _is_audio(name):
+        return False
+    meta = _read_json(app.storage, f"performances/{job_id}/meta.json") or {}
+    exp = meta.get("audio_expires_at")
+    if not exp:
+        return False
+    return exp < datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _feed(app: App) -> list[dict]:
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    out = []
+    for key in app.storage.list("performances/"):
+        if not key.endswith("/meta.json"):
+            continue
+        meta = _read_json(app.storage, key)
+        if not meta:
+            continue
+        if meta.get("visibility") != "public" or meta.get("hidden") or meta.get("tombstone"):
+            continue
+        after = meta.get("public_after") or ""
+        if after and after > now:
+            continue
+        out.append({
+            "id": meta.get("id"),
+            "url": f"{app.settings.public_base_url}/records/{meta.get('id')}",
+            "record": f"{app.settings.public_base_url}/records/{meta.get('id')}.json",
+            "created_at": meta.get("created_at"),
+        })
+    return out
+
+
+def pages_tomb(job_id: str, tomb: dict) -> str:
+    import html as _html
+    reason = _html.escape(tomb.get("reason") or "taken down")
+    rh = _html.escape(tomb.get("record_hash") or "")
+    return f"<!DOCTYPE html><html><head><meta name='robots' content='noindex'><title>Gone</title></head><body><h1>410 Gone</h1><p>{reason}</p><p>record_hash {rh}</p></body></html>"
+
+
+def _parse_multipart(body: bytes, content_type: str) -> dict[str, bytes]:
+    m = re.search(r"boundary=([^;]+)", content_type)
+    if not m:
+        raise Reject("Submit the record as multipart/form-data.")
+    boundary = m.group(1).strip().strip('"').encode()
+    parts = {}
+    for chunk in body.split(b"--" + boundary):
+        if b"Content-Disposition" not in chunk:
+            continue
+        head, sep, data = chunk.partition(b"\r\n\r\n")
+        if not sep:
+            head, sep, data = chunk.partition(b"\n\n")
+        data = data.rstrip(b"\r\n")
+        if data.endswith(b"--"):
+            data = data[:-2].rstrip(b"\r\n")
+        name_m = re.search(br'name="([^"]+)"', head)
+        if not name_m:
+            continue
+        parts[name_m.group(1).decode()] = data
+        file_m = re.search(br'filename="([^"]+)"', head)
+        if file_m:
+            parts[os.path.basename(file_m.group(1).decode())] = data
+    return parts
+
+
+def build_app(settings: Settings | None = None) -> App:
+    settings = settings or load()
+    os.makedirs(settings.data_dir, exist_ok=True)
+    store = Store(os.path.join(settings.data_dir, "jobs.sqlite"))
+    storage = open_storage(settings)
+    signer = Signer.from_text(settings.signing_key) if settings.signing_key.strip() else None
+    runner = Runner(settings, store, storage, signer)
+    return App(settings, store, storage, signer, runner)
+
+
+def serve(app: App) -> ThreadingHTTPServer:
+    host, _, port = app.settings.bind.rpartition(":")
+    httpd = ThreadingHTTPServer((host or "0.0.0.0", int(port or 8080)), make_handler(app))
+    if app.settings.queue_autostart and app.settings.role != "container":
+        n = max(1, app.settings.max_concurrency)
+        for _ in range(n):
+            threading.Thread(target=app.runner.pump_forever, daemon=True).start()
+    return httpd
+
+
+def main():
+    app = build_app()
+    httpd = serve(app)
+    host, port = httpd.server_address[:2]
+    print(f"nc-perform listening on http://{host}:{port}  storage={app.settings.storage}", flush=True)
+    httpd.serve_forever()

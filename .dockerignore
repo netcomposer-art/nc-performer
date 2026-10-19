@@ -1,0 +1,22 @@
+# Docker build context is the repository root. Wrangler runs docker build
+# with that context, and Docker applies this file. Keep the kit, service
+# code, and the Perform page. Leave the Worker toolchain out: it is not
+# copied into the image and it is large.
+.git
+.github
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+node_modules
+.wrangler
+.venv
+venv
+out
+.cache
+*.wav
+*.flac
+*.mp3
+*.ogg
+.env
+*.pem
+*.key

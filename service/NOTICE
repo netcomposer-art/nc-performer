@@ -1,0 +1,23 @@
+GPL software installed beside this MIT service
+=============================================
+
+The nc-performer kit and the nc-perform service are MIT, Copyright (c) 2026
+Peter Semmelhack. See the LICENSE file at the root of the repository.
+
+The container image also installs two separate programs so the default reverb
+hack can run. They are not part of the MIT code. The kit calls them as
+external tools. If they are missing, the reverb hack falls back to the
+synthetic hall and the record says so.
+
+1. Dragonfly Reverb (Dragonfly Hall), GPL-3.0
+   https://github.com/michaelwillis/dragonfly-reverb
+   Installed from the Debian package dragonfly-reverb in the image.
+
+2. pedalboard, GPL-3.0
+   https://github.com/spotify/pedalboard
+   Installed from PyPI as pedalboard==0.9.26
+
+Source for those programs is the upstream repositories above, at the versions
+named here. If you received a binary image of nc-perform and want that
+source, ask the person who gave you the image. They can point you at those
+repositories and at the Debian package version used to build the image.
