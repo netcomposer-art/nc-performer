@@ -20,13 +20,35 @@ jobs:
       - name: Install Worker dependencies
         working-directory: service/worker
         run: npm ci
+      - name: Require Cloudflare credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          missing=0
+          require() {
+            name="$1"
+            val="${2:-}"
+            trimmed=$(printf '%s' "$val" | tr -d '[:space:]')
+            if [ -z "$trimmed" ]; then
+              echo "::error title=Missing ${name}::${name} is empty. Add it under Settings → Secrets and variables → Actions. Deploy stops here and does not continue."
+              missing=1
+            fi
+          }
+          require CLOUDFLARE_API_TOKEN "${CLOUDFLARE_API_TOKEN}"
+          require CLOUDFLARE_ACCOUNT_ID "${CLOUDFLARE_ACCOUNT_ID}"
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+          echo "CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are set."
       - name: Deploy the Worker
         working-directory: service/worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx wrangler deploy
-      - name: Set Worker secrets when the GitHub secrets exist
+      - name: Set optional Worker secrets
         working-directory: service/worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -34,18 +56,21 @@ jobs:
           XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
           TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
           NC_SIGNING_KEY: ${{ secrets.NC_SIGNING_KEY }}
+          NC_ADMIN_TOKEN: ${{ secrets.NC_ADMIN_TOKEN }}
         run: |
           set -euo pipefail
           put() {
             name="$1"
             val="${2:-}"
-            if [ -n "$val" ]; then
-              printf '%s' "$val" | npx wrangler secret put "$name"
-              echo "Set Worker secret $name."
-            else
-              echo "Skipping $name (that GitHub secret is empty)."
+            trimmed=$(printf '%s' "$val" | tr -d '[:space:]')
+            if [ -z "$trimmed" ]; then
+              echo "Skipping ${name}: GitHub secret ${name} is empty."
+              return 0
             fi
+            printf '%s' "$val" | npx wrangler secret put "$name"
+            echo "Set Worker secret ${name}."
           }
-          put XAI_API_KEY "$XAI_API_KEY"
-          put TURNSTILE_SECRET_KEY "$TURNSTILE_SECRET_KEY"
-          put NC_SIGNING_KEY "$NC_SIGNING_KEY"
+          put XAI_API_KEY "${XAI_API_KEY}"
+          put TURNSTILE_SECRET_KEY "${TURNSTILE_SECRET_KEY}"
+          put NC_SIGNING_KEY "${NC_SIGNING_KEY}"
+          put NC_ADMIN_TOKEN "${NC_ADMIN_TOKEN}"

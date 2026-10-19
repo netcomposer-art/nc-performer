@@ -93,7 +93,7 @@ cp .env.example .env
 - `XAI_API_KEY` turns on model planning for words that ask for a line, triplets, or sections. Leave it empty to stay on the stub.
 - `NC_SIGNING_KEY` signs hosted records. Make a key with the command in the owner checklist below. You can also put one line `base64:` plus the raw 32-byte seed.
 - `TURNSTILE_SITEKEY` and `TURNSTILE_SECRET_KEY` turn on the bot check. Leave both empty and the check stays off.
-- `NC_ADMIN_TOKEN` turns on `/admin`.
+- `NC_ADMIN_TOKEN` turns on `/admin`. One line is enough: `openssl rand -hex 32`. Leave it empty and `/admin` stays off.
 
 Stop the server with Ctrl-C, or `docker compose down` from the `service` directory. `docker compose down -v` also deletes the audio volume.
 
@@ -160,16 +160,17 @@ Do these steps once, in order.
    The Worker secret is the PEM text, including the BEGIN and END lines. The public key is derived from it and is published at `/.well-known/nc-record-keys.json` after deploy. You do not upload the public key separately.
 5. In this GitHub repository, open Settings → Secrets and variables → Actions. Add these repository secrets if they are not already there:
 
-   | Secret | Status |
+   | Secret | What to do |
    |---|---|
-   | `CLOUDFLARE_API_TOKEN` | Already created. Needs permission to deploy Workers, Containers, Queues, and R2. |
-   | `CLOUDFLARE_ACCOUNT_ID` | Already created. |
-   | `TURNSTILE_SECRET_KEY` | Add this. It is the secret half of the widget whose site key is `0x4AAAAAAFbvFabFcwn6LUki`. |
-   | `XAI_API_KEY` | Add this. The key from step 3. |
-   | `NC_SIGNING_KEY` | Add this. The PEM from step 4. |
+   | `CLOUDFLARE_API_TOKEN` | Already created. Needs permission to deploy Workers, Containers, Queues, and R2. The workflow stops with an error if this is missing. |
+   | `CLOUDFLARE_ACCOUNT_ID` | Already created. The workflow stops with an error if this is missing. |
+   | `TURNSTILE_SECRET_KEY` | Add this. It is the secret half of the widget whose site key is `0x4AAAAAAFbvFabFcwn6LUki`. If you leave it empty, the workflow skips it and the bot check stays off. |
+   | `XAI_API_KEY` | Add this. The key from step 3. If you leave it empty, the workflow skips it and planning stays on the stub. |
+   | `NC_SIGNING_KEY` | Add this. The PEM from step 4. If you leave it empty, the workflow skips it and hosted records stay unsigned. |
+   | `NC_ADMIN_TOKEN` | Add this. Generate it with `openssl rand -hex 32` and paste that one line. It is the Bearer token for `/admin`. If you leave it empty, the workflow skips it and `/admin` stays off. |
 
    Never paste those values into a chat, an issue, or a commit.
-6. Deploy by hand: Actions → **Deploy Perform** → **Run workflow**. The workflow checks out the repo, runs `wrangler deploy` from `service/worker`, then sets the three Worker secrets when the matching GitHub secrets are non-empty. It has no push trigger.
+6. Deploy by hand: Actions → **Deploy Perform** → **Run workflow**. The workflow checks out the repo, refuses to continue when `CLOUDFLARE_API_TOKEN` or `CLOUDFLARE_ACCOUNT_ID` is missing, runs `wrangler deploy` from `service/worker`, then sets `XAI_API_KEY`, `TURNSTILE_SECRET_KEY`, `NC_SIGNING_KEY`, and `NC_ADMIN_TOKEN` only when that GitHub secret has a value. It has no push trigger.
 7. When the run finishes, the log prints a `*.workers.dev` URL. That is the site. Open it and run one short Composition.
 8. Leave the DNS for netcomposer.art alone. The Worker does not require that domain. A custom hostname can be attached later if the DNS moves to Cloudflare.
 
