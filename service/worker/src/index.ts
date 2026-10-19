@@ -15,7 +15,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { Container, ContainerProxy, getContainer } from "@cloudflare/containers";
 import pageHtml from "../../web/index.html";
-import { applyPerformHit, BURST_MESSAGE, claimToken, newId, PER_10MIN, PER_DAY, publicInternalError, rejectPlan, wordsTooLong } from "./policy";
+import { applyPerformHit, BURST_MESSAGE, claimToken, forPage, isInternalFailure, newId, PER_10MIN, PER_DAY, proxyHosts, publicInternalError, rejectPlan, wordsTooLong } from "./policy";
 
 // @cloudflare/containers 0.3.7 looks up this exact export on ctx.exports when
 // allowedHosts is set. It is a WorkerEntrypoint, not a Durable Object, so it
@@ -25,6 +25,8 @@ import { publicJwk, recordHashOf, signatureFor, signerFrom, verifyHash, type Sig
 
 const ALLOWED_HOSTS = [
   "musicmatter.art",
+  // Chord audio. ContainerProxy does not suffix-match, so the apex is not enough.
+  "audio.musicmatter.art",
   "fullchords.musicmatter.art",
   "netcomposer.art",
   "freesound.org",
@@ -65,6 +67,8 @@ const TURNSTILE_TEST: Record<string, boolean> = {
 };
 const DUMMY_TOKEN = "XXXX.DUMMY.TOKEN.XXXX";
 const ID_RE = /^[hk]-[0-9abcdefghjkmnpqrstvwxyz]{12}$/;
+/** Importing Dragonfly and the Python audio stack on a cold instance can take a few minutes. */
+const PORT_READY_MS = 300_000;
 
 export interface Env {
   JOBS: DurableObjectNamespace<JobDO>;
@@ -111,8 +115,10 @@ export class RenderContainer extends Container<Env> {
   enableInternet = false;
   // HTTPS to allowedHosts is intercepted by ContainerProxy. The image entrypoint
   // appends the runtime CA before Python starts. Other hosts stay blocked.
+  // proxyHosts adds `*.name` because the proxy matches exactly. Python still
+  // suffix-matches the names in NC_ALLOWED_HOSTS, which stay free of globs.
   interceptHttps = true;
-  allowedHosts = ALLOWED_HOSTS;
+  allowedHosts = proxyHosts(ALLOWED_HOSTS);
   entrypoint = ["/usr/local/bin/nc-perform-entrypoint", "python3", "-m", "nc_perform"];
 }
 
@@ -468,12 +474,12 @@ async function runContainer(env: Env, id: string): Promise<void> {
   const envVars = containerEnv(env, base);
   await container.startAndWaitForPorts({
     startOptions: { envVars, enableInternet: false },
-    cancellationOptions: { portReadyTimeoutMS: 180_000, instanceGetTimeoutMS: 180_000 },
+    cancellationOptions: { portReadyTimeoutMS: PORT_READY_MS, instanceGetTimeoutMS: PORT_READY_MS },
   });
-  await container.setAllowedHosts(allowedHosts(env));
+  await container.setAllowedHosts(proxyHosts(allowedHosts(env)));
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (env.NC_INTERNAL_TOKEN) headers.authorization = `Bearer ${env.NC_INTERNAL_TOKEN}`;
-  const started = await container.fetch("http://container/internal/jobs", {
+  const started = await containerFetch(container, id, "http://container/internal/jobs", {
     method: "POST",
     headers,
     body: JSON.stringify({ id, request: JSON.parse(job.request_json), ip_hash: job.ip_hash }),
@@ -482,34 +488,45 @@ async function runContainer(env: Env, id: string): Promise<void> {
     throw new Error(`container rejected the job (${started.status})`);
   }
   let last: { state?: string; stage?: string; percent?: number; error?: string | null; cost_usd?: number } = {};
+  let loggedFault = false;
+  const pageError = (error: string | null | undefined): string | null => {
+    const text = error || null;
+    if (!text || !isInternalFailure(text)) return text;
+    if (!loggedFault) {
+      console.error(JSON.stringify({ event: "perform_failed", id, detail: text }));
+      loggedFault = true;
+    }
+    return publicInternalError(id);
+  };
   for (let i = 0; i < 300; i++) {
     await sleep(2000);
-    const res = await container.fetch(`http://container/internal/jobs/${id}`, { headers });
+    const res = await containerFetch(container, id, `http://container/internal/jobs/${id}`, { headers });
     if (!res.ok) continue;
     last = await res.json();
     await stub.patch({
       state: last.state || job.state,
       stage: last.stage || job.stage,
       percent: Number(last.percent || 0),
-      error: last.error || null,
+      error: pageError(last.error),
     });
     if (last.state === "done" || last.state === "failed" || last.state === "rejected") break;
   }
   if (last.state === "done") {
     await sleep(400);
-    const again = await container.fetch(`http://container/internal/jobs/${id}`, { headers });
+    const again = await containerFetch(container, id, `http://container/internal/jobs/${id}`, { headers });
     if (again.ok) last = await again.json();
     await copyOutputs(env, container, id, headers);
   } else if (last.state !== "failed" && last.state !== "rejected") {
     throw new Error("container did not finish within 10 minutes");
   }
   const cost = Number(last.cost_usd || 0);
+  const shown = pageError(last.error);
   await budget(env).addSpend(cost);
   const updated = await stub.patch({
     state: last.state || "failed",
     stage: last.stage || last.state || "failed",
     percent: 100,
-    error: last.error || null,
+    error: shown,
     cost_usd: cost,
   });
   if (updated) {
@@ -525,7 +542,7 @@ async function runContainer(env: Env, id: string): Promise<void> {
   if (last.state === "failed" || last.state === "rejected") {
     await env.PERFORMANCES.put(
       `jobs/${id}/status.json`,
-      JSON.stringify({ id, state: last.state, error: last.error || null, at: isoNow() }),
+      JSON.stringify({ id, state: last.state, error: shown, at: isoNow() }),
       { httpMetadata: { contentType: "application/json" } },
     );
   }
@@ -547,6 +564,8 @@ function containerEnv(env: Env, base: string): Record<string, string> {
   if (env.NC_LLM_API_KEY) out.NC_LLM_API_KEY = env.NC_LLM_API_KEY;
   if (env.NC_SIGNING_KEY) out.NC_SIGNING_KEY = env.NC_SIGNING_KEY;
   if (env.NC_INTERNAL_TOKEN) out.NC_INTERNAL_TOKEN = env.NC_INTERNAL_TOKEN;
+  // Exact names only. Python suffix-matches these. Globs belong to ContainerProxy.
+  out.NC_ALLOWED_HOSTS = allowedHosts(env).join(",");
   return out;
 }
 
@@ -563,11 +582,29 @@ function allowedHosts(env: Env): string[] {
   return [...hosts];
 }
 
+async function containerFetch(container: DurableObjectStub<RenderContainer>, id: string, url: string, init?: RequestInit): Promise<Response> {
+  let res: Response;
+  try {
+    res = await container.fetch(url, init);
+  } catch (err) {
+    const detail = err instanceof Error ? err.stack || err.message : String(err);
+    console.error(JSON.stringify({ event: "container_http", id, url, detail }));
+    throw err;
+  }
+  if (res.status >= 500) {
+    const body = (await res.text()).slice(0, 500);
+    console.error(JSON.stringify({ event: "container_http", id, url, status: res.status, body }));
+    throw new Error(`container HTTP ${res.status} for ${url}`);
+  }
+  return res;
+}
+
 async function copyOutputs(env: Env, container: DurableObjectStub<RenderContainer>, id: string, headers: Record<string, string>): Promise<void> {
   const signer = id.startsWith("h-") ? await getSigner(env) : null;
   let recordBytes: Uint8Array<ArrayBuffer> | null = null;
   for (const name of FILES) {
-    const res = await container.fetch(`http://container/internal/jobs/${id}/files/${name}`, { headers });
+    const res = await containerFetch(container, id, `http://container/internal/jobs/${id}/files/${name}`, { headers });
+    // A missing file is normal (uses.json is optional). A 5xx already threw above.
     if (!res.ok) continue;
     let bytes = new Uint8Array(await res.arrayBuffer());
     if (name === "record.json") {
@@ -627,8 +664,9 @@ async function jobStatus(env: Env, id: string, base: string): Promise<Response> 
     const meta = await readJsonKey(env, `performances/${id}/meta.json`);
     const status = (await readJsonKey(env, `performances/${id}/status.json`)) || (await readJsonKey(env, `jobs/${id}/status.json`));
     if (!meta && !status) return json({ error: "not found" }, 404);
-    const state = String((status as { state?: string } | null)?.state || "done");
-    return json(publicJob(id, state, state, state === "done" ? 100 : 0, null, base, null));
+    const stored = status as { state?: string; error?: string | null } | null;
+    const state = String(stored?.state || "done");
+    return json(publicJob(id, state, state, state === "done" ? 100 : 0, stored?.error || null, base, null));
   }
   const pos = job.state === "queued" ? await budget(env).positionOf(id) : null;
   return json(publicJob(id, job.state, job.stage, job.percent, job.error, base, pos));
@@ -656,7 +694,7 @@ function publicJob(id: string, state: string, stage: string, percent: number, er
     stage_line: lines[stage] || stage,
     percent: percent || 0,
     position,
-    error,
+    error: forPage(id, error),
   };
   if (state === "done") {
     out.files = {
@@ -826,13 +864,19 @@ async function submit(request: Request, env: Env, base: string): Promise<Respons
   const container = getContainer(env.RENDER, idHint);
   await container.startAndWaitForPorts({
     startOptions: { envVars: containerEnv(env, base), enableInternet: false },
-    cancellationOptions: { portReadyTimeoutMS: 180_000, instanceGetTimeoutMS: 180_000 },
+    cancellationOptions: { portReadyTimeoutMS: PORT_READY_MS, instanceGetTimeoutMS: PORT_READY_MS },
   });
+  await container.setAllowedHosts(proxyHosts(allowedHosts(env)));
   const headers: Record<string, string> = {};
   const ctype = request.headers.get("content-type");
   if (ctype) headers["content-type"] = ctype;
   if (env.NC_INTERNAL_TOKEN) headers.authorization = `Bearer ${env.NC_INTERNAL_TOKEN}`;
-  const res = await container.fetch("http://container/api/submit", { method: "POST", headers, body: buf });
+  let res: Response;
+  try {
+    res = await containerFetch(container, idHint, "http://container/api/submit", { method: "POST", headers, body: buf });
+  } catch (err) {
+    return json({ error: logInternal(idHint, err), id: idHint, code: "error" }, 500);
+  }
   const text = await res.text();
   if (!res.ok) return new Response(text, { status: res.status, headers: { "content-type": "application/json", "access-control-allow-origin": "*" } });
   const data = JSON.parse(text) as { id?: string; record_url?: string; page_url?: string };
@@ -840,7 +884,11 @@ async function submit(request: Request, env: Env, base: string): Promise<Respons
   if (!ID_RE.test(id)) return json({ error: "container returned no id" }, 502);
   const fileHeaders: Record<string, string> = {};
   if (env.NC_INTERNAL_TOKEN) fileHeaders.authorization = `Bearer ${env.NC_INTERNAL_TOKEN}`;
-  await copyOutputs(env, container, id, fileHeaders);
+  try {
+    await copyOutputs(env, container, id, fileHeaders);
+  } catch (err) {
+    return json({ error: logInternal(id, err), id, code: "error" }, 500);
+  }
   data.record_url = `${base}/records/${id}.json`;
   data.page_url = `${base}/records/${id}`;
   return json(data, 201);

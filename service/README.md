@@ -176,6 +176,10 @@ Do these steps once, in order.
 
 `NC_INSTANCE_NAME` is already set in `service/worker/wrangler.jsonc` to `netcomposer.art hosted Performer (nc-performer 0.2.0)`. Change that variable in a later deploy if you want a different public name. The Turnstile site key in that file is public by design.
 
+The container type is `standard-3` (2 vCPU, 8 GiB, 16 GB disk). That is the smallest type that can load Dragonfly and the Python audio stack. `basic` is 1 GiB and `standard-1` is 4 GiB. While the instance is awake the active rate is about **$0.00006 per second** (about $0.22 per hour): 2 × $0.000020 per vCPU-second plus 8 × $0.0000025 per GiB-second. It sleeps 15 minutes after the last request, and that idle time is billed too.
+
+A failed Perform should say `Something went wrong while performing. Please try again. (job id)`. The page reads that sentence from the job JSON. To capture the live error, open Actions → **Diagnose Perform** → **Run workflow**, then press Perform on the site. The workflow prints container status and tails `nc-perform-api` for 5 minutes. It uses the same Cloudflare secrets as deploy and does not print them. It does not deploy. Wrangler has no stored container log, so the tail is the log.
+
 ## How a model call works
 
 Only the container calls the model, and only when the words need it and the soft budget still has room.

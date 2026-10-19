@@ -1,0 +1,91 @@
+# Reads live Perform logs. Manual only. Does not deploy.
+# This file has no push or pull_request trigger. Do not add one.
+name: Diagnose Perform
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: service/worker/package-lock.json
+      - name: Install Worker dependencies
+        working-directory: service/worker
+        run: npm ci
+      - name: Require Cloudflare credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          missing=0
+          require() {
+            name="$1"
+            val="${2:-}"
+            trimmed=$(printf '%s' "$val" | tr -d '[:space:]')
+            if [ -z "$trimmed" ]; then
+              echo "::error title=Missing ${name}::${name} is empty. Add it under Settings → Secrets and variables → Actions. Diagnose stops here and does not continue."
+              missing=1
+            fi
+          }
+          require CLOUDFLARE_API_TOKEN "${CLOUDFLARE_API_TOKEN}"
+          require CLOUDFLARE_ACCOUNT_ID "${CLOUDFLARE_ACCOUNT_ID}"
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+          echo "CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are set. This workflow does not print their values."
+      - name: Container status and live tail
+        working-directory: service/worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          echo "Container applications:"
+          npx wrangler containers list || true
+          echo "Container applications (json):"
+          npx wrangler containers list --json > /tmp/containers.json || true
+          cat /tmp/containers.json || true
+          node --input-type=module <<'EOF'
+          import { readFileSync, writeFileSync } from "node:fs";
+          const raw = readFileSync("/tmp/containers.json", "utf8");
+          let data;
+          try { data = JSON.parse(raw); } catch { data = null; }
+          const rows = Array.isArray(data) ? data : [];
+          const ids = rows
+            .map((row) => (row && typeof row.id === "string" ? row.id : ""))
+            .filter((id) => id);
+          writeFileSync("/tmp/container-ids.txt", ids.join("\n"));
+          EOF
+          if [ -s /tmp/container-ids.txt ]; then
+            while IFS= read -r id; do
+              [ -z "$id" ] && continue
+              echo "---- wrangler containers info ${id} ----"
+              npx wrangler containers info "$id" || true
+              echo "---- wrangler containers instances ${id} ----"
+              npx wrangler containers instances "$id" || true
+            done < /tmp/container-ids.txt
+          else
+            echo "No container application id was found in the list JSON. The tail below still runs."
+          fi
+          echo "Wrangler has no stored container log history. The tail is the live log."
+          echo "Tailing nc-perform-api for 5 minutes. Press Perform on the site now."
+          set +e
+          timeout 300 npx wrangler tail nc-perform-api --format pretty
+          code=$?
+          set -e
+          # timeout(1) exits 124 when the 5 minutes elapse. That is a finished tail.
+          if [ "$code" -eq 124 ]; then
+            echo "Tail finished after 5 minutes."
+            exit 0
+          fi
+          exit "$code"

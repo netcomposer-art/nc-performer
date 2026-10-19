@@ -6,6 +6,9 @@ import { fileURLToPath } from "node:url";
 import {
   applyPerformHit,
   BURST_LIMIT,
+  forPage,
+  isInternalFailure,
+  proxyHosts,
   publicInternalError,
   BURST_PERIOD_S,
   PER_10MIN,
@@ -88,6 +91,29 @@ test("internal failures stay a short sentence and keep the job id", () => {
   assert.equal(shown.includes("ContainerProxy"), false);
   assert.equal(shown.includes("undefined"), false);
   assert.equal(publicInternalError(null).includes("("), false);
+});
+
+test("proxy allowlist covers subdomains the exact apex would miss", () => {
+  const hosts = proxyHosts(["musicmatter.art", "audio.musicmatter.art", "*.example.com", ""]);
+  assert.ok(hosts.includes("musicmatter.art"));
+  assert.ok(hosts.includes("*.musicmatter.art"));
+  assert.ok(hosts.includes("audio.musicmatter.art"));
+  assert.ok(hosts.includes("*.audio.musicmatter.art"));
+  assert.ok(hosts.includes("*.example.com"));
+  assert.equal(hosts.includes("*.*.example.com"), false);
+});
+
+test("a raw HTTP 520 is replaced and a license rejection is kept", () => {
+  const id = "h-abcdefghjkmn";
+  assert.equal(isInternalFailure("HTTP Error 520: Server Error"), true);
+  assert.equal(isInternalFailure("Origin is disallowed"), true);
+  const shown = forPage(id, "HTTP Error 520: Server Error");
+  assert.match(shown || "", /Something went wrong while performing/);
+  assert.match(shown || "", new RegExp(id));
+  assert.equal(shown?.includes("520"), false);
+  assert.equal(shown?.includes("HTTP Error"), false);
+  assert.equal(forPage(id, "license not allowed: CC-BY-NC"), "license not allowed: CC-BY-NC");
+  assert.equal(forPage(id, null), null);
 });
 
 function parseJsonc(text: string): Record<string, unknown> {
