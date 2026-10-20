@@ -43,6 +43,10 @@ AI planning runs only when the words ask for a line, triplets, or sections. Set 
 - `found_sounds`: `[{title, supplier, license}]`, filled as sources are actually found. Rows without a title, supplier, and license are left out. Nothing is invented.
 - `stage_line`: a short sentence for the current stage, such as `Finding a choir on Freesound…`.
 
+`done` is sent only after `preview.mp3`, `meta.json`, the record, and the other output files have been read back from storage. Until that read succeeds the status stays `storing` (`Storing the Performance…`), so the page does not request those files while they are still being copied.
+
+A room-tone search runs only when the words ask for air or space, and that pass stops after 20 seconds. Each other source search stops after 20 seconds and is skipped. One recorded-note file is given 20 seconds; the rest of the library is still checked. While that check runs the line is `Checking recorded notes…`.
+
 The signed record still carries `performance.timeline` and `sounds_used[].spans` as kit 0.2.0 writes them.
 
 Freesound is queried through its official API when the Worker secret `FREESOUND_API_KEY` is set. If the secret is missing, or the API fails, the HTML search is used. The deploy workflow writes the secret only when it is non-empty.

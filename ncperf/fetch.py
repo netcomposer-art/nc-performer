@@ -1,7 +1,8 @@
 """Fetch one planned sound and check its license on the live page or manifest.
 Which sounds to try is decided by ncperf.discover. This module does not rank suppliers.
 Downloads are cached by URL (and byte range)."""
-import hashlib, html as _html, json, os, re, time, urllib.request
+import hashlib, html as _html, json, os, re, socket, time, urllib.request
+from . import deadline
 from . import licenses as LIC
 from .util import sha256_file
 
@@ -15,15 +16,34 @@ def cache_dir():
     os.makedirs(d, exist_ok=True); return d
 
 def http(url, range_bytes=None, timeout=120, tries=3):
+    """GET bytes. A surrounding search budget is one try and is not retried.
+
+    With no budget, a download keeps the timeout it was given (600 seconds
+    while rendering). The socket timeout alone restarts when bytes arrive;
+    read_response stops at the wall clock.
+    """
     h = {'User-Agent': UA}
     if range_bytes: h['Range'] = f'bytes=0-{int(range_bytes) - 1}'
-    for k in range(tries):
+    parent = deadline.current()
+    attempts = 1 if parent is not None else tries
+    for k in range(attempts):
         try:
-            with urllib.request.urlopen(urllib.request.Request(url, headers=h), timeout=timeout) as r:
-                return r.read(), r.geturl()
-        except Exception as e:
-            if k == tries - 1: raise
-            time.sleep(2 * (k + 1))
+            with deadline.limit(timeout):
+                wait = deadline.socket_timeout(timeout)
+                with urllib.request.urlopen(urllib.request.Request(url, headers=h), timeout=wait) as r:
+                    return deadline.read_response(r), r.geturl()
+        except deadline.SearchTimeout:
+            if parent is not None or k == attempts - 1:
+                raise
+        except (TimeoutError, socket.timeout) as e:
+            if parent is not None:
+                raise deadline.SearchTimeout('search timed out') from e
+            if k == attempts - 1:
+                raise
+        except Exception:
+            if parent is not None or k == attempts - 1:
+                raise
+        time.sleep(2 * (k + 1))
 
 _text = {}
 def text(url):

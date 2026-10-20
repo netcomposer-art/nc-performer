@@ -35,6 +35,9 @@ def origin_label(name: str | None) -> str:
     return _ORIGIN.get(key, name or "")
 
 
+NOTE_LINE = "Checking recorded notes…"
+
+
 def finding_line(origin: str, words: list[str] | None, texture: bool = False) -> str:
     """A short line for the page, such as 'Finding a choir on Freesound…'."""
     where = origin_label(origin) or origin

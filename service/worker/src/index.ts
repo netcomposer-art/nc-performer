@@ -35,6 +35,7 @@ import {
   tooLargeMessage,
   type LiveDials,
 } from "./keep";
+import { REQUIRED_OUTPUTS, containerPageUpdate, missingOutputs, readableBytes } from "./outputs";
 import { applyPerformHit, BURST_MESSAGE, claimToken, forPage, isInternalFailure, jobStatusFields, newId, PER_10MIN, PER_DAY, proxyHosts, publicInternalError, rejectPlan, wordsTooLong, type FoundSound } from "./policy";
 
 // @cloudflare/containers 0.3.7 looks up this exact export on ctx.exports when
@@ -65,16 +66,7 @@ const ALLOWED_HOSTS = [
   "api.x.ai",
 ];
 
-const FILES = [
-  "performance.flac",
-  "preview.mp3",
-  "record.json",
-  "plan.json",
-  "uses.json",
-  "composition.md",
-  "meta.json",
-  "status.json",
-];
+const FILES = [...REQUIRED_OUTPUTS];
 
 const FILE_TYPES: Record<string, string> = {
   "performance.flac": "audio/flac",
@@ -566,16 +558,17 @@ async function runContainer(env: Env, id: string): Promise<void> {
     const res = await containerFetch(container, id, `http://container/internal/jobs/${id}`, { headers });
     if (!res.ok) continue;
     last = await res.json();
+    const page = containerPageUpdate(last);
     const patch: Partial<Job> = {
-      state: last.state || job.state,
-      stage: last.stage || job.stage,
-      percent: Number(last.percent || 0),
+      state: page.state,
+      stage: page.stage,
+      percent: page.percent,
       error: pageError(last.error),
     };
     if (last.seed != null && Number.isFinite(Number(last.seed))) patch.seed = Number(last.seed);
     if ("trimmed" in last) patch.trimmed = typeof last.trimmed === "string" && last.trimmed.trim() ? last.trimmed : null;
     if (Array.isArray(last.found_sounds)) patch.found_sounds = last.found_sounds;
-    if (typeof last.stage_line === "string" && last.stage_line.trim()) patch.stage_line = last.stage_line;
+    if (page.stage_line) patch.stage_line = page.stage_line;
     await stub.patch(patch);
     if (last.state === "done" || last.state === "failed" || last.state === "rejected") break;
   }
@@ -583,19 +576,28 @@ async function runContainer(env: Env, id: string): Promise<void> {
     await sleep(400);
     const again = await containerFetch(container, id, `http://container/internal/jobs/${id}`, { headers });
     if (again.ok) last = await again.json();
-    await copyOutputs(env, container, id, headers);
+    if (last.state === "done") {
+      await copyOutputs(env, container, id, headers);
+      await confirmStored(env, id);
+    }
   } else if (last.state !== "failed" && last.state !== "rejected") {
     throw new Error("container did not finish within 10 minutes");
   }
   const cost = Number(last.cost_usd || 0);
   const shown = pageError(last.error);
   await budget(env).addSpend(cost);
+  const finishedLine = last.state === "done"
+    ? (typeof last.stage_line === "string" && last.stage_line.trim() && last.stage_line !== "Storing the Performance…"
+      ? last.stage_line
+      : "Done")
+    : undefined;
   const updated = await stub.patch({
     state: last.state || "failed",
     stage: last.stage || last.state || "failed",
     percent: 100,
     error: shown,
     cost_usd: cost,
+    ...(finishedLine ? { stage_line: finishedLine } : {}),
   });
   if (updated) {
     await budget(env).note({
@@ -678,12 +680,56 @@ async function containerFetch(container: DurableObjectStub<RenderContainer>, id:
   return res;
 }
 
+const READBACK_TRIES = 5;
+const READBACK_WAIT_MS = 200;
+
+/** Read each output back from R2. done is not published until this returns. */
+async function confirmStored(env: Env, id: string): Promise<void> {
+  let missing: string[] = [...REQUIRED_OUTPUTS];
+  for (let attempt = 0; attempt < READBACK_TRIES; attempt++) {
+    const readable: string[] = [];
+    for (const name of REQUIRED_OUTPUTS) {
+      try {
+        // One byte, not the whole FLAC. A missing or empty object fails the read-back.
+        const obj = await env.PERFORMANCES.get(`performances/${id}/${name}`, { range: { offset: 0, length: 1 } });
+        if (await objectHasBytes(obj)) readable.push(name);
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        console.error(JSON.stringify({ event: "readback", id, name, detail }));
+      }
+    }
+    missing = missingOutputs(readable);
+    if (!missing.length) return;
+    if (attempt + 1 < READBACK_TRIES) await sleep(READBACK_WAIT_MS);
+  }
+  throw new Error(`Stored files were not readable: ${missing.join(", ")}`);
+}
+
+async function objectHasBytes(obj: R2ObjectBody | null): Promise<boolean> {
+  if (!obj || obj.size <= 0 || !obj.body) return false;
+  let first = 0;
+  const reader = obj.body.getReader();
+  try {
+    const { value, done } = await reader.read();
+    if (!done && value) first = value.byteLength;
+  } catch {
+    return false;
+  } finally {
+    try {
+      await reader.cancel();
+    } catch {
+      /* the first byte was enough */
+    }
+  }
+  return readableBytes(obj.size, first);
+}
+
 async function copyOutputs(env: Env, container: DurableObjectStub<RenderContainer>, id: string, headers: Record<string, string>): Promise<void> {
   const signer = id.startsWith("h-") ? await getSigner(env) : null;
   let recordBytes: Uint8Array<ArrayBuffer> | null = null;
   for (const name of FILES) {
     const res = await containerFetch(container, id, `http://container/internal/jobs/${id}/files/${name}`, { headers });
-    // A missing file is normal (uses.json is optional). A 5xx already threw above.
+    // A missing file is left for confirmStored to reject. A 5xx already threw above.
     if (!res.ok) continue;
     let bytes = new Uint8Array(await res.arrayBuffer());
     if (name === "record.json") {

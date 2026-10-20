@@ -3,7 +3,9 @@
 Registered Suppliers (today, musicmatter.art) are one origin among the open
 commons: Freesound, Openverse, the Internet Archive, Wikimedia Commons,
 ccMixter, and the bundled UIowa MIS library. Each origin is queried with the
-same words. A failure in one origin is skipped.
+same words. A failure in one origin is skipped. An origin that does not answer
+within 20 seconds is skipped too. A room-tone search runs only when the words
+ask for air or space, and that whole pass stops after 20 seconds.
 
 A chord strike has to be that chord. It is either a whole-chord file of that
 root and quality, or the chord built from single notes that were recorded at
@@ -28,6 +30,7 @@ import zlib
 from collections import Counter
 
 from . import chords as CH
+from . import deadline
 from . import interpret
 from . import licenses as LIC
 from . import notemap
@@ -94,9 +97,7 @@ def _hostname(url: str) -> str:
 
 
 def _get(url: str, timeout: int = 20) -> bytes:
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return r.read()
+    return deadline.read_url(url, timeout, {"User-Agent": UA})
 
 
 def _json(url: str):
@@ -105,9 +106,8 @@ def _json(url: str):
 
 def _json_auth(url: str, token: str, timeout: int = 20) -> dict:
     """GET JSON with a bearer-style token header. The token is not put in the URL."""
-    req = urllib.request.Request(url, headers={"User-Agent": UA, "Authorization": f"Token {token}"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read().decode("utf-8", "replace"))
+    raw = deadline.read_url(url, timeout, {"User-Agent": UA, "Authorization": f"Token {token}"})
+    return json.loads(raw.decode("utf-8", "replace"))
 
 
 def excluded_terms(text: str) -> set[str]:
@@ -221,6 +221,8 @@ def _mm_index(registry_url: str | None, host_ok_fn=None) -> list[dict]:
                 off = dict(off)
                 off["_supplier"] = sup.get("name") or sup.get("id") or "supplier"
                 offerings.append(off)
+    except deadline.SearchTimeout:
+        raise
     except Exception as exc:
         print(json.dumps({"event": "discover_origin", "origin": "musicmatter", "error": str(exc)[:200]}), flush=True)
         return []
@@ -640,6 +642,8 @@ def search_freesound(terms, hint, chords, seed, host_ok_fn=None, registry_url=No
             hits = _freesound_from_api(doc, terms, hint, chords, seed, host_ok_fn)
             if hits:
                 return hits
+        except deadline.SearchTimeout:
+            raise
         except Exception as exc:
             print(json.dumps({
                 "event": "freesound_api",
@@ -755,6 +759,8 @@ def search_internet_archive(terms, hint, chords, seed, host_ok_fn=None, registry
 def _archive_mp3(ident: str) -> str | None:
     try:
         meta = _json(f"https://archive.org/metadata/{urllib.parse.quote(ident)}")
+    except deadline.SearchTimeout:
+        raise
     except Exception:
         return None
     best = None
@@ -974,11 +980,14 @@ def _audio_reachable(cand: dict) -> bool:
     if not url or src.get("kind") in ("freesound", "supplier"):
         return True
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": UA, "Range": "bytes=0-2047"})
-        with urllib.request.urlopen(req, timeout=25) as r:
-            if r.status >= 400:
-                return False
-            r.read(32)
+        with deadline.limit(25):
+            wait = deadline.socket_timeout(25)
+            req = urllib.request.Request(url, headers={"User-Agent": UA, "Range": "bytes=0-2047"})
+            with urllib.request.urlopen(req, timeout=wait) as r:
+                if r.status >= 400:
+                    return False
+                if not deadline.read_response(r):
+                    return False
         return True
     except Exception as exc:
         print(json.dumps({"event": "discover_fetch", "origin": cand.get("origin"), "error": str(exc)[:160]}), flush=True)
@@ -1036,7 +1045,7 @@ def assign_strikes(groups: list[list[dict]], seed: int, hint: str | None, mentio
     return chosen
 
 
-def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_fn=None, searchers=None, registry_url=None, verify_live: bool = True, note_maps=None, progress_cb=None) -> dict:
+def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_fn=None, searchers=None, registry_url=None, verify_live: bool = True, note_maps=None, progress_cb=None, origin_budget_s: float = 20, texture_budget_s: float = 20) -> dict:
     """Build a plan from an even-handed search. Raises ValueError if nothing usable came back."""
     comp_text = comp.get("composition") or ""
     found = take.composition_chords(comp_text) or CH.find_full(
@@ -1095,7 +1104,11 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
             continue
         tell(progress.finding_line(origin, query))
         try:
-            hits = fn(query, hint, syms, seed, host_ok_fn, registry_url) or []
+            with deadline.limit(origin_budget_s):
+                hits = fn(query, hint, syms, seed, host_ok_fn, registry_url) or []
+        except deadline.SearchTimeout:
+            errors[origin] = "timed out"
+            hits = []
         except Exception as exc:
             errors[origin] = str(exc)[:180]
             hits = []
@@ -1106,24 +1119,34 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
             note_hit(hit, origin)
     seen = {hit["key"] for hits in groups.values() for hit in hits if hit.get("key")}
     texture_terms = ["field recording", "room tone", "ambience"]
-    for origin in order:
-        if origin in ("musicmatter", "uiowa"):
-            continue
-        fn = fns.get(origin)
-        if not fn:
-            continue
-        tell(progress.finding_line(origin, texture_terms, texture=True))
+    # The bed is optional. Skip the room-tone pass unless the words asked for air or space.
+    if take.phrase(words).get("bed"):
         try:
-            extra = fn(texture_terms, None, syms, seed + 17, host_ok_fn, registry_url) or []
-        except Exception as exc:
-            errors[origin + ":texture"] = str(exc)[:180]
-            extra = []
-        for hit in extra:
-            if not hit or hit.get("key") in seen:
-                continue
-            seen.add(hit["key"])
-            groups.setdefault(hit.get("origin") or origin, []).append(hit)
-            note_hit(hit, origin)
+            with deadline.limit(texture_budget_s):
+                for origin in order:
+                    if origin in ("musicmatter", "uiowa"):
+                        continue
+                    fn = fns.get(origin)
+                    if not fn:
+                        continue
+                    tell(progress.finding_line(origin, texture_terms, texture=True))
+                    try:
+                        deadline.check()
+                        extra = fn(texture_terms, None, syms, seed + 17, host_ok_fn, registry_url) or []
+                    except deadline.SearchTimeout:
+                        errors[origin + ":texture"] = "timed out"
+                        break
+                    except Exception as exc:
+                        errors[origin + ":texture"] = str(exc)[:180]
+                        extra = []
+                    for hit in extra:
+                        if not hit or hit.get("key") in seen:
+                            continue
+                        seen.add(hit["key"])
+                        groups.setdefault(hit.get("origin") or origin, []).append(hit)
+                        note_hit(hit, origin)
+        except deadline.SearchTimeout:
+            errors["texture"] = "timed out"
     for origin in ORIGINS:
         groups.setdefault(origin, [])
     print(json.dumps({
@@ -1213,6 +1236,7 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
         })
         return sid
 
+    tell(progress.NOTE_LINE)
     if note_maps is None and verify_live:
         try:
             note_maps, library_meta = notemap.ensure(syms)
