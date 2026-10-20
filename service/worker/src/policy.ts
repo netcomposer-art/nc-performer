@@ -191,6 +191,23 @@ export function forPage(id: string | null, error: string | null): string | null 
 }
 
 /**
+ * The sentence a failed Save may show. A container rejection stays.
+ * A traceback, a proxy fault, or a secret becomes the public sentence.
+ * The caller logs the raw exception.
+ */
+export function failureForPage(id: string | null, detail: string): string {
+  const line = detail.split(/\r?\n/, 1)[0].trim();
+  if (!line || isInternalFailure(line) || !isPublicReason(line)) return publicInternalError(id);
+  return line;
+}
+
+function isPublicReason(line: string): boolean {
+  if (line.length > 400) return false;
+  if (/bearer\s|secret key|password|traceback|\.py", line |\/tmp\/|\/data\/|\/workspace/i.test(line)) return false;
+  return true;
+}
+
+/**
  * One Perform against the rolling 10-minute and 24-hour windows.
  * Both caps are checked before a hit is added, so a rejection does not
  * consume either window. `now` and `hits` are unix seconds.

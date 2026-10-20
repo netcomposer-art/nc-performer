@@ -41,7 +41,7 @@ import {
 } from "./keep";
 import { CANCELLED_MESSAGE, cancelToken, queueErrorIsCancel } from "./cancel";
 import { REQUIRED_OUTPUTS, containerPageUpdate, missingOutputs, readableBytes } from "./outputs";
-import { applyPerformHit, burstBlock, claimToken, corsHeaders, forPage, GATHER_CACHE, isInternalFailure, jobStatusFields, newId, pageGatherState, PER_10MIN, PER_DAY, proxyHosts, publicInternalError, publishedRegistryStats, queuedGatherFields, registryPublicStats, rejectPlan, siteverifyRequest, testerPass, turnstileDeniedBody, turnstileFailure, turnstileToken, wordsTooLong, type FoundSound, type RateBlock, type RegistryStats, type TurnstileFailure } from "./policy";
+import { applyPerformHit, burstBlock, claimToken, corsHeaders, failureForPage, forPage, GATHER_CACHE, isInternalFailure, jobStatusFields, newId, pageGatherState, PER_10MIN, PER_DAY, proxyHosts, publicInternalError, publishedRegistryStats, queuedGatherFields, registryPublicStats, rejectPlan, siteverifyRequest, testerPass, turnstileDeniedBody, turnstileFailure, turnstileToken, wordsTooLong, type FoundSound, type RateBlock, type RegistryStats, type TurnstileFailure } from "./policy";
 
 // @cloudflare/containers 0.3.7 looks up this exact export on ctx.exports when
 // allowedHosts is set. It is a WorkerEntrypoint, not a Durable Object, so it
@@ -404,9 +404,21 @@ export default {
           msg.ack();
           continue;
         }
-        const error = logInternal(id, err);
-        await jobs(env, id).patch({ state: "failed", stage: "failed", percent: 100, error, error_code: "container" });
-        msg.retry();
+        const detail = err instanceof Error ? err.stack || err.message : String(err);
+        console.error(JSON.stringify({ event: "perform_failed", id, detail }));
+        const message = err instanceof Error ? err.message : String(err);
+        const copyStatus = err instanceof ContainerCopyError ? err.status : 0;
+        const rejected = copyStatus >= 400 && copyStatus < 500;
+        const error = failureForPage(id, message);
+        await jobs(env, id).patch({
+          state: rejected ? "rejected" : "failed",
+          stage: rejected ? "rejected" : "failed",
+          percent: 100,
+          error,
+          error_code: rejected ? "rejected" : "container",
+        });
+        if (rejected) msg.ack();
+        else msg.retry();
       }
     }
   },
@@ -1313,21 +1325,64 @@ async function copyGather(env: Env, container: DurableObjectStub<RenderContainer
   return doc;
 }
 
+class ContainerCopyError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ContainerCopyError";
+    this.status = status;
+  }
+}
+
+/**
+ * Save copies the Gather and the take into the container. Python reads
+ * Content-Length, or X-NC-Content-Length when the port proxy drops the first.
+ * A runtime that rejects Content-Length is retried with the length hint only.
+ */
+async function postContainerBytes(
+  container: DurableObjectStub<RenderContainer>,
+  id: string,
+  url: string,
+  headers: Record<string, string>,
+  bytes: ArrayBuffer,
+  extra: Record<string, string>,
+): Promise<Response> {
+  const base: Record<string, string> = { ...headers, ...extra, "x-nc-content-length": String(bytes.byteLength) };
+  try {
+    return await containerFetch(container, id, url, {
+      method: "POST",
+      headers: { ...base, "content-length": String(bytes.byteLength) },
+      body: bytes,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (!/content-length/i.test(message)) throw err;
+    return await containerFetch(container, id, url, { method: "POST", headers: base, body: bytes });
+  }
+}
+
+async function refuseCopy(res: Response, fallback: string): Promise<void> {
+  if (res.ok || res.status === 204) return;
+  let reason = "";
+  try {
+    const text = (await res.text()).slice(0, 500);
+    const body = JSON.parse(text) as { error?: unknown };
+    if (typeof body.error === "string" && body.error.trim()) reason = body.error.trim();
+  } catch {
+    reason = "";
+  }
+  throw new ContainerCopyError(reason || fallback, res.status);
+}
+
 async function seedTakeAudio(env: Env, container: DurableObjectStub<RenderContainer>, id: string, headers: Record<string, string>): Promise<void> {
   const obj = await env.PERFORMANCES.get(`jobs/${id}/take-audio`);
   if (!obj) throw new Error("take audio was not stored");
-  const seeded = await containerFetch(container, id, "http://container/internal/take-audio", {
-    method: "POST",
-    headers: {
-      ...headers,
-      "content-type": obj.httpMetadata?.contentType || "application/octet-stream",
-      "x-take-job": id,
-    },
-    body: await obj.arrayBuffer(),
+  const bytes = await obj.arrayBuffer();
+  const seeded = await postContainerBytes(container, id, "http://container/internal/take-audio", headers, bytes, {
+    "content-type": obj.httpMetadata?.contentType || "application/octet-stream",
+    "x-take-job": id,
   });
-  if (!seeded.ok && seeded.status !== 204) {
-    throw new Error(`could not copy the take (${seeded.status})`);
-  }
+  await refuseCopy(seeded, `could not copy the take (${seeded.status})`);
 }
 
 async function seedKeepGather(env: Env, container: DurableObjectStub<RenderContainer>, performId: string, gatherId: string, headers: Record<string, string>): Promise<void> {
@@ -1339,18 +1394,12 @@ async function seedKeepGather(env: Env, container: DurableObjectStub<RenderConta
       if (!item.key || item.size <= 0 || item.size > 80 * 1024 * 1024) continue;
       const obj = await env.PERFORMANCES.get(item.key);
       if (!obj) continue;
-      const seeded = await containerFetch(container, performId, "http://container/internal/gather-file", {
-        method: "POST",
-        headers: {
-          ...headers,
-          "content-type": obj.httpMetadata?.contentType || "application/octet-stream",
-          "x-gather-key": item.key,
-        },
-        body: await obj.arrayBuffer(),
+      const bytes = await obj.arrayBuffer();
+      const seeded = await postContainerBytes(container, performId, "http://container/internal/gather-file", headers, bytes, {
+        "content-type": obj.httpMetadata?.contentType || "application/octet-stream",
+        "x-gather-key": item.key,
       });
-      if (!seeded.ok && seeded.status !== 204) {
-        throw new Error(`could not copy ${item.key} (${seeded.status})`);
-      }
+      await refuseCopy(seeded, `could not copy ${item.key} (${seeded.status})`);
     }
     cursor = page.truncated ? page.cursor : undefined;
   } while (cursor);
@@ -1566,6 +1615,7 @@ function publicJob(
     percent: percent || 0,
     position,
     error: forPage(id, error),
+    ...(job?.error_code ? { code: job.error_code } : {}),
     seed: fields.seed,
     trimmed: fields.trimmed,
     found_sounds: fields.found_sounds,

@@ -8,6 +8,7 @@ import {
   BURST_LIMIT,
   DAY_S,
   DEFAULT_LIMITS,
+  failureForPage,
   forPage,
   isInternalFailure,
   jobStatusFields,
@@ -142,6 +143,21 @@ test("a Performance can have 16 layers and not 17", () => {
   assert.equal(rejectPlan(plan), null);
   plan.layers.push({});
   assert.match(rejectPlan(plan) || "", /at most 16 layers/);
+});
+
+test("a Save copy rejection stays on the job and a proxy fault does not", () => {
+  const id = "h-abcdefghjkmn";
+  assert.equal(failureForPage(id, "The gathered file is missing or too large."), "The gathered file is missing or too large.");
+  assert.equal(failureForPage(id, "The take is missing or too large."), "The take is missing or too large.");
+  assert.equal(failureForPage(id, "could not copy gathers/g-abcdefghjkmn/audio/c0 (400)"), "could not copy gathers/g-abcdefghjkmn/audio/c0 (400)");
+  const hidden = failureForPage(id, "HTTP Error 520: Server Error");
+  assert.match(hidden, /Something went wrong while performing/);
+  assert.equal(hidden.includes("520"), false);
+  assert.match(failureForPage(id, "Traceback (most recent call last)"), /Something went wrong while performing/);
+  assert.equal(
+    failureForPage(id, "The take is missing or too large.\nTraceback (most recent call last)"),
+    "The take is missing or too large.",
+  );
 });
 
 test("a raw HTTP 520 is replaced and a license rejection is kept", () => {
