@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 import threading
 import time
 import urllib.parse
@@ -78,31 +79,83 @@ FILE_TYPES = {
 }
 
 
-def verify_turnstile(settings: Settings, token: str | None, _ip: str) -> bool:
-    """Return True if the bot gate is off, or if Turnstile accepts the token.
+_TURNSTILE_CODE = re.compile(r"^[a-z0-9-]{1,64}$")
+_TURNSTILE_HOST = re.compile(r"^[A-Za-z0-9.-]{1,253}$")
+
+
+def turnstile_failure(codes, hostname) -> dict:
+    """Siteverify error-codes and hostname. Drop anything that could echo a secret."""
+    errors = []
+    if isinstance(codes, list):
+        for code in codes:
+            if isinstance(code, str) and _TURNSTILE_CODE.fullmatch(code):
+                errors.append(code)
+            if len(errors) >= 8:
+                break
+    host = hostname if isinstance(hostname, str) and _TURNSTILE_HOST.fullmatch(hostname) else None
+    return {"turnstile_errors": errors, "hostname": host}
+
+
+def _log_turnstile(failure: dict) -> None:
+    sys.stderr.write(json.dumps({
+        "event": "turnstile",
+        "errors": failure["turnstile_errors"],
+        "hostname": failure["hostname"],
+    }) + "\n")
+
+
+def verify_turnstile(settings: Settings, token: str | None, _ip: str) -> tuple[bool, dict]:
+    """Return whether the token passed, and the safe siteverify failure fields.
 
     The three documented test secrets are decided locally so a self-check does
     not need to reach Cloudflare. Any other secret is posted to siteverify
-    (or to TURNSTILE_VERIFY_URL).
+    (or to TURNSTILE_VERIFY_URL). A missing token is not posted.
     """
-    secret = settings.turnstile_secret
+    secret = (settings.turnstile_secret or "").strip()
+    raw = token.strip() if isinstance(token, str) else ""
     if not secret:
-        return True
+        return True, {}
     if secret in _TURNSTILE_TEST:
-        return _TURNSTILE_TEST[secret] and token == _DUMMY_TOKEN
-    if not token:
-        return False
+        if _TURNSTILE_TEST[secret] and raw == _DUMMY_TOKEN:
+            return True, {}
+        failure = turnstile_failure(["missing-input-response" if not raw else "invalid-input-response"], None)
+        _log_turnstile(failure)
+        return False, failure
+    if not raw:
+        failure = turnstile_failure(["missing-input-response"], None)
+        _log_turnstile(failure)
+        return False, failure
     # remoteip is omitted. Turnstile compares it with the IP that solved the
     # widget, and a mismatch rejects a fresh token. The Worker checks once.
     # The container hop (/internal/jobs) does not check again.
     data = urllib.parse.urlencode({
         "secret": secret,
-        "response": token,
+        "response": raw,
     }).encode()
-    req = urllib.request.Request(settings.turnstile_verify_url, data=data, method="POST")
+    req = urllib.request.Request(
+        settings.turnstile_verify_url,
+        data=data,
+        method="POST",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
     with urllib.request.urlopen(req, timeout=15) as r:
         body = json.loads(r.read().decode())
-    return bool(body.get("success"))
+    if not isinstance(body, dict):
+        body = {}
+    if body.get("success"):
+        return True, {}
+    failure = turnstile_failure(body.get("error-codes"), body.get("hostname"))
+    _log_turnstile(failure)
+    return False, failure
+
+
+def _turnstile_denied(handler, failure: dict):
+    handler._send(403, {
+        "error": "The bot check failed. Reload the page and try again.",
+        "code": "turnstile",
+        "turnstile_errors": failure.get("turnstile_errors") or [],
+        "hostname": failure.get("hostname"),
+    })
 
 
 def _json_error(handler, status: int, message: str, code: str = "error"):
@@ -335,8 +388,9 @@ def make_handler(app: App):
             if not app.perform_enabled() or app.store.spend_today() >= s.daily_hard_usd:
                 return self._send(503, {"error": "Perform is resting until tomorrow.", "code": "resting"})
             body = json.loads(self._read(s.max_plan_bytes + 8000).decode() or "{}")
-            if s.turnstile_required and not verify_turnstile(s, body.get("turnstile_token"), self._ip()):
-                return self._send(403, {"error": "The bot check failed. Reload the page and try again.", "code": "turnstile"})
+            ok, failure = verify_turnstile(s, body.get("turnstile_token"), self._ip())
+            if s.turnstile_required and not ok:
+                return _turnstile_denied(self, failure)
             comp = _composition(body)
             check_words(comp, s)
             if "instrument" in body and body.get("instrument") not in (None, ""):
@@ -408,8 +462,9 @@ def make_handler(app: App):
             if not app.perform_enabled() or app.store.spend_today() >= s.daily_hard_usd:
                 return self._send(503, {"error": "Perform is resting until tomorrow.", "code": "resting"})
             body = json.loads(self._read(s.max_plan_bytes + 8000).decode() or "{}")
-            if s.turnstile_required and not verify_turnstile(s, body.get("turnstile_token"), self._ip()):
-                return self._send(403, {"error": "The bot check failed. Reload the page and try again.", "code": "turnstile"})
+            ok, failure = verify_turnstile(s, body.get("turnstile_token"), self._ip())
+            if s.turnstile_required and not ok:
+                return _turnstile_denied(self, failure)
             gathered = _perform_gather(app, body)
             if isinstance(gathered, tuple):
                 return self._send(gathered[0], gathered[1])
@@ -499,8 +554,9 @@ def make_handler(app: App):
                 "claim_token": (text("claim_token") or "").strip(),
                 "turnstile_token": text("turnstile_token") or "",
             }
-            if s.turnstile_required and not verify_turnstile(s, body.get("turnstile_token"), self._ip()):
-                return self._send(403, {"error": "The bot check failed. Reload the page and try again.", "code": "turnstile"})
+            ok, failure = verify_turnstile(s, body.get("turnstile_token"), self._ip())
+            if s.turnstile_required and not ok:
+                return _turnstile_denied(self, failure)
             gathered = _perform_gather(app, body)
             if isinstance(gathered, tuple):
                 return self._send(gathered[0], gathered[1])

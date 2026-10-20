@@ -41,7 +41,7 @@ import {
 } from "./keep";
 import { CANCELLED_MESSAGE, cancelToken, queueErrorIsCancel } from "./cancel";
 import { REQUIRED_OUTPUTS, containerPageUpdate, missingOutputs, readableBytes } from "./outputs";
-import { applyPerformHit, burstBlock, claimToken, corsHeaders, forPage, GATHER_CACHE, isInternalFailure, jobStatusFields, newId, PER_10MIN, PER_DAY, proxyHosts, publicInternalError, publishedRegistryStats, registryPublicStats, rejectPlan, siteverifyFields, testerPass, turnstileToken, wordsTooLong, type FoundSound, type RateBlock, type RegistryStats } from "./policy";
+import { applyPerformHit, burstBlock, claimToken, corsHeaders, forPage, GATHER_CACHE, isInternalFailure, jobStatusFields, newId, PER_10MIN, PER_DAY, proxyHosts, publicInternalError, publishedRegistryStats, registryPublicStats, rejectPlan, siteverifyRequest, testerPass, turnstileDeniedBody, turnstileFailure, turnstileToken, wordsTooLong, type FoundSound, type RateBlock, type RegistryStats, type TurnstileFailure } from "./policy";
 
 // @cloudflare/containers 0.3.7 looks up this exact export on ctx.exports when
 // allowedHosts is set. It is a WorkerEntrypoint, not a Durable Object, so it
@@ -470,7 +470,7 @@ async function config(env: Env): Promise<Response> {
   const on = await budget(env).enabled(env.PERFORM_ENABLED !== "0");
   return json({
     turnstile_sitekey: env.TURNSTILE_SITEKEY || null,
-    turnstile_required: Boolean(env.TURNSTILE_SECRET_KEY),
+    turnstile_required: Boolean((env.TURNSTILE_SECRET_KEY || "").trim()),
     max_words: 4000,
     max_length_s: 180,
     instance: env.NC_INSTANCE_NAME,
@@ -512,9 +512,8 @@ async function gather(request: Request, env: Env, base: string): Promise<Respons
   if (!on || spend >= 5) return json({ error: "Perform is resting until tomorrow.", code: "resting" }, 503);
   const body = (await readJson(request)) as Record<string, unknown>;
   const ip = clientIp(request);
-  if (env.TURNSTILE_SECRET_KEY && !(await turnstile(env, turnstileToken(body)))) {
-    return json({ error: "The bot check failed. Reload the page and try again.", code: "turnstile" }, 403);
-  }
+  const gate = await turnstile(env, turnstileToken(body));
+  if (!gate.ok) return json(turnstileDeniedBody(gate), 403);
   const comp = compositionFrom(body);
   const instrumentError = instrumentProblem(body.instrument);
   if (instrumentError) return json({ error: instrumentError, code: "rejected" }, 400);
@@ -650,9 +649,8 @@ async function perform(request: Request, env: Env, base: string, processed = fal
   if (!on || spend >= 5) return json({ error: "Perform is resting until tomorrow.", code: "resting" }, 503);
   const body = (await readJson(request)) as Record<string, unknown>;
   const ip = clientIp(request);
-  if (env.TURNSTILE_SECRET_KEY && !(await turnstile(env, turnstileToken(body)))) {
-    return json({ error: "The bot check failed. Reload the page and try again.", code: "turnstile" }, 403);
-  }
+  const gate = await turnstile(env, turnstileToken(body));
+  if (!gate.ok) return json(turnstileDeniedBody(gate), 403);
   const kept = await keptGather(env, body);
   if (kept instanceof Response) return kept;
   const comp = kept ? kept.composition : compositionFrom(body);
@@ -812,9 +810,8 @@ async function keepTake(request: Request, env: Env, base: string): Promise<Respo
     throw err;
   }
   const ip = clientIp(request);
-  if (env.TURNSTILE_SECRET_KEY && !(await turnstile(env, turnstileToken(fields)))) {
-    return json({ error: "The bot check failed. Reload the page and try again.", code: "turnstile" }, 403);
-  }
+  const gate = await turnstile(env, turnstileToken(fields));
+  if (!gate.ok) return json(turnstileDeniedBody(gate), 403);
   const kept = await keptGather(env, fields);
   if (kept instanceof Response) return kept;
   if (!kept) return json({ error: "gather_id is required.", code: "rejected" }, 400);
@@ -2115,17 +2112,44 @@ async function sweep(env: Env): Promise<void> {
   } while (cursor);
 }
 
-async function turnstile(env: Env, token: string): Promise<boolean> {
-  const secret = env.TURNSTILE_SECRET_KEY || "";
-  if (!secret) return true;
-  if (secret in TURNSTILE_TEST) return TURNSTILE_TEST[secret] && token === DUMMY_TOKEN;
-  if (!token) return false;
-  const res = await fetch(env.TURNSTILE_VERIFY_URL || "https://challenges.cloudflare.com/turnstile/v0/siteverify", {
-    method: "POST",
-    body: new URLSearchParams(siteverifyFields(secret, token)),
-  });
-  const data = (await res.json()) as { success?: boolean };
-  return Boolean(data.success);
+type TurnstileGate = ({ ok: true } & Partial<TurnstileFailure>) | ({ ok: false } & TurnstileFailure);
+
+function logTurnstile(failure: TurnstileFailure, status: number | null): void {
+  // error-codes and hostname only. Never the token or the secret.
+  console.error(JSON.stringify({ event: "turnstile", errors: failure.turnstile_errors, hostname: failure.hostname, status }));
+}
+
+/**
+ * One siteverify call. Gather, Perform, and Save each call this once.
+ * /internal/jobs does not call it. A missing token is decided here and is
+ * not posted, so a dropped field stays distinct from a Cloudflare rejection.
+ */
+async function turnstile(env: Env, token: string): Promise<TurnstileGate> {
+  const secret = (env.TURNSTILE_SECRET_KEY || "").trim();
+  if (!secret) return { ok: true };
+  if (secret in TURNSTILE_TEST) {
+    if (TURNSTILE_TEST[secret] && token === DUMMY_TOKEN) return { ok: true };
+    const failure = turnstileFailure([token ? "invalid-input-response" : "missing-input-response"], null);
+    logTurnstile(failure, null);
+    return { ok: false, ...failure };
+  }
+  if (!token) {
+    const failure = turnstileFailure(["missing-input-response"], null);
+    logTurnstile(failure, null);
+    return { ok: false, ...failure };
+  }
+  const posted = siteverifyRequest(secret, token);
+  const res = await fetch(env.TURNSTILE_VERIFY_URL || "https://challenges.cloudflare.com/turnstile/v0/siteverify", posted);
+  let data: { success?: boolean; "error-codes"?: unknown; hostname?: unknown } = {};
+  try {
+    data = (await res.json()) as typeof data;
+  } catch {
+    data = {};
+  }
+  if (data.success) return { ok: true };
+  const failure = turnstileFailure(data["error-codes"], data.hostname);
+  logTurnstile(failure, res.status);
+  return { ok: false, ...failure };
 }
 
 async function rateLimit(env: Env, ipHash: string, tester: boolean): Promise<RateBlock | null> {
