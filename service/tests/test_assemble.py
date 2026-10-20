@@ -81,7 +81,6 @@ class RawPlanTest(unittest.TestCase):
     def test_gather_again_picks_something_else(self):
         first = _plan(2)
         second = _plan(2, avoid_keys=first["gather_picks"])
-        self.assertNotEqual(first["ensemble"]["family"], second["ensemble"]["family"])
         self.assertFalse(set(first["gather_picks"]) & set(second["gather_picks"]))
 
     def test_a_written_tempo_is_the_clock(self):
@@ -323,6 +322,168 @@ class RawPlanTest(unittest.TestCase):
         for seed in range(1, 6):
             chosen, _primary = take.choose(choir_groups, seed, ["choir"], None, False)
             self.assertTrue(all(row["instrument"] == "choir" for row in chosen))
+
+    def test_each_chord_draws_its_own_source(self):
+        """Share of distinct sources over many seeds.
+
+        The previous draw (take.choose) picked one family for every chord, so
+        distinct collections per take was 1 and every take was one collection.
+        """
+        symbols = ["D", "A", "Bm", "F#m", "G", "D", "G", "A"] * 2
+        libraries = (
+            ("musicmatter", "choir", "jacobschoir"),
+            ("musicmatter", "piano", "00a_main"),
+            ("musicmatter", "fat synth", "fatsynth"),
+            ("musicmatter", "synth arp", "syntharp"),
+        )
+
+        def opt(origin, instrument, collection, sym, key):
+            return {
+                "built": "whole-chord file",
+                "origin": origin,
+                "instrument": instrument,
+                "collection": collection,
+                "tier": 0,
+                "title": f"{instrument} {sym}",
+                "license": "CC-BY-SA-4.0",
+                "cand": {"key": key, "collection": collection},
+            }
+
+        groups = []
+        for sym in symbols:
+            rows = [opt(origin, inst, coll, sym, f"{coll}-{sym}") for origin, inst, coll in libraries]
+            # Twelve extra files in one pack must not outweigh the single-file sources.
+            for n in range(12):
+                rows.append(opt("musicmatter", "piano", "00a_main", sym, f"00a_main-{sym}-{n}"))
+            rows.append(opt("freesound", "piano", "freesound-piano", sym, f"fs-{sym}"))
+            groups.append(rows)
+
+        def tally(draw):
+            distinct = []
+            mono = 0
+            counts = {}
+            for seed in range(1, 201):
+                chosen = draw(seed)
+                cols = [take.collection_of(row) for row in chosen]
+                distinct.append(len(set(cols)))
+                if len(set(cols)) == 1:
+                    mono += 1
+                for col in cols:
+                    counts[col] = counts.get(col, 0) + 1
+            n = 200 * len(symbols)
+            return {
+                "distinct_per_take": round(sum(distinct) / len(distinct), 3),
+                "share": round(sum(distinct) / len(distinct) / len(symbols), 3),
+                "mono": round(mono / len(distinct), 3),
+                "counts": {key: round(val / n, 3) for key, val in sorted(counts.items())},
+            }
+
+        before = tally(lambda seed: take.choose(groups, seed, None, None, False)[0])
+        after = tally(lambda seed: take.draw_each(groups, seed, None)[0])
+        print("source variety before", before)
+        print("source variety after", after)
+        self.assertEqual(before["distinct_per_take"], 1.0)
+        self.assertEqual(before["mono"], 1.0)
+        self.assertGreaterEqual(after["distinct_per_take"], 3.5)
+        self.assertGreaterEqual(after["share"], 0.2)
+        self.assertLess(after["mono"], 0.02)
+        for name in ("jacobschoir", "fatsynth", "syntharp"):
+            self.assertGreater(after["counts"][name], 0.15, after)
+            self.assertLess(after["counts"][name], 0.35, after)
+        # Piano is one family split evenly across two sources, not 13 files against 1.
+        self.assertGreater(after["counts"]["00a_main"], 0.08, after)
+        self.assertLess(after["counts"]["00a_main"], 0.22, after)
+        self.assertGreater(after["counts"]["freesound-piano"], 0.08, after)
+        self.assertLess(after["counts"]["freesound-piano"], 0.22, after)
+        again, _primary = take.draw_each(groups, 7, None)
+        same, _primary = take.draw_each(groups, 7, None)
+        self.assertEqual(
+            [take.collection_of(row) for row in again],
+            [take.collection_of(row) for row in same],
+        )
+        choir, _primary = take.draw_each(groups, 4, ["choir"])
+        self.assertTrue(all(row["instrument"] == "choir" for row in choir))
+        named = []
+        for seed in range(1, 21):
+            chosen, _primary = take.draw_each(groups, seed, ["piano"])
+            named.extend(take.family_of(row["instrument"]) for row in chosen)
+        self.assertGreater(len(set(named)), 1)
+        self.assertLess(named.count("piano") / len(named), 0.5)
+
+    def test_sixteen_chords_gather_stays_near_a_second(self):
+        symbols = ["D", "A", "Bm", "F#m", "G", "D", "G", "A"] * 2
+        rows = []
+        for origin, instrument, collection in (
+            ("musicmatter", "choir", "jacobschoir"),
+            ("musicmatter", "piano", "00a_main"),
+            ("musicmatter", "fat synth", "fatsynth"),
+            ("musicmatter", "synth arp", "syntharp"),
+        ):
+            for sym in symbols:
+                row = _clip(origin, f"{instrument} {sym}", instrument, f"{collection}-{sym}", kind="supplier", chord=sym)
+                row["collection"] = collection
+                rows.append(row)
+        bad = _clip("freesound", "Extra piano D", "piano", "nc-locked", kind="freesound", chord="D", license_id="CC-BY-NC-4.0")
+        bad["license"] = "CC-BY-NC-4.0"
+        bad["source"]["license"] = "CC-BY-NC-4.0"
+        bad["collection"] = "locked"
+        comp = dict(COMP, composition="4/4. quarter = 60. one chord per bar. " + ", ".join(symbols) + ".")
+        searchers = _searchers({"musicmatter": rows, "freesound": [bad]})
+        started = time.perf_counter()
+        plan = _plan(1, comp=comp, searchers=searchers, settle_s=0, gather_deadline_s=2)
+        elapsed = time.perf_counter() - started
+        print(f"sixteen-chord gather {elapsed:.3f}s")
+        self.assertEqual(len(plan["clips"]), 16)
+        self.assertLess(elapsed, 2.0)
+        self.assertNotIn("stretch_to_s", json.dumps(plan))
+        self.assertTrue(all(take.family_of(clip["instrument"]) for clip in plan["clips"]))
+        blob = json.dumps(plan)
+        self.assertNotIn("CC-BY-NC", blob)
+        self.assertNotIn("Extra piano D", blob)
+        families = {clip["family"] for clip in plan["clips"]}
+        self.assertGreater(len(families), 1)
+        again = _plan(1, comp=comp, searchers=searchers, settle_s=0, gather_deadline_s=2)
+        self.assertEqual(
+            [clip["collection"] for clip in plan["clips"]],
+            [clip["collection"] for clip in again["clips"]],
+        )
+
+    def test_a_second_catalog_pack_stays_in_the_draw(self):
+        from ncperf import discover
+
+        tmp = tempfile.mkdtemp(prefix="nc-packs-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        previous = os.environ.get("NC_CACHE")
+        os.environ["NC_CACHE"] = tmp
+        url = "https://example.test/suppliers-packs.json"
+        offerings = []
+        for pack in ("00a_main", "00b_main-voicings"):
+            offerings.append({
+                "audio": f"https://audio.musicmatter.art/fullchords/D/{pack}_Dm7_1_root.flac",
+                "manifest": f"https://musicmatter.art/sounds/fullchords-v4/D/{pack}_Dm7_1_root.nc.json",
+                "instrument_name": "Piano",
+                "chord": "Dm7",
+            })
+        discover._write_index_disk(url, offerings)
+        discover._MM_CACHE.pop(url, None)
+        comp = dict(COMP, composition="4/4. quarter = 60. one chord per bar. Dm7.")
+        token = discover.arm_wall(8)
+        packs = set()
+        try:
+            for seed in range(1, 41):
+                plan = assemble.plan_raw(
+                    comp, seed=seed, searchers={"openverse": lambda *_a: []}, verify_live=False,
+                    note_maps=[], registry_url=url, gather_deadline_s=0.4, settle_s=0,
+                )
+                packs.add(plan["clips"][0]["collection"])
+        finally:
+            discover.reset_wall(token)
+            discover._MM_CACHE.pop(url, None)
+            if previous is None:
+                os.environ.pop("NC_CACHE", None)
+            else:
+                os.environ["NC_CACHE"] = previous
+        self.assertEqual(packs, {"00a_main", "00b_main-voicings"})
 
 
 class RawRenderTest(unittest.TestCase):

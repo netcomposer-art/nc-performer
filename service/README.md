@@ -8,7 +8,7 @@ On the site, Perform and Perform again assemble in the browser. Gather copies ea
 
 The earlier layered engine stays in the tree and is off. `POST /api/perform-processed` answers 404 unless `NC_PROCESSED` is `1`, `true`, `yes`, or `on`. Gather and `POST /api/perform` stay raw either way. The deploy workflow does not set `NC_PROCESSED`.
 
-An optional `instrument` field is a weak hint (`choir`, `synth`, `piano`). The ensemble comes from the words. When the Composition or the Performance names instruments, those words are the ensemble. When they name none, the take picks one family that can play every chord, and each such family is equally likely, piano included. The hint does not select a supplier, does not enter the search, and does not put piano first. One take is one clip per chord and one ensemble. The next take, or Gather again, can choose a different ensemble. A Performance is not refused because only one or two origins answered.
+An optional `instrument` field is a weak hint (`choir`, `synth`, `piano`). The ensemble comes from the words. When the Composition or the Performance names a choir, guitar, synth, or another family, that family is the draw. The word "piano" does not narrow it, and piano is not the default. When the words name no family, each chord draws on its own from the families that can play that chord. Each family has the same chance. Inside a family, each source has the same chance, and inside a source each collection has the same chance. A library with more files is not heavier. A whole Gather from one collection happens only when that draw lands there. The hint does not select a supplier, does not enter the search, and does not put piano first. One take is one clip per chord. The next take, or Gather again, draws again. A Performance is not refused because only one or two origins answered.
 
 You can run it on your own computer. You do not need an account on netcomposer.art. A record made here, or with the kit, can move to any other instance with `nc submit`.
 
@@ -145,7 +145,7 @@ The word "Piano." in the Canon and blues Performance lines does not lock the fam
 
 ### Canon in D, 10 seeds, no instrument named
 
-The published Performance line says "Piano." This run used the 16-bar harmony and the words "Let each chord ring into the next. One ensemble, clear and unhurried." Live suppliers were queried inside the 4 second deadline. Musicmatter covered every chord, so no note stack was used. Each take is 16 whole-chord files, one family, length 53.333 s (one chord per bar).
+The published Performance line says "Piano." This run used the 16-bar harmony and the words "Let each chord ring into the next. One ensemble, clear and unhurried." Live suppliers were queried inside the 4 second deadline. Musicmatter covered every chord, so no note stack was used. Each take is 16 whole-chord files, length 53.333 s (one chord per bar). These ten seeds are the earlier draw, which picked one family for the whole take. Gather now draws each chord on its own, so a take mixes families unless the words name one.
 
 | Seed | Family | Origin | Built | Chord 1 |
 |---|---|---|---|---|
@@ -160,7 +160,7 @@ The published Performance line says "Piano." This run used the 16-bar harmony an
 | 9 | synth arp | musicmatter | whole-chord file | synth arp |
 | 10 | choir | musicmatter | whole-chord file | Choir |
 
-Piano is in 2 of these 10 takes. An `instrument: "Piano"` hint on the same seed does not change the family. Words that say "choir" pick choir. The word "Piano." does not. It is one family in the draw, the same size as the others that can cover the piece.
+Piano is in 2 of these 10 takes. An `instrument: "Piano"` hint on the same seed does not change the family. Words that say "choir" pick choir. The word "Piano." does not. Piano is the same size as the other families. That table locked one family for every chord. The current draw does that only when the words name the family.
 
 ### Previous layered engine (not what this release runs)
 
