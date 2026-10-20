@@ -18,7 +18,7 @@
     },
     "interpreter": {
       "type": "object", "description": "Who turned the words into this plan. Copied into the record.",
-      "properties": {"kind": {"type": "string", "enum": ["llm", "human/agent-written plan", "stub"]}, "model": {"type": "string"}, "base_url": {"type": "string"}, "at": {"type": "string"}, "note": {"type": "string"}}
+      "properties": {"kind": {"type": "string", "enum": ["llm", "human/agent-written plan", "stub", "discover"]}, "model": {"type": "string"}, "base_url": {"type": "string"}, "at": {"type": "string"}, "note": {"type": "string"}}
     },
     "seed": {"type": "integer", "description": "Seeds every random choice in the render (roll spreads, gain jitter, and the noise of the synthetic reverb engine)."},
     "length_s": {"type": "number", "minimum": 5, "description": "Where the music ends."},
@@ -82,7 +82,7 @@
     "source": {
       "type": "object", "required": ["kind"],
       "properties": {
-        "kind": {"type": "string", "enum": ["supplier", "freesound", "uiowa_mis", "url"], "description": "supplier: a manifest from a registered Supplier (suppliers.json). freesound: a sound id (license read from the live page, HQ preview used). uiowa_mis: a UIowa MIS file URL (terms checked live). url: any other file with a declared license, checked on its page when given."},
+        "kind": {"type": "string", "enum": ["supplier", "freesound", "uiowa_mis", "url", "commons"], "description": "supplier: a manifest from a registered Supplier. freesound: a sound id (license read from the live page, HQ preview used). uiowa_mis: a UIowa MIS file URL (terms checked live). commons: a file from the open commons whose license is checked on its live page. url: any other file with a declared license, checked on its page when given. Hosted Perform does not accept kind=url."},
         "manifest": {"type": "string"}, "id": {"type": "string"}, "url": {"type": "string"}, "page": {"type": "string"},
         "license": {"type": "string", "description": "kind=url only: CC0-1.0, CC-BY-x.y, CC-BY-SA-x.y or PD."},
         "author": {"type": "string"}, "title": {"type": "string"}, "source": {"type": "string"},

@@ -1,0 +1,364 @@
+{
+ "glass": {
+  "performance": "Clear and open, like light through glass. Gentle strikes, a little space between chords.",
+  "seed": 11,
+  "source_mix": {
+   "by_origin": {
+    "musicmatter": 2,
+    "freesound": 2,
+    "openverse": 1,
+    "internet_archive": 1
+   },
+   "share": {
+    "musicmatter": 0.33,
+    "freesound": 0.33,
+    "openverse": 0.17,
+    "internet_archive": 0.17
+   },
+   "instruments": [
+    "choir",
+    "rhodes",
+    "synth",
+    "texture"
+   ],
+   "queried": [
+    "wikimedia",
+    "ccmixter",
+    "uiowa",
+    "musicmatter",
+    "freesound",
+    "openverse",
+    "internet_archive"
+   ],
+   "returned": {
+    "freesound": 1,
+    "musicmatter": 5,
+    "openverse": 1,
+    "internet_archive": 1,
+    "wikimedia": 0,
+    "ccmixter": 0,
+    "uiowa": 0
+   },
+   "terms": [
+    "percussion",
+    "texture",
+    "pluck"
+   ],
+   "instrument_hint": null,
+   "rule": "Same query to every origin. Round-robin selection. One origin is capped at half the clips unless the notes name that origin, or it is the only origin that returned sounds."
+  },
+  "notes": [
+   "Source mix: musicmatter 2, freesound 2, openverse 1, internet_archive 1. Instruments: choir, rhodes, synth, texture. No pitch-shift and no time-stretch; clips are trimmed and faded."
+  ],
+  "layers": [
+   {
+    "id": "strikes",
+    "events": [
+     "choir (musicmatter) Choir",
+     "rhodes (freesound) rhodes",
+     "synth (openverse) Percussive Buchla 200e morphagene reel by mudlogger",
+     "texture (internet_archive) Ramblin' Band: LIVE @ BurnDown Denver - 9/18/2026",
+     "synth (musicmatter) Fat Synth"
+    ]
+   },
+   {
+    "id": "bed",
+    "events": [
+     "bed rhodes (freesound) rhodes"
+    ]
+   }
+  ],
+  "sources": {
+   "mu-0": {
+    "kind": "supplier",
+    "title": null,
+    "author": null,
+    "license": null,
+    "manifest": "https://audio.musicmatter.art/fullchords/jacobschoir/A/00a_main_A7_4_inv3.nc.json",
+    "url": null,
+    "id": null,
+    "page": null
+   },
+   "fr-1": {
+    "kind": "freesound",
+    "title": null,
+    "author": null,
+    "license": null,
+    "manifest": null,
+    "url": null,
+    "id": "65719",
+    "page": null
+   },
+   "op-2": {
+    "kind": "commons",
+    "title": "Percussive Buchla 200e morphagene reel by mudlogger",
+    "author": "mudlogger",
+    "license": "CC-BY-4.0",
+    "manifest": null,
+    "url": "https://cdn.freesound.org/previews/485/485426_8973798-hq.mp3",
+    "id": null,
+    "page": "https://freesound.org/people/mudlogger/sounds/485426"
+   },
+   "in-3": {
+    "kind": "commons",
+    "title": "Ramblin' Band: LIVE @ BurnDown Denver - 9/18/2026",
+    "author": "Ramblin' Band: ABB",
+    "license": "CC0-1.0",
+    "manifest": null,
+    "url": "https://archive.org/download/ramblinbandatburndown91826show/1-05%20Mama%20Tried%20-%20LIVE.mp3",
+    "id": null,
+    "page": "https://archive.org/details/ramblinbandatburndown91826show"
+   },
+   "mu-4": {
+    "kind": "supplier",
+    "title": null,
+    "author": null,
+    "license": null,
+    "manifest": "https://audio.musicmatter.art/fullchords/fatsynth/A/00a_main_Am_6_inv2_8va.nc.json",
+    "url": null,
+    "id": null,
+    "page": null
+   }
+  }
+ },
+ "choir-synth": {
+  "performance": "A choir in the distance, then a soft synth answers. Keep the piano out of the lead.",
+  "seed": 12,
+  "source_mix": {
+   "by_origin": {
+    "musicmatter": 2,
+    "freesound": 3,
+    "openverse": 1
+   },
+   "share": {
+    "musicmatter": 0.33,
+    "freesound": 0.5,
+    "openverse": 0.17
+   },
+   "instruments": [
+    "choir",
+    "harp",
+    "synth",
+    "texture"
+   ],
+   "queried": [
+    "ccmixter",
+    "uiowa",
+    "musicmatter",
+    "freesound",
+    "openverse",
+    "internet_archive",
+    "wikimedia"
+   ],
+   "returned": {
+    "ccmixter": 3,
+    "freesound": 7,
+    "musicmatter": 5,
+    "openverse": 6,
+    "internet_archive": 0,
+    "wikimedia": 0,
+    "uiowa": 0
+   },
+   "terms": [
+    "synth",
+    "choir"
+   ],
+   "instrument_hint": null,
+   "rule": "Same query to every origin. Round-robin selection. One origin is capped at half the clips unless the notes name that origin, or it is the only origin that returned sounds."
+  },
+  "notes": [
+   "Source mix: freesound 3, musicmatter 2, openverse 1. Instruments: choir, harp, synth, texture. No pitch-shift and no time-stretch; clips are trimmed and faded."
+  ],
+  "layers": [
+   {
+    "id": "strikes",
+    "events": [
+     "choir (musicmatter) Choir",
+     "harp (freesound) harp",
+     "synth (openverse) Synth Choir Waveform Stereo C2",
+     "synth (musicmatter) Fat Synth",
+     "texture (freesound) freesound 614546"
+    ]
+   },
+   {
+    "id": "bed",
+    "events": [
+     "bed harp (freesound) harp"
+    ]
+   }
+  ],
+  "sources": {
+   "mu-0": {
+    "kind": "supplier",
+    "title": null,
+    "author": null,
+    "license": null,
+    "manifest": "https://audio.musicmatter.art/fullchords/jacobschoir/A/00a_main_A7_5_root_8va.nc.json",
+    "url": null,
+    "id": null,
+    "page": null
+   },
+   "fr-1": {
+    "kind": "freesound",
+    "title": null,
+    "author": null,
+    "license": null,
+    "manifest": null,
+    "url": null,
+    "id": "373563",
+    "page": null
+   },
+   "op-2": {
+    "kind": "commons",
+    "title": "Synth Choir Waveform Stereo C2",
+    "author": "Vanyamba",
+    "license": "CC0-1.0",
+    "manifest": null,
+    "url": "https://cdn.freesound.org/previews/614/614112_1063450-hq.mp3",
+    "id": null,
+    "page": "https://freesound.org/people/Vanyamba/sounds/614112"
+   },
+   "mu-3": {
+    "kind": "supplier",
+    "title": null,
+    "author": null,
+    "license": null,
+    "manifest": "https://audio.musicmatter.art/fullchords/fatsynth/A/00a_main_A7_1_root.nc.json",
+    "url": null,
+    "id": null,
+    "page": null
+   },
+   "fr-4": {
+    "kind": "freesound",
+    "title": null,
+    "author": null,
+    "license": null,
+    "manifest": null,
+    "url": null,
+    "id": "614546",
+    "page": null
+   }
+  }
+ },
+ "pluck-synth": {
+  "performance": "Layer a plucked string with a fat synth. Vary the color on each chord.",
+  "seed": 13,
+  "source_mix": {
+   "by_origin": {
+    "uiowa": 1,
+    "musicmatter": 2,
+    "freesound": 1,
+    "openverse": 1,
+    "internet_archive": 1
+   },
+   "share": {
+    "uiowa": 0.17,
+    "musicmatter": 0.33,
+    "freesound": 0.17,
+    "openverse": 0.17,
+    "internet_archive": 0.17
+   },
+   "instruments": [
+    "violin",
+    "synth",
+    "texture"
+   ],
+   "queried": [
+    "uiowa",
+    "musicmatter",
+    "freesound",
+    "openverse",
+    "internet_archive",
+    "wikimedia",
+    "ccmixter"
+   ],
+   "returned": {
+    "uiowa": 1,
+    "musicmatter": 5,
+    "freesound": 6,
+    "openverse": 6,
+    "internet_archive": 1,
+    "ccmixter": 3,
+    "wikimedia": 0
+   },
+   "terms": [
+    "synth"
+   ],
+   "instrument_hint": null,
+   "rule": "Same query to every origin. Round-robin selection. One origin is capped at half the clips unless the notes name that origin, or it is the only origin that returned sounds."
+  },
+  "notes": [
+   "Source mix: musicmatter 2, uiowa 1, freesound 1, openverse 1, internet_archive 1. Instruments: violin, synth, texture. No pitch-shift and no time-stretch; clips are trimmed and faded."
+  ],
+  "layers": [
+   {
+    "id": "strikes",
+    "events": [
+     "violin (uiowa) violin",
+     "synth (musicmatter) Fat Synth",
+     "texture (freesound) freesound 20203",
+     "synth (openverse) Atmospheric Ambient Spacy Synth Beat.wav",
+     "texture (internet_archive) MegaEnx - Space Debris"
+    ]
+   },
+   {
+    "id": "bed",
+    "events": [
+     "bed synth (musicmatter) Fat Synth"
+    ]
+   }
+  ],
+  "sources": {
+   "ui-0": {
+    "kind": "uiowa_mis",
+    "title": null,
+    "author": null,
+    "license": null,
+    "manifest": null,
+    "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/violin2012/Violin.arco.pp.sulD.C5B5.stereo.aif",
+    "id": null,
+    "page": "https://theremin.music.uiowa.edu/MISviolin2012.html"
+   },
+   "mu-1": {
+    "kind": "supplier",
+    "title": null,
+    "author": null,
+    "license": null,
+    "manifest": "https://audio.musicmatter.art/fullchords/fatsynth/A/00a_main_A7_2_inv1.nc.json",
+    "url": null,
+    "id": null,
+    "page": null
+   },
+   "fr-2": {
+    "kind": "freesound",
+    "title": null,
+    "author": null,
+    "license": null,
+    "manifest": null,
+    "url": null,
+    "id": "20203",
+    "page": null
+   },
+   "op-3": {
+    "kind": "commons",
+    "title": "Atmospheric Ambient Spacy Synth Beat.wav",
+    "author": "RutgerMuller",
+    "license": "CC0-1.0",
+    "manifest": null,
+    "url": "https://cdn.freesound.org/previews/51/51230_179538-hq.mp3",
+    "id": null,
+    "page": "https://freesound.org/people/RutgerMuller/sounds/51230"
+   },
+   "in-4": {
+    "kind": "commons",
+    "title": "MegaEnx - Space Debris",
+    "author": "MegaEnx",
+    "license": "CC-BY-SA-3.0",
+    "manifest": null,
+    "url": "https://archive.org/download/pandacd-2555-space-debris/03%20-%20MegaEnx%20-%20Wild%20Feelings.mp3",
+    "id": null,
+    "page": "https://archive.org/details/pandacd-2555-space-debris"
+   }
+  }
+ }
+}

@@ -112,10 +112,14 @@ validates without the `jsonschema` package, and uses it when installed). Example
 - [`examples/glass-garden.create-stub.plan.json`](examples/glass-garden.create-stub.plan.json): a plan stub made on https://netcomposer.art/create/
 
 A plan holds: `sections`; `chords` (time, length, symbol, voicing as MIDI notes); `sources` (by id:
-`supplier` manifest, `freesound` id, `uiowa_mis` file, or `url` with a declared license); `banks`
+`supplier` manifest, `freesound` id, `uiowa_mis` file, `commons` file with a live license check, or
+`url` with a declared license); `banks`
 (instrument -> note -> candidate source ids); `layers` (`chord_notes`, `chord_pad`, `chord_under`, `drone`,
 `clips`, `notes` for the line and triplets); `master` (buses with the hacks, reverb, loudness); `quality`
-(time-stretch and resampling engines); `seed`; `notes`.
+(time-stretch and resampling engines); `seed`; `notes`. Hosted Perform
+([`service/`](service/)) searches Suppliers and the open commons with the same words and does not
+prefer one supplier. That search trims clips instead of time-stretching them. `--stub` still drafts
+a musicmatter chord plan with a time-stretched pad, for editing by hand.
 
 ## The master hacks (kit 0.2)
 

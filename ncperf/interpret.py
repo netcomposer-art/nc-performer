@@ -102,8 +102,8 @@ SYSTEM = """You are the INTERPRETER of a NetComposer Performer. You turn a Compo
 Rules you must keep:
 - Keep the composer's chords, line and form; choose voicings, orchestration, pacing, hacks and seed yourself.
 - Voicings are MIDI note lists (60 = C4). Prefer voicings that exist in the full chord set (given) so the chord strikes can come from it.
-- Sounds: use only ids from the LIBRARY below, or add supplier manifests (kind "supplier") from the full chord set, or Freesound ids (kind "freesound") you are sure are CC0/CC BY/CC BY-SA. Licenses are checked live; anything else is rejected.
-- Never ask for pitch-shifting; there is no such field. Time-stretch is allowed.
+- Sounds: use the DISCOVERED SOUNDS when they are listed. They already come from several origins on equal footing. Do not put most layers on one supplier unless the Performance names that supplier. Otherwise use only ids from the LIBRARY below, or Freesound ids you are sure are CC0/CC BY/CC BY-SA. Licenses are checked live; anything else is rejected.
+- Never ask for pitch-shifting; there is no such field. Do not set stretch_to_s. Trim and fade instead.
 - Reverb: master.reverb.engine "dragonfly" (default) with send_lu (wet loudness vs dry, LU; about 5 for ambient, 1-2 for drier) and optional params (decay_s etc.). "convolution" only with an ir id from the kit's list.
 - Loudness: master.loudness.lufs -17, tp -1.5.
 - Reply with the JSON object only."""
@@ -120,16 +120,17 @@ def _json_from(text):
     i, j = text.find('{'), text.rfind('}')
     return json.loads(text[i:j + 1])
 
-def llm(comp, seed=1, base_url=None, model=None, api_key=None, example=None, repair_rounds=2, log=print):
+def llm(comp, seed=1, base_url=None, model=None, api_key=None, example=None, repair_rounds=2, log=print, discovered_plan=None):
     base = base_url or os.environ.get('NC_LLM_BASE_URL') or os.environ.get('OPENAI_BASE_URL')
     model = model or os.environ.get('NC_LLM_MODEL')
     key = api_key if api_key is not None else os.environ.get('NC_LLM_API_KEY', os.environ.get('OPENAI_API_KEY'))
     if not base or not model: raise SystemExit('LLM interpreter needs NC_LLM_BASE_URL and NC_LLM_MODEL (and usually NC_LLM_API_KEY). Or use --plan FILE or --stub.')
     lib = _data('library.json')
     example = example or _data('example.plan.json')
-    draft = None
-    try: draft = stub(comp, seed=seed)
-    except ValueError: pass
+    draft = discovered_plan
+    if draft is None:
+        try: draft = stub(comp, seed=seed)
+        except ValueError: pass
     user = '\n\n'.join([
         'JSON SCHEMA (plan.json):\n' + json.dumps(SCHEMA, separators=(',', ':')),
         'LIBRARY (sources and banks you may use; each bank note lists candidates, the renderer keeps the first that measures right):\n' + json.dumps(dict(sources=lib['sources'], banks=lib['banks']), separators=(',', ':')),
@@ -162,5 +163,5 @@ def from_plan(path):
     errs = validate(plan)
     if errs: raise SystemExit(f'{path} does not validate:\n' + '\n'.join(errs[:40]))
     it = plan.get('interpreter') or {}
-    if it.get('kind') not in ('llm', 'stub'): plan['interpreter'] = dict(it, kind='human/agent-written plan')
+    if it.get('kind') not in ('llm', 'stub', 'discover'): plan['interpreter'] = dict(it, kind='human/agent-written plan')
     return plan

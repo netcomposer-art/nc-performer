@@ -33,6 +33,13 @@ DEFAULT_HOSTS = (
     "webfiles.york.ac.uk",
     "www.openair.hosted.york.ac.uk",
     "web.archive.org",
+    "archive.org",
+    "us.archive.org",
+    "api.openverse.org",
+    "commons.wikimedia.org",
+    "upload.wikimedia.org",
+    "wikimedia.org",
+    "ccmixter.org",
     "api.x.ai",
 )
 

@@ -32,6 +32,7 @@ from .config import Settings
 from .ids import sha256_text
 from .jobs import Store
 from .limits import Reject, check_plan, load_suppliers
+from ncperf.discover import plan_for
 from .planner import cache_key, compute_cost, llm_cost, needs_llm
 from .sign import Signer, apply_signature
 from .storage import Storage
@@ -228,8 +229,22 @@ class Runner:
     def _interpret(self, comp: dict, seed: int, usage: dict, force_stub: bool = False) -> tuple[dict, str]:
         settings = self.settings
         text = (comp.get("composition") or "") + "\n" + (comp.get("performance") or "")
+        instrument = (comp.get("instrument") or "").strip() or None
+        if instrument:
+            text += "\ninstrument: " + instrument
         want = needs_llm(text) and not force_stub
         soft = self.store.spend_today() >= settings.daily_soft_usd
+        discovered = None
+        try:
+            discovered = plan_for(
+                comp, seed=seed, instrument=instrument, host_ok_fn=settings.host_allowed,
+                registry_url=settings.suppliers_json,
+            )
+        except Exception as exc:
+            discovered = None
+            discover_error = str(exc)
+        else:
+            discover_error = None
         if want and settings.llm_configured and not soft:
             key = cache_key(text, seed, settings.llm_model)
             cached = self.storage.get(f"plans/{key}.json")
@@ -239,27 +254,26 @@ class Runner:
                 usage["tokens"] = {"cached_plan": True}
                 usage["usd"] = 0.0
                 return plan, "llm-cache"
-            plan, info = _llm(comp, seed, settings)
+            plan, info = _llm(comp, seed, settings, discovered=discovered)
             usage["model"] = info.get("model") or settings.llm_model
             usage["tokens"] = info.get("usage") or {}
             usd = llm_cost(usage["tokens"], settings)
             usage["usd"] = usd
             self.storage.put(f"plans/{key}.json", json.dumps(plan).encode(), "application/json")
             return plan, "llm"
+        if discovered is not None:
+            if want and not settings.llm_configured:
+                note = "LLM planning was not configured; the even-handed search was used."
+            elif want and soft:
+                note = "The daily AI budget is spent; the even-handed search was used."
+            else:
+                note = None
+            if note:
+                discovered.setdefault("notes", []).append(note)
+            return discovered, "discover"
         if want and not settings.llm_configured:
-            note = "LLM planning was not configured (no XAI_API_KEY or NC_LLM_BASE_URL); the stub ran."
-        elif want and soft:
-            note = "The daily AI budget is spent; the stub ran."
-        else:
-            note = None
-        try:
-            plan = interpret.stub(comp, seed=seed)
-        except ValueError as e:
-            raise Reject(str(e)) from e
-        if note:
-            plan.setdefault("notes", []).append(note)
-            plan["interpreter"]["note"] = (plan["interpreter"].get("note") or "") + " " + note
-        return plan, "stub"
+            raise Reject(discover_error or "No licensed sounds came back, and no model is configured.")
+        raise Reject(discover_error or "No licensed sounds came back from the sources that were queried.")
 
     def _render(self, job_id, plan, comp, req, stage_t, mark) -> dict:
         settings = self.settings
@@ -378,7 +392,7 @@ def _composition_md(comp: dict) -> str:
     return f"""# {title}
 
 **Composer of this Composition:** {composer} · **License out:** CC BY-SA 4.0
-**Allowed transforms:** trim, gain, fade, filter, reverb, delay, time_stretch (no pitch-shift)
+**Allowed transforms:** trim, gain, fade, filter, reverb, delay (no pitch-shift, no time-stretch)
 
 ## Composition
 
@@ -391,7 +405,7 @@ def _composition_md(comp: dict) -> str:
 ## Material rules
 
 - Inputs: CC0, CC BY, CC BY-SA or public domain only.
-- No pitch-shifting. Time-stretch is fine.
+- No pitch-shifting and no time-stretching. Clips are trimmed and faded.
 - Output license: CC BY-SA 4.0.
 """
 
@@ -421,7 +435,7 @@ def _tag(flac: str, mp3: str, title: str, artist: str, record_url: str) -> None:
     os.replace(tmp_m, mp3)
 
 
-def _llm(comp: dict, seed: int, settings: Settings) -> tuple[dict, dict]:
+def _llm(comp: dict, seed: int, settings: Settings, discovered: dict | None = None) -> tuple[dict, dict]:
     """Call the kit's LLM interpreter and keep the token usage it would otherwise drop.
 
     The real request is the kit's ``ncperf.interpret.llm``: POST
@@ -443,6 +457,7 @@ def _llm(comp: dict, seed: int, settings: Settings) -> tuple[dict, dict]:
         plan = interpret.llm(
             comp, seed=seed, base_url=settings.llm_base_url,
             model=settings.llm_model, api_key=settings.llm_api_key, log=lambda *a: None,
+            discovered_plan=discovered,
         )
     except SystemExit as e:
         raise Reject(str(e) or "The AI plan was not valid, and the stub could not replace it.") from e

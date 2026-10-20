@@ -1,5 +1,6 @@
-"""Fetch sounds: registered Suppliers (suppliers.json -> index -> manifest -> audio) first, then the open commons.
-Every license is checked on a live page or manifest at fetch time. Downloads are cached by URL (and byte range)."""
+"""Fetch one planned sound and check its license on the live page or manifest.
+Which sounds to try is decided by ncperf.discover. This module does not rank suppliers.
+Downloads are cached by URL (and byte range)."""
 import hashlib, html as _html, json, os, re, time, urllib.request
 from . import licenses as LIC
 from .util import sha256_file
@@ -101,6 +102,24 @@ def resolve(src):
                     supplier=dict(display_name='University of Iowa Electronic Music Studios', primary_link=IOWA_TERMS_URL),
                     license=dict(id='PD-equivalent', name='Public domain equivalent (UIowa MIS: no restrictions)', uri=IOWA_TERMS_URL, terms_verbatim=IOWA_TERMS, verified_live=f'{now}, {IOWA_TERMS_URL}'),
                     sha256=sha256_file(p), size_bytes=os.path.getsize(p), partial=False)
+    if k == 'commons':
+        L = LIC.from_id(src.get('license'))
+        if not LIC.allowed(L[0]): raise ValueError(f"license not allowed: {src.get('license')}")
+        page = src.get('page') or ''
+        if not page or not src.get('url'): raise ValueError('commons source needs a url and a page')
+        html, final = text(page)
+        found = LIC.page_licenses(html)
+        uri = (L[2] or '').rstrip('/')
+        page_l = html.lower()
+        if L[0] not in found and (not uri or uri not in html) and not (L[0] == 'PD' and 'public domain' in page_l):
+            raise ValueError(f"declared license {L[0]} not found on the live page {page} ({found})")
+        rb = src.get('range_bytes'); p = download(src['url'], rb)
+        what = 'open-commons file as published' + (f'; only the first {rb:,} bytes were fetched (HTTP Range) and hashed' if rb else '')
+        return dict(path=p, audio_url=src['url'], what=what, source=src.get('source') or 'open commons', source_url=final or page,
+                    title=src.get('title') or os.path.basename(src['url']), author=src.get('author') or 'unknown',
+                    supplier=dict(display_name=src.get('author') or 'unknown', primary_link=page),
+                    license=dict(id=L[0], name=L[1], uri=L[2], verified_live=f'{now}, {final or page}'),
+                    sha256=sha256_file(p), size_bytes=os.path.getsize(p), partial=bool(rb))
     if k == 'url':
         L = LIC.from_id(src['license'])
         if not LIC.allowed(L[0]): raise ValueError(f"license not allowed: {src['license']}")

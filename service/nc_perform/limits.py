@@ -9,6 +9,7 @@ import os
 import urllib.request
 from urllib.parse import urlparse
 
+from ncperf import licenses as LIC
 from ncperf.schema import validate as schema_validate
 
 from .config import Settings
@@ -66,11 +67,8 @@ def check_plan(plan: dict, settings: Settings, suppliers: dict | None) -> None:
 
 def _check_sources(plan: dict, settings: Settings, suppliers: dict | None) -> None:
     lib = library()
-    freesound = set()
     uiowa = set()
     for src in lib.get("sources", {}).values():
-        if src.get("kind") == "freesound" and src.get("id"):
-            freesound.add(str(src["id"]))
         if src.get("kind") == "uiowa_mis" and src.get("url"):
             uiowa.add(src["url"])
     listed = _listed_manifests(suppliers)
@@ -79,8 +77,15 @@ def _check_sources(plan: dict, settings: Settings, suppliers: dict | None) -> No
         if kind == "url":
             raise Reject(f"Source {sid} is kind=url. Hosted Perform does not fetch arbitrary URLs.")
         if kind == "freesound":
-            if str(src.get("id")) not in freesound:
-                raise Reject(f"Freesound id {src.get('id')} is not in the curated library.")
+            if not str(src.get("id") or "").isdigit():
+                raise Reject(f"Freesound id {src.get('id')} is not a sound id.")
+        elif kind == "commons":
+            if not src.get("url") or not src.get("page") or not src.get("license"):
+                raise Reject(f"Source {sid} needs a url, a page, and a license.")
+            if not LIC.allowed(LIC.from_id(str(src.get("license")))[0]):
+                raise Reject(f"Source {sid} license is not allowed.")
+            _need_host(src["url"], settings)
+            _need_host(src["page"], settings)
         elif kind == "uiowa_mis":
             if src.get("url") not in uiowa:
                 raise Reject(f"Source {sid} is not a UIowa file from the curated library.")

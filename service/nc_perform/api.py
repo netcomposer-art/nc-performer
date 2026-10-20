@@ -640,7 +640,16 @@ def _composition(body: dict) -> dict:
     # Never invent a person's name. Blank stays anonymous.
     typed = body["composer"] if "composer" in body else comp.get("composer")
     comp["composer"] = (typed or "").strip() or "anonymous"
+    if "instrument" in body and body.get("instrument") not in (None, ""):
+        comp["instrument"] = _instrument(body.get("instrument"))
     return comp
+
+
+def _instrument(raw) -> str:
+    text = str(raw or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 ._-]{0,39}", text):
+        raise Reject("instrument must be a short name, like choir, synth, or piano. It is a timbre hint, not a supplier.")
+    return text
 
 
 def _public_job(job_id, state, stage, percent, error, app: App, position=None) -> dict:
@@ -649,7 +658,7 @@ def _public_job(job_id, state, stage, percent, error, app: App, position=None) -
         "planning": "Planning the Performance…",
         "fetching": "Fetching sounds, licenses checked…",
         "measuring": "Measuring pitch…",
-        "rendering": "Rendering layers, time-stretch (pitch unchanged)…",
+        "rendering": "Rendering layers…",
         "reverb": "Reverb hack…",
         "mastering": "Mastering to -17 LUFS…",
         "verifying": "Checking the record…",

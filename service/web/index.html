@@ -36,6 +36,8 @@
     <textarea id="composition" name="composition">1 min. Ebsus2, Cm-add9, Ab6/9, Bb7sus4, Eb6.</textarea>
     <label for="performance">Performance</label>
     <textarea id="performance" name="performance">Clear and open, like light through glass. Gentle strikes, a little space between chords.</textarea>
+    <label for="instrument">Instrument <span class="muted">(optional timbre hint, any source)</span></label>
+    <input id="instrument" name="instrument" placeholder="choir, synth, strings…">
     <label for="visibility">Who can find it</label>
     <select id="visibility" name="visibility">
       <option value="unlisted" selected>Unlisted (link only, audio kept 90 days)</option>
@@ -105,6 +107,7 @@ $("form").onsubmit = async (ev) => {
     composer: $("composer").value,
     composition: $("composition").value,
     performance: $("performance").value,
+    instrument: $("instrument").value,
     visibility: $("visibility").value,
     turnstile_token: token ? token.value : undefined,
     perform_again: !!jobId

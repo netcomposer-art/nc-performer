@@ -2,7 +2,9 @@
 
 This folder is a small website in front of the NetComposer Performer kit in the parent directory.
 
-You write a Composition. Perform fetches openly licensed sounds, checks the license, and renders a Performance. Pitch is never shifted. The sound is shaped by **hacks** (time-stretch, reverb, a loudness limiter). The output is [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). The code is MIT, Copyright (c) 2026 Peter Semmelhack.
+You write a Composition. Perform searches openly licensed sounds across registered Suppliers and the open commons with no supplier preferred, checks the license, and renders a Performance. Pitch is never shifted, and this search does not time-stretch. The sound is shaped by **hacks** (trim, fade, reverb, a loudness limiter). The output is [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). The code is MIT, Copyright (c) 2026 Peter Semmelhack.
+
+An optional `instrument` field on `POST /api/perform` is a timbre hint (`choir`, `synth`, `piano`). It is matched against every source. It does not select musicmatter. The record's `summary.source_mix` lists how many clips came from each origin.
 
 You can run it on your own computer. You do not need an account on netcomposer.art. A record made here, or with the kit, can move to any other instance with `nc submit`.
 
@@ -26,11 +28,11 @@ There are no user accounts in v1. Each Performance comes with a `claim_token`, s
 
 - Inputs: CC0, CC BY, CC BY-SA, or public domain.
 - Output: CC BY-SA 4.0.
-- No pitch-shifting. Time-stretch is allowed.
+- No pitch-shifting. The hosted search trims and fades clips. It does not time-stretch them. A hand-written plan can still set `stretch_to_s`.
 - No `kind=url` sources. The service will not fetch an arbitrary URL.
 - The transforms are called hacks.
 
-AI planning runs only when the words ask for a line, triplets, or sections. Otherwise the stub planner runs and no model is called. The hosted default model is `grok-4.3` at `https://api.x.ai/v1`. Set `XAI_API_KEY` and nothing else, and the kit posts to `{base}/chat/completions` with that model. If you set `NC_LLM_BASE_URL` yourself, that host is used instead. Tests point that URL at a local mock. They never call api.x.ai.
+AI planning runs only when the words ask for a line, triplets, or sections. Otherwise even-handed source discovery runs and no model is called. `summary.source_mix` on the record lists how many clips came from each origin. The hosted default model is `grok-4.3` at `https://api.x.ai/v1`. Set `XAI_API_KEY` and nothing else, and the kit posts to `{base}/chat/completions` with that model. If you set `NC_LLM_BASE_URL` yourself, that host is used instead. Tests point that URL at a local mock. They never call api.x.ai.
 
 A soft daily cap of $3 switches new jobs to the stub. A hard cap of $5 answers "Perform is resting until tomorrow."
 

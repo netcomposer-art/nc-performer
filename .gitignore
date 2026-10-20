@@ -12,6 +12,8 @@ out/
 *.wav
 *.flac
 *.mp3
+# Short discovery previews for the even-handed source PR. Other audio stays out of git.
+!service/previews/*.mp3
 *.ogg
 *.aif
 *.aiff

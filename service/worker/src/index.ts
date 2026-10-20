@@ -35,6 +35,13 @@ const ALLOWED_HOSTS = [
   "webfiles.york.ac.uk",
   "www.openair.hosted.york.ac.uk",
   "web.archive.org",
+  "archive.org",
+  "us.archive.org",
+  "api.openverse.org",
+  "commons.wikimedia.org",
+  "upload.wikimedia.org",
+  "wikimedia.org",
+  "ccmixter.org",
   "api.x.ai",
 ];
 
@@ -392,6 +399,10 @@ async function perform(request: Request, env: Env, base: string): Promise<Respon
     return json({ error: "The bot check failed. Reload the page and try again.", code: "turnstile" }, 403);
   }
   const comp = compositionFrom(body);
+  const instrumentError = instrumentProblem(body.instrument);
+  if (instrumentError) return json({ error: instrumentError, code: "rejected" }, 400);
+  const instrument = typeof body.instrument === "string" && body.instrument.trim() ? body.instrument.trim() : null;
+  if (instrument) comp.instrument = instrument;
   const words = `${comp.composition || ""}\n${comp.performance || ""}`;
   const wordErr = wordsTooLong(words);
   if (wordErr) return json({ error: wordErr, code: "rejected" }, 400);
@@ -419,9 +430,10 @@ async function perform(request: Request, env: Env, base: string): Promise<Respon
     visibility,
     seed,
     keep: Boolean(body.keep),
+    instrument: instrument,
     claim_hash: await sha256Text(token),
     public_base: base,
-    // The container still decides stub vs model from the words. This flag is only the soft budget.
+    // The container still decides discovery vs model from the words. This flag skips the model when the soft budget is spent.
     force_stub: spend >= 3,
   };
   const job: Job = {
@@ -1028,6 +1040,15 @@ async function rateLimit(env: Env, ipHash: string): Promise<string | null> {
     // Local tests have no binding. The Durable Object still enforces both windows.
   }
   return budget(env).hit(ipHash);
+}
+
+function instrumentProblem(raw: unknown): string | null {
+  if (raw == null || raw === "") return null;
+  const text = String(raw).trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9 ._-]{0,39}$/.test(text)) {
+    return "instrument must be a short name, like choir, synth, or piano. It is a timbre hint, not a supplier.";
+  }
+  return null;
 }
 
 function compositionFrom(body: Record<string, unknown>): Record<string, unknown> {

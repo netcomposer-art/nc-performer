@@ -171,6 +171,9 @@ test("the exported ContainerProxy is what the container start path calls for egr
   assert.ok(props.allowedHosts?.includes("*.musicmatter.art"));
   assert.ok(props.allowedHosts?.includes("audio.musicmatter.art"));
   assert.ok(props.allowedHosts?.includes("api.x.ai"));
+  assert.ok(props.allowedHosts?.includes("api.openverse.org"));
+  assert.ok(props.allowedHosts?.includes("ccmixter.org"));
+  assert.ok(props.allowedHosts?.includes("*.us.archive.org"));
 });
 
 test("the container entrypoint appends the runtime CA and keeps temp off /tmp", () => {

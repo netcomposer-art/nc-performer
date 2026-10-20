@@ -77,12 +77,15 @@ nc perform composition.md -o out/           # or any OpenAI-compatible LLM via N
 
 **By hand** (any tools), in this order:
 
-1. Fetch each sound. Suppliers first: https://netcomposer.art/suppliers.json -> the Supplier's index ->
-   the manifest (license, sha256, audio URL). Check the sha256. Then the open commons (Freesound,
-   Wikimedia Commons, Internet Archive, public-domain collections); read the license on the live page.
-   Freesound originals need OAuth2; the public HQ previews are fine, say so in the record.
+1. Fetch each sound from any license-compatible source. Registered Suppliers
+   (https://netcomposer.art/suppliers.json -> the Supplier's index -> the manifest) are one origin,
+   not a preferred one. Also search the open commons (Freesound, Wikimedia Commons, the Internet
+   Archive, ccMixter, Openverse, public-domain collections). Read the license on the live page and
+   check a Supplier sha256. Freesound originals need OAuth2; the public HQ previews are fine, say so
+   in the record. Hosted Perform queries these origins together and does not start with a Supplier.
 2. Measure every pitched sound (pYIN or similar; FFT for bells). Drop any that is not the note.
-3. Place, time-stretch (never pitch-shift), fade, filter, add delay and reverb. Name the reverb tool and its
+3. Place, fade, filter, add delay and reverb. Never pitch-shift. A hand-written plan may time-stretch
+   (`stretch_to_s`, pitch unchanged). Hosted Perform's search does not: it trims and fades. Name the reverb tool and its
    version in the record; a convolution impulse response is an input like any other (license, author, sha256).
 4. Master to -17 LUFS integrated, true peak <= -1 dBTP: linear gain, then a true-peak limiter (4x oversampled)
    only where a peak would pass the ceiling. Avoid ffmpeg `loudnorm`: it can switch to dynamic mode on its own. Write FLAC

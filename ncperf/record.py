@@ -18,6 +18,7 @@ def rhash(r): return hashlib.sha256(canon({k: v for k, v in r.items() if k not i
 def interpreter_label(it):
     if not it: return 'human/agent-written plan'
     if it.get('kind') == 'llm': return it.get('model') or 'llm (model not named)'
+    if it.get('kind') == 'discover': return 'even-handed source discovery (no supplier preferred)'
     if it.get('kind') == 'stub': return 'nc interpret --stub (rule-based draft, no LLM)'
     return 'human/agent-written plan'
 
@@ -105,7 +106,7 @@ def build(plan, plan_path, log, flac, mp3, out_path, performer='nc-performer kit
                  dict(file=os.path.basename(mp3), format='MP3 320 kbps, 48 kHz (preview)', sha256=sha256_file(mp3), size_bytes=os.path.getsize(mp3), duration_s=round(dur(mp3), 3), loudness_lufs_integrated=mI, true_peak_dbtp=mP, lra_lu=mL)],
         known_compromises=comp, license_out=dict(id=LIC.OUT['id'], uri=LIC.OUT['uri'])),
       hacks_chain=hacks_chain(plan, log), sounds_used=sounds,
-      summary=dict(distinct_sounds=len(sounds), authors=authors, contributors=len(authors), sources=dict(cnt), licenses=dict(lic), total_events=len(log['uses'])),
+      summary=dict(distinct_sounds=len(sounds), authors=authors, contributors=len(authors), sources=dict(cnt), licenses=dict(lic), total_events=len(log['uses']), **({'source_mix': plan['source_mix']} if plan.get('source_mix') else {})),
       derived_inputs=dict(accepted_input_licenses=['CC0-1.0', 'CC-BY (any version)', 'CC-BY-SA (any version)', 'Public domain (incl. UIowa MIS no-restriction terms)'], present=sorted(lic),
                           check='OK: no NC, ND, Sampling+ or custom-restrictive licenses. CC BY / BY-SA inputs credited; output CC BY-SA 4.0.'),
       attribution=f"\u201c{C['title']}\u201d, composed by {C.get('composer')}. Performed with the NetComposer Performer kit (interpreter: {it['label']}) using sounds by: {credit}. Licensed CC BY-SA 4.0, {LIC.OUT['uri']}",
