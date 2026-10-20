@@ -24,6 +24,8 @@ from .ids import ID_RE, claim_token, new_id, sha256_text
 from .jobs import Store
 from .limits import Reject, check_words
 from .planner import llm_price_card
+from ncperf.cancel import MESSAGE as CANCELLED_MESSAGE
+from .cancel import token_from, wipe_performance, write_cancelled_status
 from .runner import Runner, claim_matches, store_kit_submission
 from .sign import Signer
 from .storage import Storage, open_storage
@@ -241,6 +243,9 @@ def make_handler(app: App):
             path = urllib.parse.urlparse(self.path).path
             if path == "/api/perform":
                 return self._perform()
+            m = re.fullmatch(r"/api/jobs/([hk]-[0-9a-z]+)/cancel", path)
+            if m:
+                return self._cancel(m.group(1))
             m = re.fullmatch(r"/api/jobs/([hk]-[0-9a-z]+)/(keep|visibility)", path)
             if m:
                 return self._meta_post(m.group(1), m.group(2))
@@ -413,10 +418,45 @@ def make_handler(app: App):
                     self.wfile.write(f"data: {payload}\n\n".encode())
                     self.wfile.flush()
                     last = snap
-                if job["state"] in ("done", "failed", "rejected"):
+                if job["state"] in ("done", "failed", "rejected", "cancelled"):
                     break
                 app.runner._stop.wait(1.0)
             self.close_connection = True
+
+        def _cancel(self, job_id):
+            job = app.store.get(job_id)
+            if not job:
+                return self._send(404, {"error": "not found"})
+            try:
+                body = json.loads(self._read(8000).decode() or "{}")
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                raise Reject("Body must be JSON.")
+            if not isinstance(body, dict):
+                raise Reject("Body must be a JSON object.")
+            token = token_from(body)
+            if not token:
+                return self._send(400, {"error": "claim_token is required.", "code": "rejected"})
+            meta = _read_json(app.storage, f"performances/{job_id}/meta.json") or {}
+            stored = job.get("claim_hash") or meta.get("claim_token_sha256")
+            if not claim_matches(stored, token):
+                return self._send(403, {"error": "claim_token does not match this Performance."})
+            if job.get("state") in ("done", "failed", "rejected"):
+                return self._send(200, _public_job(
+                    job_id, job["state"], job["stage"], job["percent"], job.get("error"), app, None, job=job,
+                ))
+            app.runner.request_cancel(job_id)
+            left = app.store.mark_cancelled(job_id, CANCELLED_MESSAGE)
+            job = app.store.get(job_id) or job
+            if left in ("done", "failed", "rejected"):
+                return self._send(200, _public_job(
+                    job_id, job["state"], job["stage"], job["percent"], job.get("error"), app, None, job=job,
+                ))
+            wipe_performance(app.storage, job_id)
+            write_cancelled_status(app.storage, job_id)
+            job = app.store.get(job_id) or job
+            return self._send(200, _public_job(
+                job_id, job["state"], job["stage"], job["percent"], job.get("error"), app, None, job=job,
+            ))
 
         def _meta_post(self, job_id, action):
             ctype = self.headers.get("Content-Type") or ""

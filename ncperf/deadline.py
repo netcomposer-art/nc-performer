@@ -53,6 +53,9 @@ def check() -> None:
     budget = current()
     if budget is not None:
         budget.check()
+    # A Stop during a search must leave the search, not wait out the budget.
+    from . import cancel as job_cancel
+    job_cancel.check()
 
 
 @contextlib.contextmanager

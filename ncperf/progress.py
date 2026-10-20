@@ -14,6 +14,7 @@ STAGE_LINES = {
     "done": "Done",
     "failed": "Something went wrong.",
     "rejected": "This Performance was refused.",
+    "cancelled": "Stopped.",
 }
 
 _ORIGIN = {
