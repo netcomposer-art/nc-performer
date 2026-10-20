@@ -1,9 +1,10 @@
 """Gather a collection, then Perform it later without searching again.
 
-Gather reads the note index and asks every supplier, with a short deadline.
-It does not download the note libraries and it does not measure pitch.
-Perform downloads the files that collection kept, in parallel.
-One-shot Perform does not call this module, and it keeps the 20 second budgets.
+Gather asks every supplier for a recording of each chord, with a short deadline.
+It does not download the files and it does not measure pitch. A single-note
+library is used only when the note index can stack that chord, and only for a
+chord that has no whole-chord recording. Perform places those clips in order.
+The layered engine remains available as build(..., processed=True).
 """
 from __future__ import annotations
 
@@ -15,6 +16,7 @@ import time
 from . import deadline
 from . import fetch
 from . import progress
+from . import assemble
 from .discover import arm_wall, plan_for, reset_wall
 from .parallel import run_all
 
@@ -65,8 +67,50 @@ def source_rows(plan: dict) -> list[dict]:
     return rows
 
 
-def build(comp: dict, *, seed: int = 1, instrument: str | None = None, avoid_keys=None, avoid_sample_ids=None, host_ok_fn=None, registry_url=None, verify_live: bool = True, searchers=None, note_maps=None, progress_cb=None) -> dict:
-    """Search and pick. If the previous collection leaves a chord empty, keep those sounds."""
+def build(comp: dict, *, seed: int = 1, instrument: str | None = None, avoid_keys=None, avoid_sample_ids=None, host_ok_fn=None, registry_url=None, verify_live: bool = True, searchers=None, note_maps=None, progress_cb=None, processed: bool = False) -> dict:
+    """Search and pick. The default is one raw clip per chord.
+
+    ``processed=True`` keeps the layered plan for the later processing step.
+    If the previous collection leaves a chord empty, the pick is tried once more
+    without those exclusions.
+    """
+    if processed:
+        return _build_layered(
+            comp, seed=seed, instrument=instrument, avoid_keys=avoid_keys,
+            avoid_sample_ids=avoid_sample_ids, host_ok_fn=host_ok_fn,
+            registry_url=registry_url, verify_live=verify_live, searchers=searchers,
+            note_maps=note_maps, progress_cb=progress_cb,
+        )
+    kwargs = dict(
+        seed=seed, instrument=instrument, host_ok_fn=host_ok_fn, searchers=searchers,
+        registry_url=registry_url, verify_live=verify_live, note_maps=note_maps,
+        progress_cb=progress_cb, origin_budget_s=ORIGIN_S, avoid_keys=avoid_keys,
+        avoid_sample_ids=avoid_sample_ids,
+    )
+    avoided = bool(avoid_keys or avoid_sample_ids)
+    wall = arm_wall(ORIGIN_S)
+    try:
+        try:
+            plan = assemble.plan_raw(comp, **kwargs)
+        except ValueError:
+            if not avoided:
+                raise
+            kwargs["avoid_keys"] = None
+            kwargs["avoid_sample_ids"] = None
+            plan = assemble.plan_raw(comp, **kwargs)
+    finally:
+        reset_wall(wall)
+    plan["from_gather"] = True
+    picks = [str(item) for item in (plan.pop("gather_picks", None) or []) if item]
+    files = source_rows(plan)
+    keys, samples = picked_from_plan(plan)
+    keys = list(dict.fromkeys(picks + keys))
+    samples = list(dict.fromkeys([item for item in picks if item] + samples))
+    return {"plan": plan, "files": files, "picked_keys": keys, "picked_sample_ids": samples}
+
+
+def _build_layered(comp: dict, *, seed: int = 1, instrument: str | None = None, avoid_keys=None, avoid_sample_ids=None, host_ok_fn=None, registry_url=None, verify_live: bool = True, searchers=None, note_maps=None, progress_cb=None) -> dict:
+    """The layered search. Off unless processing is turned on."""
     kwargs = dict(
         seed=seed,
         instrument=instrument,
@@ -161,7 +205,13 @@ def cache_sources(plan: dict, budget_s: float = FETCH_S) -> list[dict]:
 
 
 def public_sounds(plan: dict, gather_id: str, base: str, files: list[dict] | None = None) -> list[dict]:
-    """The list the page shows. preview_url plays the cached file."""
+    """The list the page shows. preview_url plays the cached file.
+
+    A raw collection is one row per chord, with the credit for that clip.
+    """
+    clips = plan.get("clips") if plan.get("assembly") == "raw" else None
+    if isinstance(clips, list) and clips:
+        return _clip_sounds(clips, gather_id, base, files)
     base = (base or "").rstrip("/")
     by_sid = {row.get("sid"): row for row in (files or []) if isinstance(row, dict)}
     sounds = []
@@ -187,6 +237,42 @@ def public_sounds(plan: dict, gather_id: str, base: str, files: list[dict] | Non
             "page": str(src.get("page") or ""),
         }
         source_url = file.get("url") or src.get("audio_url") or src.get("url")
+        if source_url:
+            row["source_url"] = source_url
+        sounds.append(row)
+    return sounds
+
+
+def _clip_sounds(clips: list, gather_id: str, base: str, files: list[dict] | None) -> list[dict]:
+    base = (base or "").rstrip("/")
+    by_sid = {row.get("sid"): row for row in (files or []) if isinstance(row, dict)}
+    sounds = []
+    for clip in clips:
+        if not isinstance(clip, dict):
+            continue
+        sid = str(clip.get("id") or "")
+        title = str(clip.get("title") or "").strip()
+        license_id = str(clip.get("license") or "").strip()
+        supplier = str(clip.get("supplier") or "").strip()
+        if not sid or not title or not license_id or not supplier:
+            continue
+        preview = f"{base}/api/jobs/{gather_id}/audio/{sid}" if base else f"/api/jobs/{gather_id}/audio/{sid}"
+        row = {
+            "id": sid,
+            "title": title,
+            "supplier": supplier,
+            "license": license_id,
+            "credit": str(clip.get("credit") or ""),
+            "preview_url": preview,
+            "page": str(clip.get("page") or ""),
+            "chord": clip.get("chord"),
+            "symbol": clip.get("symbol") or "",
+        }
+        sids = [str(item) for item in (clip.get("sids") or []) if item]
+        file = by_sid.get(sids[0]) if len(sids) == 1 else {}
+        source_url = (file or {}).get("url")
+        if not source_url and len(sids) == 1:
+            source_url = None
         if source_url:
             row["source_url"] = source_url
         sounds.append(row)
@@ -239,9 +325,49 @@ def save_collection(storage, gather_id: str, doc: dict, files: list[dict]) -> No
     )
 
 
-def read_audio(storage, gather_id: str, sid: str) -> tuple[bytes, str] | None:
-    """One gathered file. The first play downloads that file and keeps the bytes."""
+def _clip_for(doc: dict, sid: str) -> dict | None:
+    plan = doc.get("plan") if isinstance(doc.get("plan"), dict) else {}
+    for clip in plan.get("clips") or []:
+        if isinstance(clip, dict) and str(clip.get("id") or "") == sid:
+            return clip
+    return None
+
+
+def _stacked_preview(storage, gather_id: str, clip: dict) -> tuple[bytes, str] | None:
+    sid = str(clip.get("id") or "")
+    if not sid:
+        return None
+    key = f"gathers/{gather_id}/audio/{sid}"
+    data = storage.get(key)
+    if data:
+        return bytes(data), "audio/wav"
+    plan = {}
     doc = load_collection(storage, gather_id) or {}
+    if isinstance(doc.get("plan"), dict):
+        plan = doc["plan"]
+    try:
+        from .assemble import preview_clip
+        data = preview_clip(plan, clip)
+    except Exception:
+        return None
+    if not data:
+        return None
+    storage.put(key, data, "audio/wav")
+    return data, "audio/wav"
+
+
+def read_audio(storage, gather_id: str, sid: str) -> tuple[bytes, str] | None:
+    """One gathered file. The first play downloads that file and keeps the bytes.
+
+    A raw clip id plays that chord. A stack of notes is mixed on this request
+    and kept, so the next play does not build it again.
+    """
+    doc = load_collection(storage, gather_id) or {}
+    clip = _clip_for(doc, sid)
+    if clip and len(clip.get("sids") or []) > 1:
+        return _stacked_preview(storage, gather_id, clip)
+    if clip and clip.get("sids"):
+        sid = str(clip["sids"][0])
     row = next((item for item in (doc.get("files") or []) if isinstance(item, dict) and item.get("sid") == sid), None)
     data = storage.get(f"gathers/{gather_id}/audio/{sid}")
     if data:

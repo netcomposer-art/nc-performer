@@ -692,6 +692,7 @@ class ServiceTest(unittest.TestCase):
             __import__("cryptography").hazmat.primitives.serialization.NoEncryption(),
         )).decode()
         s.queue_autostart = False
+        s.processed = True
         s.allowed_hosts = ("127.0.0.1",)
         app, httpd = _api(s)
         self.addCleanup(_close, httpd)
@@ -707,7 +708,7 @@ class ServiceTest(unittest.TestCase):
             "visibility": "unlisted",
             "seed": 7,
         }
-        req = urllib.request.Request(api + "/api/perform", json.dumps(words).encode(), {"Content-Type": "application/json"})
+        req = urllib.request.Request(api + "/api/perform-processed", json.dumps(words).encode(), {"Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=10) as r:
             created = json.loads(r.read())
         self.assertEqual(r.status, 202)

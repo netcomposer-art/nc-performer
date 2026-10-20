@@ -270,6 +270,10 @@ def make_handler(app: App):
                 return self._gather()
             if path == "/api/perform":
                 return self._perform()
+            if path == "/api/perform-processed":
+                if not app.settings.processed:
+                    return self._send(404, {"error": "not found"})
+                return self._perform(processed=True)
             m = re.fullmatch(r"/api/jobs/([hkg]-[0-9a-z]+)/cancel", path)
             if m:
                 return self._cancel(m.group(1))
@@ -363,7 +367,7 @@ def make_handler(app: App):
                 "poll": f"/api/jobs/{job_id}",
             })
 
-        def _perform(self):
+        def _perform(self, processed=False):
             s = app.settings
             if not app.perform_enabled() or app.store.spend_today() >= s.daily_hard_usd:
                 return self._send(503, {"error": "Perform is resting until tomorrow.", "code": "resting"})
@@ -386,6 +390,8 @@ def make_handler(app: App):
                 gather_id = None
             if plan is not None and not isinstance(plan, dict):
                 raise Reject("plan must be a JSON object.")
+            if not gathered and plan is not None and not processed and plan.get("assembly") != "raw":
+                raise Reject("This release assembles the recordings in order. Processing is off.")
             allowed, tester = self._rate_block_or_tester()
             if not allowed:
                 return
@@ -410,6 +416,7 @@ def make_handler(app: App):
                 "keep": bool(body.get("keep")),
                 "claim_hash": sha256_text(token),
                 "tester": tester,
+                "processed": bool(processed),
             }
             app.store.create({
                 "id": job_id,

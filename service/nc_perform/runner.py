@@ -31,7 +31,8 @@ from ncperf.render import Renderer
 from .config import Settings
 from .ids import sha256_text
 from .jobs import Store
-from .limits import Reject, check_plan, load_suppliers
+import ncperf.assemble as assemble
+from .limits import Reject, check_plan, load_suppliers, source_cap
 from ncperf.cancel import MESSAGE as CANCELLED_MESSAGE
 from ncperf.cancel import bind as bind_cancel
 from ncperf.cancel import check as cancel_check
@@ -274,6 +275,7 @@ class Runner:
             plan = doc["plan"]
         if req.get("gather_id"):
             restore_cache(self.storage, req["gather_id"])
+        processed = bool(req.get("processed")) and bool(settings.processed)
         mode = "plan"
         os.environ["NC_SUPPLIERS_JSON"] = settings.suppliers_json
         os.environ["NC_PERFORMER"] = settings.instance_name
@@ -284,10 +286,33 @@ class Runner:
             fetch._reg.clear()
         with egress_guard(settings):
             suppliers = None
-            if plan is None:
+            if plan is None and not processed:
+                instrument = (comp.get("instrument") or "").strip() or None
+
+                def progress_cb(line, sound=None):
+                    self._progress(job_id, stage_line=line, sound=sound, seed=seed)
+
+                try:
+                    built = gather.build(
+                        comp,
+                        seed=seed,
+                        instrument=instrument,
+                        host_ok_fn=settings.host_allowed,
+                        registry_url=settings.suppliers_json,
+                        progress_cb=progress_cb,
+                    )
+                except ValueError as exc:
+                    raise Reject(str(exc)) from exc
+                plan = built["plan"]
+                mode = "raw"
+            elif plan is None:
                 plan, mode = self._interpret(
                     comp, seed, usage, force_stub=bool(req.get("force_stub")), job_id=job_id,
                 )
+            elif plan.get("assembly") == "raw":
+                mode = "raw"
+            elif not processed:
+                raise Reject("This release assembles the recordings in order. Processing is off.")
             # Supplier manifests are checked against the live registry. A failure
             # here is a rejection, before any audio is written.
             try:
@@ -302,7 +327,7 @@ class Runner:
             fit_plan(
                 plan,
                 max_layers=settings.max_layers,
-                max_sources=settings.max_sources,
+                max_sources=source_cap(plan, settings),
                 max_chords=settings.max_chords,
                 max_length_s=settings.max_length_s,
                 max_plan_bytes=settings.max_plan_bytes,
@@ -371,7 +396,7 @@ class Runner:
         fit_plan(
             plan,
             max_layers=settings.max_layers,
-            max_sources=settings.max_sources,
+            max_sources=source_cap(plan, settings),
             max_chords=settings.max_chords,
             max_length_s=settings.max_length_s,
             max_plan_bytes=settings.max_plan_bytes,
@@ -468,7 +493,8 @@ class Runner:
         try:
             os.environ["NC_PERFORMER"] = settings.instance_name
             comp_path = os.path.join(work, "composition.md")
-            open(comp_path, "w", encoding="utf-8").write(_composition_md(comp))
+            raw = plan.get("assembly") == "raw"
+            open(comp_path, "w", encoding="utf-8").write(_composition_md(comp, raw=raw))
             plan_path = os.path.join(work, "plan.json")
             json.dump(plan, open(plan_path, "w", encoding="utf-8"), indent=1, ensure_ascii=False)
 
@@ -484,9 +510,11 @@ class Runner:
             self._stage(job_id, "rendering", stage_t, mark)
             # The 10 minute cap is enforced by the caller: the Cloudflare queue
             # consumer stops waiting, and `docker` can be given a stop timeout.
-            # Renderer itself is one blocking call into the kit.
-            flac, mp3, rlog = Renderer(plan, work, log=log).run("performance")
-            self._stage(job_id, "mastering", stage_t, mark)
+            if raw:
+                flac, mp3, rlog = assemble.render(plan, work, log=log)
+            else:
+                flac, mp3, rlog = Renderer(plan, work, log=log).run("performance")
+                self._stage(job_id, "mastering", stage_t, mark)
             preview = os.path.join(work, "preview.mp3")
             os.replace(mp3, preview)
             master = os.path.join(work, "performance.flac")
@@ -612,13 +640,14 @@ def _iso_plus_hours(hours: int) -> str:
     return (datetime.now(timezone.utc) + timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _composition_md(comp: dict) -> str:
+def _composition_md(comp: dict, raw: bool = False) -> str:
     title = comp.get("title") or "Untitled"
     composer = comp.get("composer") or "anonymous"
+    transforms = "trim, fade, gain (no pitch-shift, no time-stretch)" if raw else "trim, gain, fade, filter, reverb, delay (no pitch-shift, no time-stretch)"
     return f"""# {title}
 
 **Composer of this Composition:** {composer} · **License out:** CC BY-SA 4.0
-**Allowed transforms:** trim, gain, fade, filter, reverb, delay (no pitch-shift, no time-stretch)
+**Allowed transforms:** {transforms}
 
 ## Composition
 

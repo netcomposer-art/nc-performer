@@ -110,6 +110,22 @@ test("proxy allowlist covers subdomains the exact apex would miss", () => {
   assert.equal(hosts.includes("*.*.example.com"), false);
 });
 
+test("raw assembly keeps one file per chord past the layered source cap", () => {
+  const sources: Record<string, { kind: string }> = {};
+  for (let i = 0; i < 35; i++) sources["c" + i] = { kind: "supplier" };
+  const plan = {
+    assembly: "raw",
+    sources,
+    chords: Array.from({ length: 35 }, () => ({ t: 0 })),
+    layers: [{}],
+    length_s: 120,
+    tail_s: 0,
+  };
+  assert.equal(rejectPlan(plan), null);
+  const layered = { ...plan, assembly: "layered" };
+  assert.match(rejectPlan(layered) || "", /at most 24 sources/);
+});
+
 test("a Performance can have 16 layers and not 17", () => {
   assert.equal(DEFAULT_LIMITS.maxLayers, 16);
   const plan = { sources: {}, chords: [{ t: 0 }], layers: Array.from({ length: 16 }, () => ({})), length_s: 10, tail_s: 0 };

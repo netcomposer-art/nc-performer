@@ -123,6 +123,7 @@ class Settings:
     llm_usd_cached: float = DEFAULT_LLM_USD[1]
     llm_usd_out: float = DEFAULT_LLM_USD[2]
     llm_every_perform: bool = False
+    processed: bool = False
     cpu_usd_s: float = DEFAULT_CPU_USD_S
     gib_usd_s: float = DEFAULT_GIB_USD_S
     extra_hosts: tuple[str, ...] = field(default_factory=tuple)
@@ -241,6 +242,7 @@ def load() -> Settings:
         llm_usd_cached=_f("NC_LLM_USD_PER_TOKEN_CACHED", DEFAULT_LLM_USD[1]),
         llm_usd_out=_f("NC_LLM_USD_PER_TOKEN_OUT", DEFAULT_LLM_USD[2]),
         llm_every_perform=os.environ.get("NC_LLM_EVERY_PERFORM", "").strip().lower() in ("1", "true", "yes", "on"),
+        processed=os.environ.get("NC_PROCESSED", "").strip().lower() in ("1", "true", "yes", "on"),
         cpu_usd_s=_f("NC_CPU_USD_PER_S", DEFAULT_CPU_USD_S),
         gib_usd_s=_f("NC_GIB_USD_PER_S", DEFAULT_GIB_USD_S),
     )

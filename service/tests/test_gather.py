@@ -81,6 +81,7 @@ class GatherKitTest(unittest.TestCase):
         try:
             built = gather.build(
                 COMP, seed=1, verify_live=False, note_maps=[], searchers=_commons_searchers(),
+                processed=True,
             )
         finally:
             gather.plan_for = real
@@ -125,7 +126,7 @@ class GatherKitTest(unittest.TestCase):
         try:
             built = gather.build(
                 COMP, seed=1, verify_live=False, note_maps=[], searchers=_commons_searchers(),
-                avoid_keys=["cm-Cm"],
+                avoid_keys=["cm-Cm"], processed=True,
             )
         finally:
             gather.plan_for = real

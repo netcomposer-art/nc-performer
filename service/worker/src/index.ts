@@ -118,6 +118,7 @@ export interface Env {
   NC_INTERNAL_TOKEN?: string;
   NC_PUBLIC_BASE_URL?: string;
   NC_IP_HASH_SALT?: string;
+  NC_PROCESSED?: string;
 }
 
 type Job = {
@@ -417,6 +418,10 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (request.method === "GET" && path === "/admin") return adminPage(request, env);
   if (request.method === "POST" && path === "/api/gather") return gather(request, env, base);
   if (request.method === "POST" && path === "/api/perform") return perform(request, env, base);
+  if (request.method === "POST" && path === "/api/perform-processed") {
+    if (!processedOn(env)) return json({ error: "not found" }, 404);
+    return perform(request, env, base, true);
+  }
   if (request.method === "POST" && path === "/api/submit") return submit(request, env, base);
   if (request.method === "POST" && path === "/admin/enabled") return adminEnabled(request, env);
   if (request.method === "POST" && (path === "/admin/hide" || path === "/admin/takedown")) {
@@ -604,7 +609,12 @@ async function keptGather(env: Env, body: Record<string, unknown>): Promise<{ ga
   return { gather_id: gatherId, plan: doc.plan, composition: doc.composition, seed };
 }
 
-async function perform(request: Request, env: Env, base: string): Promise<Response> {
+function processedOn(env: Env): boolean {
+  const value = (env.NC_PROCESSED || "").trim().toLowerCase();
+  return value === "1" || value === "true" || value === "yes" || value === "on";
+}
+
+async function perform(request: Request, env: Env, base: string, processed = false): Promise<Response> {
   const b = budget(env);
   const spend = await b.spendToday();
   const on = await b.enabled(env.PERFORM_ENABLED !== "0");
@@ -630,6 +640,10 @@ async function perform(request: Request, env: Env, base: string): Promise<Respon
     if (typeof body.plan !== "object" || Array.isArray(body.plan)) return json({ error: "plan must be a JSON object.", code: "rejected" }, 400);
     const planErr = rejectPlan(body.plan);
     if (planErr) return json({ error: planErr, code: "rejected" }, 400);
+    const posted = body.plan as { assembly?: string };
+    if (!processed && posted.assembly !== "raw") {
+      return json({ error: "This release assembles the recordings in order. Processing is off.", code: "rejected" }, 400);
+    }
   }
   const ipHash = await sha256Text(`${env.NC_IP_HASH_SALT || "nc-perform"}:${ip}`);
   const tester = await testerPass(request.headers.get("X-NC-Tester"), env.NC_TESTER_TOKEN);
@@ -657,10 +671,11 @@ async function perform(request: Request, env: Env, base: string): Promise<Respon
     instrument: instrument,
     claim_hash: await sha256Text(token),
     public_base: base,
-    // The container still decides discovery vs model from the words. This flag skips the model when the soft budget is spent.
+    // Raw assembly does not call the model. This flag still skips it on the processed endpoint when the soft budget is spent.
     // A tester pass does not change it, and it does not change the $5 rest either.
     force_stub: spend >= 3,
     tester,
+    processed: processed && processedOn(env),
   };
   const job: Job = {
     id,
@@ -879,6 +894,7 @@ function containerEnv(env: Env, base: string): Record<string, string> {
   if (env.NC_LLM_BASE_URL) out.NC_LLM_BASE_URL = env.NC_LLM_BASE_URL;
   if (env.NC_LLM_API_KEY) out.NC_LLM_API_KEY = env.NC_LLM_API_KEY;
   if (env.NC_LLM_EVERY_PERFORM) out.NC_LLM_EVERY_PERFORM = env.NC_LLM_EVERY_PERFORM;
+  if (processedOn(env)) out.NC_PROCESSED = "1";
   if (env.FREESOUND_API_KEY) out.FREESOUND_API_KEY = env.FREESOUND_API_KEY;
   if (env.NC_SIGNING_KEY) out.NC_SIGNING_KEY = env.NC_SIGNING_KEY;
   if (env.NC_INTERNAL_TOKEN) out.NC_INTERNAL_TOKEN = env.NC_INTERNAL_TOKEN;

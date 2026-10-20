@@ -57,7 +57,10 @@ export function rejectPlan(plan: unknown, limits: LimitSettings = DEFAULT_LIMITS
   const p = plan as Record<string, unknown>;
   const sources = (p.sources || {}) as Record<string, { kind?: string }>;
   const nSources = Object.keys(sources).length;
-  if (nSources > limits.maxSources) return `A Performance can use at most ${limits.maxSources} sources.`;
+  // Raw assembly is one file per chord. A stack may hold several note files.
+  // The layered cap stays 24. The 64 KiB plan cap still applies above.
+  const sourceCap = p.assembly === "raw" ? Math.max(limits.maxSources, limits.maxChords * 8) : limits.maxSources;
+  if (nSources > sourceCap) return `A Performance can use at most ${sourceCap} sources.`;
   const chords = Array.isArray(p.chords) ? p.chords.length : 0;
   if (chords > limits.maxChords) return `A Performance can have at most ${limits.maxChords} chords.`;
   const layers = Array.isArray(p.layers) ? p.layers.length : 0;
