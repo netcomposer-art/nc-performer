@@ -15,6 +15,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { Container, ContainerProxy, getContainer } from "@cloudflare/containers";
 import pageHtml from "../../web/index.html";
+import { contactPreflight, contactReady, handleContact } from "./contact";
 import { applyPerformHit, BURST_MESSAGE, claimToken, forPage, isInternalFailure, newId, PER_10MIN, PER_DAY, proxyHosts, publicInternalError, rejectPlan, wordsTooLong } from "./policy";
 
 // @cloudflare/containers 0.3.7 looks up this exact export on ctx.exports when
@@ -84,6 +85,7 @@ export interface Env {
   PERFORMANCES: R2Bucket;
   PERFORM_JOBS: Queue<{ id: string }>;
   PERFORM_RATE: RateLimit;
+  CONTACT_RATE?: RateLimit;
   NC_INSTANCE_NAME: string;
   TURNSTILE_SITEKEY: string;
   PERFORM_ENABLED: string;
@@ -99,6 +101,9 @@ export interface Env {
   NC_INTERNAL_TOKEN?: string;
   NC_PUBLIC_BASE_URL?: string;
   NC_IP_HASH_SALT?: string;
+  RESEND_API_KEY?: string;
+  CONTACT_TO?: string;
+  CONTACT_FROM?: string;
 }
 
 type Job = {
@@ -290,6 +295,8 @@ async function getSigner(env: Env): Promise<Signer | null> {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    const path = new URL(request.url).pathname.replace(/\/$/, "") || "/";
+    if (request.method === "OPTIONS" && path === "/api/contact") return contactPreflight(request);
     if (request.method === "OPTIONS") {
     return new Response(null, {
       status: 204,
@@ -342,6 +349,7 @@ async function route(request: Request, env: Env): Promise<Response> {
     return json({ ok: true, service: "nc-perform", version: "0.2.0" });
   }
   if (request.method === "GET" && path === "/api/config") return config(env);
+  if (request.method === "POST" && path === "/api/contact") return handleContact(request, env);
   if (request.method === "GET" && path === "/.well-known/nc-record-keys.json") return keys(env);
   if (request.method === "GET" && path === "/api/feed") return feed(env, base);
   if (request.method === "GET" && path === "/admin") return adminPage(request, env);
@@ -380,6 +388,7 @@ async function config(env: Env): Promise<Response> {
     perform_enabled: on,
     llm: Boolean(env.XAI_API_KEY || env.NC_LLM_BASE_URL),
     llm_model: env.NC_LLM_MODEL || null,
+    contact: contactReady(env),
   });
 }
 

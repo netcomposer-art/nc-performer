@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "check": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test src/sign.test.ts src/limits.test.ts src/entrypoint.test.ts"
+    "test": "node --experimental-strip-types --test src/sign.test.ts src/limits.test.ts src/entrypoint.test.ts src/contact.test.ts"
   },
   "dependencies": {
     "@cloudflare/containers": "^0.3.7",

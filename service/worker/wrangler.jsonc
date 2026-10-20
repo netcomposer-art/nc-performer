@@ -10,7 +10,8 @@
     "TURNSTILE_SITEKEY": "0x4AAAAAAFbvFabFcwn6LUki",
     "PERFORM_ENABLED": "1",
     "NC_LLM_MODEL": "grok-4.3",
-    "NC_SUPPLIERS_JSON": "https://netcomposer.art/suppliers.json"
+    "NC_SUPPLIERS_JSON": "https://netcomposer.art/suppliers.json",
+    "CONTACT_FROM": "NetComposer <onboarding@resend.dev>"
   },
   // RenderContainer is the sqlite Durable Object that runs the image.
   // ContainerProxy is exported from src/index.ts. It is a WorkerEntrypoint from
@@ -59,6 +60,12 @@
       "name": "PERFORM_RATE",
       "namespace_id": "1001",
       "simple": { "limit": 3, "period": 10 }
+    },
+    {
+      // 3 contact messages per 60 seconds per IP. Wrangler only allows period 10 or 60.
+      "name": "CONTACT_RATE",
+      "namespace_id": "1002",
+      "simple": { "limit": 3, "period": 60 }
     }
   ],
   "triggers": { "crons": ["15 4 * * *"] },
