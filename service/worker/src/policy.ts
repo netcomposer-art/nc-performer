@@ -346,6 +346,19 @@ export type RegistryStats = {
   recheck_days: number | null;
 };
 
+/**
+ * Counts in ncperf/data/checked-sounds.json. The Worker serves /health and
+ * /api/config, so it cannot see that file. These numbers stand in until R2
+ * has registry/v1-stats.json. A job that copies the registry up replaces them.
+ */
+export const BUNDLED_REGISTRY_STATS: RegistryStats = {
+  size: 10334,
+  ok: 8977,
+  rejected: 1357,
+  checker_version: 1,
+  recheck_days: 90,
+};
+
 /** Counts from registry/v1-stats.json. Missing or junk fields become zeros, never a secret. */
 export function registryPublicStats(doc: unknown): RegistryStats {
   const row = doc && typeof doc === "object" ? (doc as Record<string, unknown>) : {};
@@ -365,4 +378,10 @@ export function registryPublicStats(doc: unknown): RegistryStats {
     checker_version: optional(row.checker_version),
     recheck_days: optional(row.recheck_days),
   };
+}
+
+/** R2 wins when the stats object exists. A missing object is the image seed, not an empty catalog. */
+export function publishedRegistryStats(stored: unknown): RegistryStats {
+  if (stored == null) return { ...BUNDLED_REGISTRY_STATS };
+  return registryPublicStats(stored);
 }

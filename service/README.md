@@ -74,7 +74,7 @@ A row is checked again only when its fingerprint changes, `checker_version` chan
 
 `loudness_lufs` is null in the seed. The backfill did not decode the audio, so it does not invent a loudness. Raw render still matches the level of the clip it plays. Duration and cents are filled for the note-index rows, which were already measured. They are empty for musicmatter until a check decodes the file.
 
-`GET /api/config` and `GET /health` include `registry`: `size`, `ok`, `rejected`, `checker_version`, and `recheck_days`. No URLs and no secrets. The Worker reads those counts from `registry/v1-stats.json`. Until that object exists they are zeros. The container reports the bundled file.
+`GET /api/config` and `GET /health` include `registry`: `size`, `ok`, `rejected`, `checker_version`, and `recheck_days`. No URLs and no secrets. The Worker reads those counts from `registry/v1-stats.json` when that object exists. Until a job copies the registry up, it reports the bundled seed (10,334 rows, 8,977 ok, 1,357 rejected). The container reads the file in the image. `GET /api/config` also sets `browser_assembly` to true, which is the signal the site uses to assemble in the browser and Save with `POST /api/keep-take`.
 
 The seed is the note index plus the musicmatter catalog already on disk (10,195 offerings). It did not download the audio. Counts: 10,334 rows, 8,977 ok, 1,357 rejected. By supplier: musicmatter 8,839 ok and 1,356 rejected (`wrong_chord`, a catalog file whose name is not a chord), University of Iowa 104 ok, Freesound 34 ok (piano, cello, and flute), Philharmonia 1 rejected (`bad_license`, the custom licence already recorded on the note index). No row was rejected for a missing credit, a wrong pitch, an unreachable file, silence, clipping, or length, because those checks need the audio and this seed did not fetch it. On this machine a 5-chord Gather with the disk index and an empty registry downloaded 5 manifests and finished in 0.232 s (hit rate 0). The same Gather with the registry loaded made no check download and finished in 0.042 s, hit rate 1.0 (5 of 5). Loading the 5.5 MB file took 0.035 s. A rejected lookup returned in under a millisecond and did not fetch. Queue wait and the R2 copy are not in these numbers.
 
@@ -215,7 +215,7 @@ Keep with a JSON `{claim_token}` body still keeps the original render. When the 
 | `GET /.well-known/nc-record-keys.json` | The public Ed25519 key, when a signing key is set. |
 | `POST /api/submit` | A kit record plus its audio. Checked, stored under a `k-` id, not re-rendered, not signed. |
 | `GET /api/feed` | Public Performances whose 24 hour wait has passed. |
-| `GET /api/config` | Site key, limits, whether a model key is configured, and `registry` counts (`size`, `ok`, `rejected`). |
+| `GET /api/config` | Site key, limits, whether a model key is configured, `browser_assembly` (true on this release), and `registry` counts (`size`, `ok`, `rejected`). |
 | `GET /health` | Liveness, plus the same `registry` counts. |
 | `GET /` | The Perform page. |
 | `GET /admin` | Today's spend. Needs `Authorization: Bearer <NC_ADMIN_TOKEN>`. |
