@@ -134,7 +134,7 @@ class Settings:
 
     @property
     def turnstile_required(self) -> bool:
-        return bool(self.turnstile_secret)
+        return bool((self.turnstile_secret or "").strip())
 
     def host_allowed(self, host: str | None) -> bool:
         if not host:

@@ -390,15 +390,20 @@ class ServiceTest(unittest.TestCase):
             def do_POST(self):
                 n = int(self.headers.get("Content-Length") or 0)
                 form = urllib.parse.parse_qs(self.rfile.read(n).decode())
+                form["_content_type"] = [self.headers.get("Content-Type") or ""]
                 seen.append(form)
                 token = (form.get("response") or [""])[0]
                 if "remoteip" in form:
-                    payload = {"success": False, "error-codes": ["invalid-input-response"]}
+                    payload = {"success": False, "error-codes": ["invalid-input-response"], "hostname": "netcomposer.art"}
                 elif token in used:
-                    payload = {"success": False, "error-codes": ["timeout-or-duplicate"]}
+                    payload = {
+                        "success": False,
+                        "error-codes": ["timeout-or-duplicate", "secret=do-not-echo"],
+                        "hostname": "netcomposer.art",
+                    }
                 else:
                     used.add(token)
-                    payload = {"success": True}
+                    payload = {"success": True, "hostname": "netcomposer.art"}
                 raw = json.dumps(payload).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
@@ -414,7 +419,7 @@ class ServiceTest(unittest.TestCase):
         tmp = tempfile.mkdtemp(prefix="nc-turnstile-once-")
         self.addCleanup(shutil.rmtree, tmp, True)
         s = _settings(tmp, suppliers="http://127.0.0.1/suppliers.json", llm_base="", llm_model="")
-        s.turnstile_secret = "not-a-test-secret"
+        s.turnstile_secret = "not-a-test-secret\n"
         s.turnstile_verify_url = verify + "/siteverify"
         s.queue_autostart = False
         s.perform_enabled = True
@@ -440,6 +445,8 @@ class ServiceTest(unittest.TestCase):
         code, body = post("/api/gather", {"probe": True})
         self.assertEqual(code, 403)
         self.assertEqual(body["code"], "turnstile")
+        self.assertEqual(body["turnstile_errors"], ["missing-input-response"])
+        self.assertIsNone(body["hostname"])
         self.assertEqual(seen, [])
 
         code, body = post("/api/gather", {"composition": "Cm.", "turnstile_token": token})
@@ -447,6 +454,8 @@ class ServiceTest(unittest.TestCase):
         self.assertEqual(len(seen), 1)
         self.assertNotIn("remoteip", seen[0])
         self.assertEqual(seen[0]["response"], [token])
+        self.assertEqual(seen[0]["secret"], ["not-a-test-secret"])
+        self.assertTrue(seen[0]["_content_type"][0].startswith("application/x-www-form-urlencoded"))
         self.assertTrue(body["gather_id"].startswith("g-"))
 
         hop = new_id("g")
@@ -461,6 +470,9 @@ class ServiceTest(unittest.TestCase):
         code, again = post("/api/gather", {"composition": "Cm.", "turnstile_token": token})
         self.assertEqual(code, 403)
         self.assertEqual(again["code"], "turnstile")
+        self.assertEqual(again["turnstile_errors"], ["timeout-or-duplicate"])
+        self.assertEqual(again["hostname"], "netcomposer.art")
+        self.assertNotIn("secret", json.dumps(again))
         self.assertEqual(len(seen), 2)
         self.assertEqual(seen[1].get("response"), [token])
 

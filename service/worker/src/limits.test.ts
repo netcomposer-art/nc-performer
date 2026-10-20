@@ -23,6 +23,9 @@ import {
   publishedRegistryStats,
   registryPublicStats,
   siteverifyFields,
+  siteverifyRequest,
+  turnstileDeniedBody,
+  turnstileFailure,
   turnstileToken,
 } from "./policy.ts";
 
@@ -238,6 +241,29 @@ test("siteverify reads turnstile_token and does not send the client ip", () => {
   const fields = siteverifyFields("secret", "fresh-token");
   assert.deepEqual(fields, { secret: "secret", response: "fresh-token" });
   assert.equal("remoteip" in fields, false);
+  const posted = siteverifyRequest("  secret\n", "fresh-token");
+  assert.equal(posted.headers["content-type"], "application/x-www-form-urlencoded");
+  assert.equal(posted.body, "secret=secret&response=fresh-token");
+  assert.equal(posted.body.includes("remoteip"), false);
+  assert.deepEqual(
+    turnstileFailure(["invalid-input-secret", "not a code", "x".repeat(65)], "netcomposer.art"),
+    { turnstile_errors: ["invalid-input-secret"], hostname: "netcomposer.art" },
+  );
+  assert.deepEqual(turnstileFailure(["missing-input-response"], null), {
+    turnstile_errors: ["missing-input-response"],
+    hostname: null,
+  });
+  assert.equal(turnstileFailure(["timeout-or-duplicate"], "bad host").hostname, null);
+  assert.deepEqual(turnstileDeniedBody(turnstileFailure(["timeout-or-duplicate"], "netcomposer.art")), {
+    error: "The bot check failed. Reload the page and try again.",
+    code: "turnstile",
+    turnstile_errors: ["timeout-or-duplicate"],
+    hostname: "netcomposer.art",
+  });
+  const worker = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
+  assert.match(worker, /siteverifyRequest\(secret, token\)/);
+  assert.match(worker, /turnstileDeniedBody\(gate\)/);
+  assert.equal(worker.includes("remoteip"), false);
 });
 
 test("public job status always has trimmed, seed, found sounds, and a stage line", () => {

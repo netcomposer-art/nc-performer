@@ -64,6 +64,10 @@ jobs:
           put() {
             name="$1"
             val="${2:-}"
+            # Edge-trim only when asked. NC_SIGNING_KEY is a PEM and must keep its newlines.
+            if [ "${3:-}" = "trim" ]; then
+              val=$(printf '%s' "$val" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+            fi
             trimmed=$(printf '%s' "$val" | tr -d '[:space:]')
             if [ -z "$trimmed" ]; then
               echo "Skipping ${name}: GitHub secret ${name} is empty."
@@ -74,7 +78,7 @@ jobs:
           }
           put XAI_API_KEY "${XAI_API_KEY}"
           put FREESOUND_API_KEY "${FREESOUND_API_KEY}"
-          put TURNSTILE_SECRET_KEY "${TURNSTILE_SECRET_KEY}"
+          put TURNSTILE_SECRET_KEY "${TURNSTILE_SECRET_KEY}" trim
           put NC_SIGNING_KEY "${NC_SIGNING_KEY}"
           put NC_ADMIN_TOKEN "${NC_ADMIN_TOKEN}"
           put NC_TESTER_TOKEN "${NC_TESTER_TOKEN}"

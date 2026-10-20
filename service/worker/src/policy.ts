@@ -394,6 +394,51 @@ export function siteverifyFields(secret: string, token: string): { secret: strin
   return { secret, response: token };
 }
 
+const TURNSTILE_CODE = /^[a-z0-9-]{1,64}$/;
+const TURNSTILE_HOST = /^[a-z0-9.-]{1,253}$/i;
+
+export type TurnstileFailure = { turnstile_errors: string[]; hostname: string | null };
+
+/** Keep siteverify error-codes and hostname. Drop anything that is not a short code or hostname. */
+export function turnstileFailure(codes: unknown, hostname: unknown): TurnstileFailure {
+  const turnstile_errors: string[] = [];
+  if (Array.isArray(codes)) {
+    for (const code of codes) {
+      if (typeof code === "string" && TURNSTILE_CODE.test(code)) turnstile_errors.push(code);
+      if (turnstile_errors.length >= 8) break;
+    }
+  }
+  const host = typeof hostname === "string" && TURNSTILE_HOST.test(hostname) ? hostname : null;
+  return { turnstile_errors, hostname: host };
+}
+
+export function turnstileDeniedBody(failure: TurnstileFailure): {
+  error: string;
+  code: "turnstile";
+  turnstile_errors: string[];
+  hostname: string | null;
+} {
+  return {
+    error: "The bot check failed. Reload the page and try again.",
+    code: "turnstile",
+    turnstile_errors: failure.turnstile_errors,
+    hostname: failure.hostname,
+  };
+}
+
+/** Form body with an explicit content type. The secret is trimmed so a trailing newline is not the secret. */
+export function siteverifyRequest(secret: string, token: string): {
+  method: "POST";
+  headers: { "content-type": "application/x-www-form-urlencoded" };
+  body: string;
+} {
+  return {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(siteverifyFields(secret.trim(), token)).toString(),
+  };
+}
+
 /** R2 wins when the stats object exists. A missing object is the image seed, not an empty catalog. */
 export function publishedRegistryStats(stored: unknown): RegistryStats {
   if (stored == null) return { ...BUNDLED_REGISTRY_STATS };
