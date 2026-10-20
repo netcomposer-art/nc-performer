@@ -15,6 +15,25 @@
 import { DurableObject } from "cloudflare:workers";
 import { Container, ContainerProxy, getContainer } from "@cloudflare/containers";
 import pageHtml from "../../web/index.html";
+import {
+  AFTER_SIGNING,
+  EXPIRE_AUDIO,
+  KEPT_FORM_OVERHEAD,
+  KEPT_MP3,
+  KEPT_TAIL_S,
+  KEPT_WAV,
+  KEPT_WAV_MAX_BYTES,
+  KeepReject,
+  dialsLine,
+  inspectWav,
+  jobLengthS,
+  keptFiles,
+  liveAudioMeta,
+  parseDials,
+  parseMultipart,
+  tooLargeMessage,
+  type LiveDials,
+} from "./keep";
 import { applyPerformHit, BURST_MESSAGE, claimToken, forPage, isInternalFailure, newId, PER_10MIN, PER_DAY, proxyHosts, publicInternalError, rejectPlan, wordsTooLong } from "./policy";
 
 // @cloudflare/containers 0.3.7 looks up this exact export on ctx.exports when
@@ -59,6 +78,8 @@ const FILES = [
 const FILE_TYPES: Record<string, string> = {
   "performance.flac": "audio/flac",
   "preview.mp3": "audio/mpeg",
+  "kept.wav": "audio/wav",
+  "kept.mp3": "audio/mpeg",
   "record.json": "application/json",
   "plan.json": "application/json",
   "uses.json": "application/json",
@@ -678,13 +699,15 @@ async function jobStatus(env: Env, id: string, base: string): Promise<Response> 
     if (!meta && !status) return json({ error: "not found" }, 404);
     const stored = status as { state?: string; error?: string | null } | null;
     const state = String(stored?.state || "done");
-    return json(publicJob(id, state, state, state === "done" ? 100 : 0, stored?.error || null, base, null));
+    const storedMeta = state === "done" ? meta : null;
+    return json(publicJob(id, state, state, state === "done" ? 100 : 0, stored?.error || null, base, null, storedMeta as Meta | null));
   }
   const pos = job.state === "queued" ? await budget(env).positionOf(id) : null;
-  return json(publicJob(id, job.state, job.stage, job.percent, job.error, base, pos));
+  const doneMeta = job.state === "done" ? ((await readJsonKey(env, `performances/${id}/meta.json`)) as Meta | null) : null;
+  return json(publicJob(id, job.state, job.stage, job.percent, job.error, base, pos, doneMeta));
 }
 
-function publicJob(id: string, state: string, stage: string, percent: number, error: string | null, base: string, position: number | null) {
+function publicJob(id: string, state: string, stage: string, percent: number, error: string | null, base: string, position: number | null, meta?: Meta | null) {
   const lines: Record<string, string> = {
     queued: "Queued" + (position ? ` (position ${position})` : ""),
     planning: "Planning the Performance…",
@@ -709,13 +732,20 @@ function publicJob(id: string, state: string, stage: string, percent: number, er
     error: forPage(id, error),
   };
   if (state === "done") {
-    out.files = {
+    const files: Record<string, string> = {
       flac: `${base}/api/jobs/${id}/files/performance.flac`,
       mp3: `${base}/api/jobs/${id}/files/preview.mp3`,
       record: `${base}/records/${id}.json`,
       plan: `${base}/api/jobs/${id}/files/plan.json`,
       page: `${base}/records/${id}`,
     };
+    const extra = keptFiles(meta || null, base, id);
+    if (extra) {
+      Object.assign(files, extra.files);
+      out.live_dials = extra.live_dials;
+      out.kept_note = extra.kept_note;
+    }
+    out.files = files;
   }
   return out;
 }
@@ -725,8 +755,7 @@ async function file(env: Env, id: string, name: string): Promise<Response> {
   const meta = (await readJsonKey(env, `performances/${id}/meta.json`)) as Meta | null;
   if (meta?.tombstone && isAudio(name)) return json({ error: "This Performance was taken down.", code: "gone" }, 410);
   if (isAudio(name) && meta?.audio_expires_at && meta.audio_expires_at < isoNow()) {
-    await env.PERFORMANCES.delete(`performances/${id}/performance.flac`);
-    await env.PERFORMANCES.delete(`performances/${id}/preview.mp3`);
+    for (const audioName of EXPIRE_AUDIO) await env.PERFORMANCES.delete(`performances/${id}/${audioName}`);
     return json({ error: "This audio has expired. The record is still here.", code: "expired" }, 410);
   }
   const obj = await env.PERFORMANCES.get(`performances/${id}/${name}`);
@@ -816,7 +845,8 @@ async function events(env: Env, id: string, base: string): Promise<Response> {
       for (let i = 0; i < 600; i++) {
         const job = await jobs(env, id).get();
         if (!job) break;
-        const pub = publicJob(id, job.state, job.stage, job.percent, job.error, base, null);
+        const doneMeta = job.state === "done" ? ((await readJsonKey(env, `performances/${id}/meta.json`)) as Meta | null) : null;
+        const pub = publicJob(id, job.state, job.stage, job.percent, job.error, base, null, doneMeta);
         const line = JSON.stringify(pub);
         if (line !== last) {
           controller.enqueue(encoder.encode(`data: ${line}\n\n`));
@@ -838,13 +868,24 @@ async function events(env: Env, id: string, base: string): Promise<Response> {
 }
 
 async function metaPost(request: Request, env: Env, id: string, action: string): Promise<Response> {
-  const body = (await readJson(request)) as Record<string, unknown>;
+  const ctype = request.headers.get("content-type") || "";
+  if (action === "keep" && ctype.toLowerCase().includes("multipart/form-data")) {
+    return keepProcessed(request, env, id, ctype);
+  }
+  let body: Record<string, unknown>;
+  try {
+    body = (await readJson(request)) as Record<string, unknown>;
+  } catch {
+    return json({ error: "Body must be JSON.", code: "rejected" }, 400);
+  }
   const meta = (await readJsonKey(env, `performances/${id}/meta.json`)) as Meta | null;
   if (!meta) return json({ error: "not found" }, 404);
   if (!(await claimMatches(meta.claim_token_sha256, body.claim_token))) {
     return json({ error: "claim_token does not match this Performance." }, 403);
   }
   if (action === "keep") {
+    // JSON keep leaves the original audio where it is. It does not delete a
+    // dialed file or clear live_dials from an earlier keep.
     meta.keep = true;
     meta.retention = "forever";
     meta.audio_expires_at = null;
@@ -865,6 +906,78 @@ async function metaPost(request: Request, env: Env, id: string, action: string):
     httpMetadata: { contentType: "application/json" },
   });
   return json({ id, visibility: meta.visibility, keep: meta.keep, audio_expires_at: meta.audio_expires_at });
+}
+
+async function keepProcessed(request: Request, env: Env, id: string, ctype: string): Promise<Response> {
+  const cap = KEPT_WAV_MAX_BYTES + KEPT_FORM_OVERHEAD;
+  const len = Number(request.headers.get("content-length") || 0);
+  if (len > cap) return json({ error: `Request is too large (${len} bytes).`, code: "rejected" }, 400);
+  const raw = new Uint8Array(await request.arrayBuffer());
+  if (raw.byteLength > cap) return json({ error: `Request is too large (${raw.byteLength} bytes).`, code: "rejected" }, 400);
+  const meta = (await readJsonKey(env, `performances/${id}/meta.json`)) as Meta | null;
+  if (!meta) return json({ error: "not found" }, 404);
+  if (meta.tombstone) return json({ error: "This Performance was taken down.", code: "gone" }, 410);
+  try {
+    const parts = parseMultipart(raw, ctype);
+    const tokenBytes = parts.claim_token;
+    if (!tokenBytes) return json({ error: "claim_token is required.", code: "rejected" }, 400);
+    let token: string;
+    try {
+      token = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(tokenBytes);
+    } catch {
+      return json({ error: "claim_token must be text.", code: "rejected" }, 400);
+    }
+    if (!(await claimMatches(meta.claim_token_sha256, token))) {
+      return json({ error: "claim_token does not match this Performance." }, 403);
+    }
+    const audio = parts.audio;
+    const dialsRaw = parts.dials;
+    if (!audio || audio.byteLength < 1) return json({ error: "Attach the dialed audio as the form field 'audio'.", code: "rejected" }, 400);
+    if (!dialsRaw) return json({ error: "Attach dials as the form field 'dials'.", code: "rejected" }, 400);
+    if (audio.byteLength > KEPT_WAV_MAX_BYTES) return json({ error: tooLargeMessage(audio.byteLength), code: "rejected" }, 400);
+    const wavBytes = new Uint8Array(audio);
+    // Read the signed record only to learn the job length. Do not write it back.
+    const recObj = await env.PERFORMANCES.get(`performances/${id}/record.json`);
+    let record: Record<string, unknown> | null = null;
+    if (recObj) {
+      try {
+        record = JSON.parse(new TextDecoder().decode(await recObj.arrayBuffer()));
+      } catch {
+        record = null;
+      }
+    }
+    const info = inspectWav(wavBytes, jobLengthS(record) + KEPT_TAIL_S);
+    let dialsText: string;
+    try {
+      dialsText = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(dialsRaw);
+    } catch {
+      return json({ error: "dials must be JSON.", code: "rejected" }, 400);
+    }
+    const dials = parseDials(dialsText);
+    await env.PERFORMANCES.put(`performances/${id}/${KEPT_WAV}`, wavBytes, { httpMetadata: { contentType: "audio/wav" } });
+    meta.keep = true;
+    meta.retention = "forever";
+    meta.audio_expires_at = null;
+    meta.live_dials = dials;
+    meta.live_audio = liveAudioMeta(info, false);
+    await env.PERFORMANCES.put(`performances/${id}/meta.json`, JSON.stringify(meta, null, 1), {
+      httpMetadata: { contentType: "application/json" },
+    });
+    const base = publicBase(request, env);
+    return json({
+      ok: true,
+      processed: true,
+      dials,
+      audio_url: `${base}/api/jobs/${id}/files/${KEPT_WAV}`,
+      id,
+      visibility: meta.visibility,
+      keep: true,
+      audio_expires_at: null,
+    });
+  } catch (err) {
+    if (err instanceof KeepReject) return json({ error: err.message, code: "rejected" }, 400);
+    throw err;
+  }
 }
 
 async function submit(request: Request, env: Env, base: string): Promise<Response> {
@@ -917,12 +1030,20 @@ async function feed(env: Env, base: string): Promise<Response> {
       const meta = (await readJsonKey(env, obj.key)) as Meta | null;
       if (!meta || meta.visibility !== "public" || meta.hidden || meta.tombstone) continue;
       if (meta.public_after && meta.public_after > now) continue;
-      performances.push({
+      const item: Record<string, unknown> = {
         id: meta.id,
         url: `${base}/records/${meta.id}`,
         record: `${base}/records/${meta.id}.json`,
         created_at: meta.created_at,
-      });
+      };
+      const extra = keptFiles(meta, base, meta.id || "");
+      if (extra) {
+        item.live_dials = extra.live_dials;
+        item.kept_audio = extra.files.kept_wav;
+        item.note = AFTER_SIGNING;
+        if (extra.files.kept_mp3) item.kept_preview = extra.files.kept_mp3;
+      }
+      performances.push(item);
     }
     cursor = page.truncated ? page.cursor : undefined;
   } while (cursor);
@@ -983,8 +1104,7 @@ async function adminModerate(request: Request, env: Env, action: "hide" | "taked
     JSON.stringify({ tombstone: true, id, record_hash: rh, reason }),
     { httpMetadata: { contentType: "application/json" } },
   );
-  await env.PERFORMANCES.delete(`performances/${id}/performance.flac`);
-  await env.PERFORMANCES.delete(`performances/${id}/preview.mp3`);
+  for (const audioName of EXPIRE_AUDIO) await env.PERFORMANCES.delete(`performances/${id}/${audioName}`);
   return json({ id, tombstone: tomb });
 }
 
@@ -999,8 +1119,7 @@ async function sweep(env: Env): Promise<void> {
       const meta = (await readJsonKey(env, obj.key)) as Meta | null;
       if (!meta?.audio_expires_at || meta.audio_expires_at >= now) continue;
       const id = meta.id || obj.key.split("/")[1];
-      await env.PERFORMANCES.delete(`performances/${id}/performance.flac`);
-      await env.PERFORMANCES.delete(`performances/${id}/preview.mp3`);
+      for (const audioName of EXPIRE_AUDIO) await env.PERFORMANCES.delete(`performances/${id}/${audioName}`);
     }
     cursor = page.truncated ? page.cursor : undefined;
   } while (cursor);
@@ -1100,6 +1219,8 @@ type Meta = {
   tombstone?: Tomb | null;
   origin?: string;
   note?: string;
+  live_dials?: LiveDials | null;
+  live_audio?: { wav?: string; mp3?: string | null; sample_rate?: number; duration_s?: number; note?: string } | null;
 };
 
 function recordPage(rec: Record<string, unknown>, meta: Meta, id: string): string {
@@ -1126,13 +1247,27 @@ function recordPage(rec: Record<string, unknown>, meta: Meta, id: string): strin
   const sigLine = esc(`${sig.status || ""} ${sig.algorithm || ""} ${sig.key_id || ""} ${sig.signed_by || ""}`);
   const robots = meta.visibility === "public" && !meta.hidden ? "" : '<meta name="robots" content="noindex">';
   const note = meta.note ? `<p>${esc(meta.note)}</p>` : "";
+  const jid = esc(id);
+  const dials = meta.live_dials;
+  let intro = "";
+  let player = `/api/jobs/${jid}/files/preview.mp3`;
+  let downloads = `<a href="/api/jobs/${jid}/files/performance.flac">Download FLAC</a><a href="/api/jobs/${jid}/files/preview.mp3">Download MP3</a>`;
+  if (dials) {
+    player = meta.live_audio?.mp3 ? `/api/jobs/${jid}/files/${KEPT_MP3}` : `/api/jobs/${jid}/files/${KEPT_WAV}`;
+    intro = `<p>This is the kept sound with the Live dials. ${esc(AFTER_SIGNING)}</p><p>Live dials: ${esc(dialsLine(dials))}</p>`;
+    const mp3Link = meta.live_audio?.mp3 ? `<a href="/api/jobs/${jid}/files/${KEPT_MP3}">Download dialed MP3</a>` : "";
+    downloads =
+      `<a href="/api/jobs/${jid}/files/${KEPT_WAV}">Download dialed WAV</a>${mp3Link}` +
+      `<a href="/api/jobs/${jid}/files/performance.flac">Download original FLAC (signed render)</a>` +
+      `<a href="/api/jobs/${jid}/files/preview.mp3">Download original MP3 (signed render)</a>`;
+  }
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${robots}<title>${title}</title>
 <style>body{font:16px/1.45 Georgia,serif;margin:0;background:#f6f3ec;color:#1c1915}main{max-width:42rem;margin:0 auto;padding:1.5rem 1rem 4rem}audio{width:100%;margin:1rem 0}a{color:#6b3a1f}.row{display:flex;flex-wrap:wrap;gap:.5rem;margin:.8rem 0}.row a,button{background:#1c1915;color:#f6f3ec;text-decoration:none;border:0;border-radius:999px;padding:.45rem .8rem;font:14px sans-serif;cursor:pointer}.badge{font:13px sans-serif;letter-spacing:.04em;text-transform:uppercase}pre{white-space:pre-wrap;font:12px/1.4 ui-monospace,monospace;background:#fff;padding:.8rem;border-radius:8px}</style></head>
 <body><main><p class="badge"><a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a> · ${esc(meta.origin || "hosted")}</p>
 <h1>${title}</h1><p>Composed by ${composer}. Interpreter: ${interp}.</p>
-<audio controls src="/api/jobs/${esc(id)}/files/preview.mp3"></audio>
-<div class="row"><a href="/api/jobs/${esc(id)}/files/performance.flac">Download FLAC</a><a href="/api/jobs/${esc(id)}/files/preview.mp3">Download MP3</a>
-<a href="/records/${esc(id)}.json">Download record</a><a href="/api/jobs/${esc(id)}/files/plan.json">Download plan</a>
+${intro}<audio controls src="${player}"></audio>
+<div class="row">${downloads}
+<a href="/records/${jid}.json">Download record</a><a href="/api/jobs/${jid}/files/plan.json">Download plan</a>
 <button type="button" id="copy">Copy link</button></div>
 <p>${loud}</p><p>${attr}</p>${note}<h2>Sounds</h2><ul>${sounds}</ul><h2>Hacks</h2><ul>${hacks}</ul>
 <p>record_hash <code>${rh}</code></p><p>Signature: ${sigLine}</p>
@@ -1250,6 +1385,7 @@ function typeOf(name: string): string {
   const low = name.toLowerCase();
   if (low.endsWith(".flac")) return "audio/flac";
   if (low.endsWith(".mp3")) return "audio/mpeg";
+  if (low.endsWith(".wav")) return "audio/wav";
   if (low.endsWith(".json")) return "application/json";
   return "application/octet-stream";
 }

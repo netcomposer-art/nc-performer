@@ -6,6 +6,8 @@ from __future__ import annotations
 import html
 import json
 
+from . import keep as K
+
 
 def record_page(rec: dict, meta: dict, job_id: str) -> str:
     p = rec.get("performance") or {}
@@ -37,6 +39,32 @@ def record_page(rec: dict, meta: dict, job_id: str) -> str:
     noindex = meta.get("visibility") != "public" or meta.get("hidden")
     robots = '<meta name="robots" content="noindex">' if noindex else ""
     full = html.escape(json.dumps(rec, indent=1, ensure_ascii=False))
+    jid = html.escape(job_id)
+    dials = meta.get("live_dials") if isinstance(meta.get("live_dials"), dict) else None
+    if dials:
+        live = meta.get("live_audio") or {}
+        player = f"/api/jobs/{jid}/files/kept.mp3" if live.get("mp3") else f"/api/jobs/{jid}/files/kept.wav"
+        intro = (
+            "<p>This is the kept sound with the Live dials. "
+            + html.escape(K.AFTER_SIGNING)
+            + "</p><p>Live dials: "
+            + html.escape(K.dials_line(dials))
+            + "</p>"
+        )
+        mp3_link = f'<a href="/api/jobs/{jid}/files/kept.mp3">Download dialed MP3</a>' if live.get("mp3") else ""
+        downloads = (
+            f'<a href="/api/jobs/{jid}/files/kept.wav">Download dialed WAV</a>'
+            + mp3_link
+            + f'<a href="/api/jobs/{jid}/files/performance.flac">Download original FLAC (signed render)</a>'
+            + f'<a href="/api/jobs/{jid}/files/preview.mp3">Download original MP3 (signed render)</a>'
+        )
+    else:
+        player = f"/api/jobs/{jid}/files/preview.mp3"
+        intro = ""
+        downloads = (
+            f'<a href="/api/jobs/{jid}/files/performance.flac">Download FLAC</a>'
+            f'<a href="/api/jobs/{jid}/files/preview.mp3">Download MP3</a>'
+        )
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -61,12 +89,12 @@ def record_page(rec: dict, meta: dict, job_id: str) -> str:
   <p class="badge"><a href="{license_uri}">CC BY-SA 4.0</a> · {origin}</p>
   <h1>{title}</h1>
   <p>Composed by {composer}. Interpreter: {interp}.</p>
-  <audio controls src="/api/jobs/{html.escape(job_id)}/files/preview.mp3"></audio>
+  {intro}
+  <audio controls src="{player}"></audio>
   <div class="row">
-    <a href="/api/jobs/{html.escape(job_id)}/files/performance.flac">Download FLAC</a>
-    <a href="/api/jobs/{html.escape(job_id)}/files/preview.mp3">Download MP3</a>
-    <a href="/records/{html.escape(job_id)}.json">Download record</a>
-    <a href="/api/jobs/{html.escape(job_id)}/files/plan.json">Download plan</a>
+    {downloads}
+    <a href="/records/{jid}.json">Download record</a>
+    <a href="/api/jobs/{jid}/files/plan.json">Download plan</a>
     <button type="button" id="copy">Copy link</button>
   </div>
   <p>{loud}</p>

@@ -17,6 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from ncperf import record as R
 
+from . import keep as K
 from . import pages
 from .config import Settings, load
 from .ids import ID_RE, claim_token, new_id, sha256_text
@@ -56,6 +57,8 @@ _DUMMY_TOKEN = "XXXX.DUMMY.TOKEN.XXXX"
 FILE_TYPES = {
     "performance.flac": "audio/flac",
     "preview.mp3": "audio/mpeg",
+    "kept.wav": "audio/wav",
+    "kept.mp3": "audio/mpeg",
     "record.json": "application/json",
     "plan.json": "application/json",
     "uses.json": "application/json",
@@ -419,13 +422,23 @@ def make_handler(app: App):
             self.close_connection = True
 
         def _meta_post(self, job_id, action):
-            body = json.loads(self._read(8000).decode() or "{}")
+            ctype = self.headers.get("Content-Type") or ""
+            if action == "keep" and "multipart/form-data" in ctype.lower():
+                return self._keep_processed(job_id, ctype)
+            try:
+                body = json.loads(self._read(8000).decode() or "{}")
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                raise Reject("Body must be JSON.")
+            if not isinstance(body, dict):
+                raise Reject("Body must be a JSON object.")
             meta = _read_json(app.storage, f"performances/{job_id}/meta.json")
             if not meta:
                 return self._send(404, {"error": "not found"})
             if not claim_matches(meta.get("claim_token_sha256"), body.get("claim_token")):
                 return self._send(403, {"error": "claim_token does not match this Performance."})
             if action == "keep":
+                # JSON keep leaves the original audio where it is. It does not
+                # delete a dialed file or clear live_dials from an earlier keep.
                 meta["keep"] = True
                 meta["retention"] = "forever"
                 meta["audio_expires_at"] = None
@@ -444,6 +457,63 @@ def make_handler(app: App):
                     meta["public_after"] = None
             app.storage.put(f"performances/{job_id}/meta.json", json.dumps(meta, indent=1).encode(), "application/json")
             self._send(200, {"id": job_id, "visibility": meta["visibility"], "keep": meta["keep"], "audio_expires_at": meta["audio_expires_at"]})
+
+        def _keep_processed(self, job_id, ctype):
+            """Store the browser WAV. The signed record is not written back."""
+            raw = self._read(K.KEPT_WAV_MAX_BYTES + K.KEPT_FORM_OVERHEAD)
+            parts = K.parse_multipart(raw, ctype)
+            meta = _read_json(app.storage, f"performances/{job_id}/meta.json")
+            if not meta:
+                return self._send(404, {"error": "not found"})
+            if meta.get("tombstone"):
+                return self._send(410, {"error": "This Performance was taken down.", "code": "gone"})
+            token_b = parts.get("claim_token")
+            if not token_b:
+                raise Reject("claim_token is required.")
+            try:
+                token = token_b.decode("utf-8")
+            except UnicodeDecodeError:
+                raise Reject("claim_token must be text.")
+            if not claim_matches(meta.get("claim_token_sha256"), token):
+                return self._send(403, {"error": "claim_token does not match this Performance."})
+            audio = parts.get("audio")
+            dials_raw = parts.get("dials")
+            if not audio:
+                raise Reject("Attach the dialed audio as the form field 'audio'.")
+            if dials_raw is None:
+                raise Reject("Attach dials as the form field 'dials'.")
+            if len(audio) > K.KEPT_WAV_MAX_BYTES:
+                raise Reject(K.too_large_message(len(audio)))
+            rec_raw = app.storage.get(f"performances/{job_id}/record.json")
+            try:
+                record = json.loads(rec_raw) if rec_raw else None
+            except json.JSONDecodeError:
+                record = None
+            info = K.inspect_wav(audio, K.job_length_s(record) + K.KEPT_TAIL_S)
+            dials = K.parse_dials(dials_raw)
+            app.storage.put(f"performances/{job_id}/{K.KEPT_WAV}", audio, "audio/wav")
+            mp3 = K.encode_kept_mp3(audio)
+            if mp3:
+                app.storage.put(f"performances/{job_id}/{K.KEPT_MP3}", mp3, "audio/mpeg")
+            elif app.storage.exists(f"performances/{job_id}/{K.KEPT_MP3}"):
+                app.storage.delete(f"performances/{job_id}/{K.KEPT_MP3}")
+            meta["keep"] = True
+            meta["retention"] = "forever"
+            meta["audio_expires_at"] = None
+            meta["live_dials"] = dials
+            meta["live_audio"] = K.live_audio_meta(info, bool(mp3))
+            app.storage.put(f"performances/{job_id}/meta.json", json.dumps(meta, indent=1).encode(), "application/json")
+            base = app.settings.public_base_url.rstrip("/")
+            self._send(200, {
+                "ok": True,
+                "processed": True,
+                "dials": dials,
+                "audio_url": f"{base}/api/jobs/{job_id}/files/{K.KEPT_WAV}",
+                "id": job_id,
+                "visibility": meta.get("visibility"),
+                "keep": True,
+                "audio_expires_at": None,
+            })
 
         def _submit(self):
             s = app.settings
@@ -546,7 +616,7 @@ def make_handler(app: App):
             app.storage.put(f"performances/{job_id}/record.json", json.dumps({
                 "tombstone": True, "id": job_id, "record_hash": rh, "reason": reason,
             }).encode(), "application/json")
-            for name in ("performance.flac", "preview.mp3"):
+            for name in K.AUDIO_FILES:
                 app.storage.delete(f"performances/{job_id}/{name}")
             self._send(200, {"id": job_id, "tombstone": tomb})
 
@@ -677,14 +747,21 @@ def _public_job(job_id, state, stage, percent, error, app: App, position=None) -
         "error": error,
     }
     if state == "done":
-        base = app.settings.public_base_url
-        out["files"] = {
+        base = app.settings.public_base_url.rstrip("/")
+        files = {
             "flac": f"{base}/api/jobs/{job_id}/files/performance.flac",
             "mp3": f"{base}/api/jobs/{job_id}/files/preview.mp3",
             "record": f"{base}/records/{job_id}.json",
             "plan": f"{base}/api/jobs/{job_id}/files/plan.json",
             "page": f"{base}/records/{job_id}",
         }
+        meta = _read_json(app.storage, f"performances/{job_id}/meta.json") or {}
+        extra = K.kept_files(meta, base, job_id)
+        if extra:
+            files.update(extra["files"])
+            out["live_dials"] = extra["live_dials"]
+            out["kept_note"] = extra["kept_note"]
+        out["files"] = files
     return out
 
 
@@ -716,6 +793,8 @@ def _ctype(name: str) -> str:
         return "audio/flac"
     if low.endswith(".mp3"):
         return "audio/mpeg"
+    if low.endswith(".wav"):
+        return "audio/wav"
     if low.endswith(".json"):
         return "application/json"
     return "application/octet-stream"
@@ -753,12 +832,15 @@ def _feed(app: App) -> list[dict]:
         after = meta.get("public_after") or ""
         if after and after > now:
             continue
-        out.append({
+        base = app.settings.public_base_url.rstrip("/")
+        item = {
             "id": meta.get("id"),
-            "url": f"{app.settings.public_base_url}/records/{meta.get('id')}",
-            "record": f"{app.settings.public_base_url}/records/{meta.get('id')}.json",
+            "url": f"{base}/records/{meta.get('id')}",
+            "record": f"{base}/records/{meta.get('id')}.json",
             "created_at": meta.get("created_at"),
-        })
+        }
+        item.update(K.kept_feed(meta, base, meta.get("id")))
+        out.append(item)
     return out
 
 
@@ -769,10 +851,10 @@ def pages_tomb(job_id: str, tomb: dict) -> str:
     return f"<!DOCTYPE html><html><head><meta name='robots' content='noindex'><title>Gone</title></head><body><h1>410 Gone</h1><p>{reason}</p><p>record_hash {rh}</p></body></html>"
 
 
-def _parse_multipart(body: bytes, content_type: str) -> dict[str, bytes]:
+def _parse_multipart(body: bytes, content_type: str, missing: str = "Submit the record as multipart/form-data.") -> dict[str, bytes]:
     m = re.search(r"boundary=([^;]+)", content_type)
     if not m:
-        raise Reject("Submit the record as multipart/form-data.")
+        raise Reject(missing)
     boundary = m.group(1).strip().strip('"').encode()
     parts = {}
     for chunk in body.split(b"--" + boundary):
