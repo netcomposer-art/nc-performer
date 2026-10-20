@@ -1224,10 +1224,45 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
             note_maps = []
     assembly = notemap.assemblies_for(syms, note_maps or [], _EXCLUDE)
 
-    seq, slice_note = take.expand_sequence(found, length)
-    dur = length / len(seq)
+    # A written "second half" is a time boundary. Bar tables keep their own clock.
+    halves = None if take.bar_chords(comp_text) else take.half_sections(comp_text)
+    section_spec: list[tuple[int, float]] = []
+    section_harmonies: list[str] = []
+    slice_bits: list[str] = []
+    if halves:
+        left, right = halves
+        half_len = float(length) / 2.0
+        seq = []
+        for group, seconds in ((left, half_len), (right, half_len)):
+            part, part_note = take.expand_sequence(group, seconds)
+            seq.extend(part)
+            section_spec.append((len(part), seconds))
+            section_harmonies.append(" ".join(sym for sym, _bass in group))
+            if part_note:
+                slice_bits.append(part_note)
+    else:
+        seq, one_note = take.expand_sequence(found, length)
+        section_spec = [(len(seq), float(length))]
+        section_harmonies = [" ".join(syms)]
+        if one_note:
+            slice_bits.append(one_note)
+    slice_note = " ".join(slice_bits) or None
+    if not seq:
+        raise ValueError('no chord symbols found in the Composition (e.g. "Cm, Am, F")')
     kn = take.phrase(words)
-    held = take.ring(dur, kn["gap"])
+    pulse = take.stated_pulse(words)
+    broaden = take.broaden_bars(words) if pulse else 0
+    slots = take.chord_slots(section_spec, int(seed), pulse, broaden)
+    if len(slots) != len(seq):
+        slots = take.chord_slots([(len(seq), float(length))], int(seed), pulse, broaden)
+        section_spec = [(len(seq), float(length))]
+    mean_dur = float(length) / len(seq)
+    opening = take.ring(slots[0]["dur"], kn["gap"])
+    section_of: list[str] = []
+    for idx, (count, _seconds) in enumerate(section_spec):
+        label = "A" if idx == 0 else ("B" if idx == 1 else chr(ord("A") + idx))
+        section_of.extend([label] * count)
+    breath_at = None
     send_lu, decay_s = take.reverb_for(kn)
     chords = []
     per_chord = []
@@ -1321,6 +1356,8 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
             section_cut = None
 
     mode = take.arrangement_mode(words, kn)
+    if mode == "free" and not pulse and not kn["gap"] and len(seq) >= 4:
+        breath_at = 1 + (int(seed) % (len(seq) - 2))
     long_piece = len(seq) >= 12
     required = [lead_words, partner_words] if partner_words else None
 
@@ -1460,10 +1497,30 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
 
     lead_pluck = False
     for members, symbols, offset in segments:
-        roles = take.arrange(members, seed + offset * 17, mode, kn["twice"], dur)
+        roles = take.arrange(members, seed + offset * 17, mode, kn["twice"], mean_dur)
         for i, role in enumerate(roles):
             sym, bass = symbols[i]
             global_i = offset + i
+            slot = slots[global_i]
+            slot_t = float(slot["t"])
+            slot_dur = float(slot["dur"])
+            role["strikes_at"] = take.shape_strikes(
+                role.get("strikes_at") or [0.0],
+                slot_dur,
+                int(seed),
+                global_i,
+                pulse,
+                mode == "orderly",
+                bool(kn["twice"]),
+            )
+            ring_i = take.ring(slot_dur, kn["gap"])
+            if breath_at is not None and global_i == breath_at:
+                # A short silence before the next chord. The chord itself is still heard.
+                ring_i = dict(ring_i)
+                gap_s = min(1.6, max(0.55, slot_dur * 0.08))
+                ring_i["cover"] = round(max(1.3, slot_dur - gap_s), 3)
+                ring_i["note_s"] = ring_i["cover"]
+                ring_i["fade_out_s"] = round(min(float(ring_i["fade_out_s"]), max(0.25, gap_s)), 3)
             anchor = members[0]
             anchor_opt = anchor["opts"][i]
             if anchor_opt and anchor_opt.get("built") == "assembled notes":
@@ -1494,16 +1551,19 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
                 "gain": role["gain"],
                 "strikes_at": list(role["strikes_at"]),
                 "rest": bool(role["rest"]),
+                "start_s": round(slot_t, 3),
+                "end_s": round(slot_t + slot_dur, 3),
+                "breath": bool(breath_at is not None and global_i == breath_at),
             })
             credit = lead_opt or anchor_opt or {}
             if credit.get("built") == "whole-chord file":
                 credit = credit.get("accepted") or credit
             chords.append({
-                "t": round(global_i * dur, 3),
-                "dur": round(dur, 3),
+                "t": round(slot_t, 3),
+                "dur": round(slot_dur, 3),
                 "symbol": sym,
                 "voicing": full,
-                "section": "A" if global_i < len(seq) / 2 else "B",
+                "section": section_of[global_i] if global_i < len(section_of) else "A",
             })
             per_chord.append({
                 "symbol": sym,
@@ -1540,6 +1600,9 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
                             "midi": midis,
                             "gain": gain,
                             "style": role["style"] if mode == "free" else ("roll" if kn["pluck_words"] else "strike"),
+                            "note_s": ring_i["note_s"],
+                            "fade_out_s": ring_i["fade_out_s"],
+                            "last_note_s": ring_i["last_note_s"],
                         })
                     else:
                         spec = pads.setdefault(bank_id, {"chords": [], "instrument": opt.get("instrument"), "origin": opt.get("origin")})
@@ -1551,10 +1614,12 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
                     sid = sid_for(picked, str(len(sources)))
                     match = _match_label(picked)
                     blob = take.chord_overlaps(
-                        global_i * dur, held["cover"], sid,
+                        slot_t, ring_i["cover"], sid,
                         f"{picked['instrument']} ({picked['origin']}) {sym} {match}: {picked['title'][:80]}",
                         seed, global_i, 0.72 * gain, role["strikes_at"][0], mode == "orderly",
                     )
+                    for ev in blob:
+                        ev["chord_index"] = global_i
                     if is_partner:
                         partner_events.extend(blob)
                     else:
@@ -1603,10 +1668,10 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
             "gain": 0.78,
             "first_gain": 0.9,
             "restrike_gain": 0.55,
-            "note_s": held["note_s"],
-            "fade_out_s": held["fade_out_s"],
-            "last_note_s": held["last_note_s"],
-            "last_fade_out_s": held["last_fade_out_s"],
+            "note_s": opening["note_s"],
+            "fade_out_s": opening["fade_out_s"],
+            "last_note_s": opening["last_note_s"],
+            "last_fade_out_s": opening["last_fade_out_s"],
             "role": "ensemble notes at their recorded pitch; the arrangement decides which of them play",
             "per_chord": [
                 {
@@ -1616,6 +1681,9 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
                     "midi": row["midi"],
                     "gain": row["gain"],
                     "style": row["style"],
+                    "note_s": row["note_s"],
+                    "fade_out_s": row["fade_out_s"],
+                    "last_note_s": row["last_note_s"],
                 }
                 for row in note_rows
             ],
@@ -1636,10 +1704,11 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
             "bank": bank_id,
             "chords": spec["chords"],
             "gain_total": 0.34,
-            "overlap_s": round(min(4.0, max(1.5, dur * 0.45)), 3),
-            "lead_s": 0.15,
+            "overlap_s": round(min(4.0, max(1.5, mean_dur * 0.45)), 3),
+            "lead_s": 0.0,
+            "lead_by_chord": take.pad_leads(len(chords), int(seed) + 5, pulse, mode == "orderly"),
             "fade_in_s": 0.3,
-            "fade_out_s": held["fade_out_s"],
+            "fade_out_s": opening["fade_out_s"],
             "role": f"{spec.get('instrument')} ({spec.get('origin')}) joins some chords, unaltered, not time-stretched",
         })
 
@@ -1674,8 +1743,9 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
             "bank": bass_bank,
             "gain": 0.22,
             "gain_low": 0.30,
-            "overlap_s": round(min(4.0, max(1.2, held["cover"] - dur)), 3) if not kn["gap"] else 0.4,
-            "lead_s": 0.05,
+            "overlap_s": round(min(4.0, max(1.2, opening["cover"] - slots[0]["dur"])), 3) if not kn["gap"] else 0.4,
+            "lead_s": 0.0,
+            "lead_by_chord": take.pad_leads(len(chords), int(seed) + 11, pulse, mode == "orderly"),
             "fade_in_s": 0.25,
             "fade_out_s": 1.1,
             "last_fade_out_s": 2.2,
@@ -1691,8 +1761,9 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
                 "bus": "keys",
                 "bank": row["bank"],
                 "gain": 0.24,
-                "overlap_s": round(min(3.0, dur * 0.5), 3),
+                "overlap_s": round(min(3.0, mean_dur * 0.5), 3),
                 "lead_s": 0.0,
+                "lead_by_chord": take.pad_leads(len(chords), int(seed) + 19, pulse, mode == "orderly"),
                 "fade_in_s": 0.4,
                 "fade_out_s": 1.4,
                 "role": "one held high tone, once in the take",
@@ -1767,7 +1838,14 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
     if not cast_labels:
         cast_labels = seen_ens or ["the ensemble"]
     how = "the same way on every chord" if mode == "orderly" else "a different shape on each chord, seeded"
-    ensemble_note = "Ensemble: " + ", ".join(cast_labels) + f". Arrangement: {how}."
+    duration_cv = take.duration_cv([float(c["dur"]) for c in chords])
+    if pulse and broaden:
+        pacing = f"Pacing: a steady pulse, with the last {broaden} bars let to broaden, as the words asked."
+    elif pulse:
+        pacing = "Pacing: a steady pulse, as the words asked."
+    else:
+        pacing = f"Pacing: chord lengths vary (duration CV {duration_cv})."
+    ensemble_note = "Ensemble: " + ", ".join(cast_labels) + f". Arrangement: {how}. {pacing}"
     if len(per_chord) > 12:
         chord_note = f"{len(per_chord)} chords on {per_chord[0]['instrument']} ({per_chord[0]['origin']})"
         if len(seen_ens) > 1:
@@ -1790,6 +1868,21 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
         note = note + " " + surprise_note
     title = (comp.get("title") or "Untitled")
     soft = bool(kn["soft"])
+    plan_sections = []
+    cursor = 0
+    for idx, (count, _seconds) in enumerate(section_spec):
+        group = slots[cursor:cursor + count]
+        cursor += count
+        if not group:
+            continue
+        label = "A" if idx == 0 else ("B" if idx == 1 else chr(ord("A") + idx))
+        harmony = section_harmonies[idx] if idx < len(section_harmonies) else " ".join(syms)
+        plan_sections.append({
+            "id": label,
+            "start_s": round(float(group[0]["t"]), 3),
+            "end_s": round(float(group[-1]["t"]) + float(group[-1]["dur"]), 3),
+            "harmony": harmony,
+        })
     _EXCLUDE = previous_exclude
     plan_notes = [note]
     plan_notes.extend(coverage_notes)
@@ -1816,10 +1909,7 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
         "tail_s": 6.0,
         "pulse_bpm": 60,
         "pitch_tolerance_cents": 15,
-        "sections": [
-            {"id": "A", "start_s": 0, "end_s": round(length / 2, 3), "harmony": " ".join(syms)},
-            {"id": "B", "start_s": round(length / 2, 3), "end_s": round(length, 3), "harmony": " ".join(syms)},
-        ],
+        "sections": plan_sections,
         "chords": chords,
         "sources": sources,
         "banks": banks,
@@ -1852,7 +1942,12 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
             "per_chord": per_chord,
             "arrangement": arrangement,
             "coverage": coverage_notes,
-            "predictability": {**take.predictability(arrangement), "mode": mode},
+            "predictability": {
+                **take.predictability(arrangement),
+                "mode": mode,
+                "duration_cv": duration_cv,
+                "pulse": pulse,
+            },
             "ensemble": cast_labels,
             "texture": None if not bed else {
                 "origin": bed["origin"],

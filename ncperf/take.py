@@ -67,6 +67,283 @@ def bar_chords(text: str) -> list[tuple] | None:
     return [found[b] for b in bars]
 
 
+_PULSE = re.compile(
+    r"steady pulse|keep it even|\bsteady\b|\buniform\b|every downbeat|"
+    r"one chord per bar|even changes|"
+    r"\d+(?:\.\d+)?\s*(?:s|sec|seconds)\s+per\s+(?:chord|bar)|"
+    r"(?:each|every)\s+bar\s+(?:is\s+|lasts\s+)?\d",
+    re.I,
+)
+_BROADEN = re.compile(r"broadening over the last\s+(\w+|\d+)\s+bars", re.I)
+_HALF_SPLIT = re.compile(r"\bsecond half\b", re.I)
+_BAR_WORDS = {"two": 2, "three": 3, "four": 4, "five": 5}
+
+
+def stated_pulse(words: str) -> bool:
+    """True when the words fix the clock: a steady pulse, or a duration per bar."""
+    return bool(_PULSE.search(words or ""))
+
+
+def broaden_bars(words: str) -> int:
+    """How many final bars the words ask to let breathe. Zero when they do not."""
+    text = words or ""
+    match = _BROADEN.search(text)
+    if match:
+        raw = match.group(1).lower()
+        if raw.isdigit():
+            return int(raw)
+        return _BAR_WORDS.get(raw, 3)
+    if re.search(r"last bar\b.{0,40}\b(held|ring)", text, re.I):
+        return 1
+    return 0
+
+
+def half_sections(text: str) -> tuple[list, list] | None:
+    """Chords before and after 'second half', when the Composition splits the piece that way."""
+    match = _HALF_SPLIT.search(text or "")
+    if not match:
+        return None
+    left = CH.find_full(text[: match.start()])
+    right = CH.find_full(text[match.end() :])
+    if not left or not right:
+        return None
+    return left, right
+
+
+def duration_cv(durs: list[float]) -> float:
+    """Coefficient of variation. 0 is a perfect grid."""
+    if len(durs) < 2:
+        return 0.0
+    mean = sum(durs) / len(durs)
+    if mean <= 0:
+        return 0.0
+    var = sum((float(d) - mean) ** 2 for d in durs) / len(durs)
+    return round((var ** 0.5) / mean, 3)
+
+
+def looks_alternating(durs: list[float]) -> bool:
+    """True for a long/short grid, including a two-value alternation."""
+    if len(durs) < 4:
+        return False
+    evens = durs[0::2]
+    odds = durs[1::2]
+    def tight(group: list[float]) -> bool:
+        mid = sum(group) / len(group)
+        return mid > 0 and (max(group) - min(group)) / mid < 0.12
+    if not (tight(evens) and tight(odds)):
+        return False
+    return abs(sum(evens) / len(evens) - sum(odds) / len(odds)) > 0.2 * (sum(durs) / len(durs))
+
+
+def _free_weights(n: int, rng: random.Random) -> list[float]:
+    """Phrase-sized push and pull. Not a long/short alternation and not one ratio repeated."""
+    if n <= 1:
+        return [1.0]
+    weights: list[float] = []
+    i = 0
+    previous = ""
+    kinds = ["rush", "hold", "unwind", "swell", "plain"]
+    while i < n:
+        left = n - i
+        if left == 1:
+            weights.append(rng.uniform(0.55, 1.9))
+            break
+        choices = [kind for kind in kinds if kind != previous] or kinds
+        kind = rng.choice(choices)
+        previous = kind
+        span = min(left, rng.choice([2, 3, 3, 4, 5][: left]))
+        if kind == "hold":
+            hold_at = rng.randrange(span)
+            for j in range(span):
+                weights.append(rng.uniform(1.85, 2.7) if j == hold_at else rng.uniform(0.36, 0.72))
+        elif kind == "rush":
+            start = rng.uniform(1.25, 1.8)
+            for j in range(span):
+                weights.append(start * (0.74 ** j) * rng.uniform(0.9, 1.08))
+        elif kind == "unwind":
+            start = rng.uniform(0.4, 0.68)
+            for j in range(span):
+                weights.append(start * (1.34 ** j) * rng.uniform(0.92, 1.08))
+        elif kind == "swell":
+            mid = span // 2
+            for j in range(span):
+                weights.append(rng.uniform(1.45, 2.15) if j == mid else rng.uniform(0.48, 0.86))
+        else:
+            bag = [0.4, 0.58, 0.77, 1.05, 1.38, 1.72, 2.15, 2.55]
+            for _j in range(span):
+                weights.append(rng.choice(bag) * rng.uniform(0.88, 1.12))
+        i += span
+    weights = weights[:n]
+    if looks_alternating(weights) or duration_cv(weights) < 0.22:
+        weights[rng.randrange(n)] *= rng.uniform(1.7, 2.4)
+        other = rng.randrange(n)
+        weights[other] *= rng.uniform(0.35, 0.6)
+    return weights
+
+
+def _unstick(durs: list[float], total: float, rng: random.Random) -> list[float]:
+    """Break a grid that survived scaling: one chord lingers, another passes."""
+    if len(durs) < 2 or total <= 0:
+        return durs
+    out = [max(0.2, float(d)) for d in durs]
+    i = rng.randrange(len(out))
+    j = (i + 1 + rng.randrange(len(out) - 1)) % len(out)
+    out[i] *= rng.uniform(1.65, 2.3)
+    out[j] *= rng.uniform(0.38, 0.62)
+    scale = total / sum(out)
+    out = [w * scale for w in out]
+    out[-1] += total - sum(out)
+    if out[-1] < 0.4 and len(out) > 1:
+        out[-1] = 0.4
+        head = sum(out[:-1]) or 1.0
+        scale = (total - 0.4) / head
+        out = [w * scale for w in out[:-1]] + [0.4]
+    return [round(max(0.1, w), 3) for w in out]
+
+
+def _fit_lengths(weights: list[float], total: float) -> list[float]:
+    """Scale phrase weights onto `total` seconds. Every chord stays long enough to hear.
+
+    The floor is max(1.25 s, 0.28 of the mean), and never more than 0.92 of the mean.
+    A section's last chord absorbs the rounding so the section still ends on time.
+    """
+    n = len(weights)
+    if n == 0:
+        return []
+    if n == 1:
+        return [round(total, 3)]
+    mean = total / n
+    # 1.25 s is an arrangement floor so a passing chord is still a chord, not a click.
+    lo = min(mean * 0.92, max(1.25, mean * 0.28))
+    hi = max(mean * 1.08, min(total * 0.58, mean * 2.85))
+    if n * lo > total:
+        lo = total / n * 0.9
+    if n * hi < total:
+        hi = total / n * 1.05
+    raw = [max(weights) and (w / (sum(weights) or 1)) * total for w in weights]
+    out = [min(hi, max(lo, w)) for w in raw]
+    for _ in range(8):
+        spare = total - sum(out)
+        if abs(spare) < 0.02:
+            break
+        if spare > 0:
+            room = [i for i, w in enumerate(out) if w < hi - 0.01]
+        else:
+            room = [i for i, w in enumerate(out) if w > lo + 0.01]
+        if not room:
+            break
+        share = spare / len(room)
+        for i in room:
+            out[i] = min(hi, max(lo, out[i] + share))
+    out[-1] = max(0.4, out[-1] + (total - sum(out)))
+    return [round(w, 3) for w in out]
+
+
+def _pulse_lengths(n: int, total: float, broaden: int, rng: random.Random) -> list[float]:
+    """Equal bars, except a written broadening of the final bars."""
+    if n <= 0:
+        return []
+    if broaden <= 0 or n < 3:
+        each = total / n
+        durs = [each] * n
+    else:
+        k = min(broaden, n - 1)
+        factors = []
+        for j in range(k):
+            factors.append(1.12 + 0.16 * j)
+        head = n - k
+        # head * 1 + sum(factors) = scale; durs sum to total
+        weight = [1.0] * head + factors
+        scale = total / sum(weight)
+        durs = [w * scale for w in weight]
+        # A hair of in-bar difference would fight the pulse. Keep the head identical.
+        head_dur = durs[0]
+        durs = [head_dur] * head + durs[head:]
+        durs[-1] += total - sum(durs)
+    return [round(d, 3) for d in durs]
+
+
+def chord_slots(sections: list[tuple[int, float]], seed: int, pulse: bool, broaden: int = 0) -> list[dict]:
+    """Start and duration of each chord. Sections are (count, seconds) and keep their boundaries.
+
+    Free pacing is phrase rubato. A stated pulse stays even, with a written broadening on the last bars.
+    """
+    slots = []
+    t = 0.0
+    last = len(sections) - 1
+    for si, (count, seconds) in enumerate(sections):
+        if count <= 0 or seconds <= 0:
+            continue
+        rng = random.Random(int(seed) + 211 + si * 29)
+        if pulse:
+            durs = _pulse_lengths(count, seconds, broaden if si == last else 0, rng)
+        else:
+            durs = _fit_lengths(_free_weights(count, rng), seconds)
+            for _ in range(3):
+                if len(durs) < 2 or not (looks_alternating(durs) or duration_cv(durs) < 0.22):
+                    break
+                durs = _unstick(durs, seconds, rng)
+        if durs:
+            durs[-1] = round(durs[-1] + (seconds - sum(durs)), 3)
+        for dur in durs:
+            slots.append({"t": round(t, 3), "dur": round(dur, 3)})
+            t = round(t + dur, 3)
+    return slots
+
+
+def shape_strikes(strikes: list[float], slot_dur: float, seed: int, index: int, pulse: bool, orderly: bool, twice: bool) -> list[float]:
+    """Where the attacks sit inside this chord. A free take does not share one offset from every boundary."""
+    dur = max(0.4, float(slot_dur))
+    if pulse:
+        if twice:
+            return [0.0, round(dur / 2.0, 3)]
+        return [0.0]
+    if orderly:
+        first = 0.02
+        if twice:
+            return [first, round(min(dur - 0.12, max(first + 0.15, dur / 2.0)), 3)]
+        if len(strikes) > 1:
+            return [first, round(min(dur * 0.45, first + 0.22), 3)]
+        return [first]
+    rng = random.Random(int(seed) * 17 + index * 5 + 3)
+    roll = rng.random()
+    if index == 0:
+        first = rng.uniform(0.02, 0.09)
+    elif roll < 0.3:
+        first = rng.uniform(-0.34, -0.07)
+    elif roll < 0.62:
+        first = rng.uniform(0.16, 0.48)
+    else:
+        first = rng.uniform(0.04, 0.14)
+    first = max(-0.4, min(first, dur * 0.42))
+    out = [round(first, 3)]
+    if twice:
+        out.append(round(min(dur - 0.12, max(first + 0.18, dur / 2.0 + rng.uniform(-0.1, 0.12))), 3))
+    elif len(strikes) > 1 or rng.random() < 0.5:
+        out.append(round(min(dur * 0.7, max(first + 0.08, first + rng.uniform(0.14, 0.42))), 3))
+    if dur > 7.2 and rng.random() < 0.75:
+        out.append(round(dur * rng.uniform(0.34, 0.71), 3))
+    cleaned = []
+    for t in sorted(out):
+        if t < dur - 0.05 and (not cleaned or abs(t - cleaned[-1]) > 0.04):
+            cleaned.append(round(t, 3))
+    return cleaned or [0.04]
+
+
+def pad_leads(n: int, seed: int, pulse: bool, orderly: bool) -> dict[str, float]:
+    """How far before each chord a joining layer enters. Free takes do not use one lead."""
+    if n <= 0:
+        return {}
+    if pulse or orderly:
+        return {str(i): 0.0 for i in range(n)}
+    rng = random.Random(int(seed) + 83)
+    bag = [0.05, 0.12, 0.19, 0.28, 0.37, 0.46, 0.09, 0.23]
+    leads = {str(i): round(rng.choice(bag), 3) for i in range(n)}
+    if n > 1 and len(set(leads.values())) == 1:
+        leads["1"] = 0.33 if leads["0"] != 0.33 else 0.14
+    return leads
+
+
 def expand_sequence(found: list, length: float) -> tuple[list, str | None]:
     """Repeat a progression so the piece fills its length, then stop at 40."""
     if not found:
@@ -544,7 +821,7 @@ def chord_overlaps(chord_t: float, cover: float, sid: str, role: str, seed: int,
     The file is not time-stretched. Orderly spacing is one hop. Free spacing changes from copy to copy.
     """
     rng = random.Random(seed * 1009 + index * 13)
-    start = float(chord_t) + float(entry)
+    start = max(0.0, float(chord_t) + float(entry))
     audible = 2.35
     last = float(chord_t) + float(cover) - audible
     if last < start:
@@ -552,7 +829,7 @@ def chord_overlaps(chord_t: float, cover: float, sid: str, role: str, seed: int,
     events = []
     t = start
     k = 0
-    while t <= last + 1e-6 and k < 24:
+    while t <= last + 1e-6 and k < 48:
         follow = gain * (0.94 if orderly else rng.uniform(0.86, 1.02))
         events.append({
             "t": round(t, 3),

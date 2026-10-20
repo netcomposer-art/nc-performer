@@ -62,6 +62,17 @@ def ir_sounds(log):
                         pitch_shift=False, spans=[], modifications='decoded to virtual microphones, resampled to 48 kHz, direct sound removed, truncated at the noise floor, predelay added' + (', decay reshaped' if log['reverb'].get('decay_reshape_s') else '')))
     return out
 
+def with_chord_span(use, chords):
+    """Copy the chord's real start and end onto a use, so the strip can show uneven slots."""
+    span = dict(use)
+    idx = span.get('chord_index')
+    if isinstance(idx, int) and 0 <= idx < len(chords or []):
+        chord = chords[idx]
+        start = float(chord.get('t') or 0)
+        span['chord_start_s'] = round(start, 3)
+        span['chord_end_s'] = round(start + float(chord.get('dur') or 0), 3)
+    return span
+
 def build(plan, plan_path, log, flac, mp3, out_path, performer='nc-performer kit', composition_path=None):
     tz = datetime.datetime.now().astimezone().tzinfo; now = datetime.datetime.now(tz)
     by = collections.defaultdict(list)
@@ -76,7 +87,7 @@ def build(plan, plan_path, log, flac, mp3, out_path, performer='nc-performer kit
         e = dict(key=sid, source=r['source'], title=r['title'] + (f" (note {r['segment']['index'] + 1} of {r['segment']['of']} in the run, {r['segment']['t0']}-{r['segment']['t1']} s)" if r.get('segment') else ''),
                  source_url=r['source_url'], author=r['author'], audio_used=dict(url=r['audio_url'], what=r['what'], sha256=r['sha256'], size_bytes=r['size_bytes']),
                  supplier=r['supplier'], license=L, credit_line=f"\u201c{r['title']}\u201d by {r['author']} ({r['source_url']}), {L['name']}",
-                 pitch_measured=pm, roles=sorted({u.get('role', u['layer']) for u in us}), uses=len(us), time_stretch_ratios=sorted({u['time_stretch'] for u in us}), pitch_shift=False, spans=us)
+                 pitch_measured=pm, roles=sorted({u.get('role', u['layer']) for u in us}), uses=len(us), time_stretch_ratios=sorted({u['time_stretch'] for u in us}), pitch_shift=False, spans=[with_chord_span(u, plan.get('chords') or []) for u in us])
         if r.get('chord'): e['chord'] = dict(symbol=r['chord'].get('symbol'), voicing=r['chord'].get('voicing'), notes=r['chord'].get('notes'))
         sounds.append(e)
     sounds += ir_sounds(log)
@@ -106,7 +117,7 @@ def build(plan, plan_path, log, flac, mp3, out_path, performer='nc-performer kit
         rule_set=dict(seed=plan['seed'], pulse_bpm=plan.get('pulse_bpm'), sections=plan.get('sections'), layers=[dict(id=l['id'], type=l['type'], bus=l.get('bus'), role=l.get('role')) for l in plan['layers']],
                       pitch_shift=False, transforms_enabled=['trim', 'gain', 'fade', 'filter', 'reverb', 'delay'],
                       pitch_policy=f"Every pitched sound chosen by NC measurement (pYIN / FFT), not by label; accepted within {plan.get('pitch_tolerance_cents', 15)} cents.", selections=log['selections']),
-        timeline=[dict(chord_index=i, start_s=c['t'], end_s=c['t'] + c['dur'], section=c.get('section'), chord=c['symbol'], voicing_midi=c['voicing']) for i, c in enumerate(plan['chords'])],
+        timeline=[dict(chord_index=i, start_s=c['t'], end_s=round(c['t'] + c['dur'], 3), section=c.get('section'), chord=c['symbol'], voicing_midi=c['voicing']) for i, c in enumerate(plan['chords'])],
         line_events=[e for ly in plan['layers'] if ly['type'] == 'notes' for e in ly['events']],
         outputs=[dict(file=os.path.basename(flac), format='FLAC 24-bit/48 kHz stereo', sha256=sha256_file(flac), size_bytes=os.path.getsize(flac), duration_s=round(dur(flac), 3), loudness_lufs_integrated=fI, true_peak_dbtp=fP, lra_lu=fL),
                  dict(file=os.path.basename(mp3), format='MP3 320 kbps, 48 kHz (preview)', sha256=sha256_file(mp3), size_bytes=os.path.getsize(mp3), duration_s=round(dur(mp3), 3), loudness_lufs_integrated=mI, true_peak_dbtp=mP, lra_lu=mL)],

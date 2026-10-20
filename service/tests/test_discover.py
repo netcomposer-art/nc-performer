@@ -583,6 +583,107 @@ class AssembledStrikeTest(unittest.TestCase):
         long, cut = take.expand_sequence([("C", None)] * 50, 120)
         self.assertEqual(len(long), 40)
         self.assertIn("40", cut or "")
+        comp = interpret.read_composition(os.path.join(ROOT, "examples", "bwv846", "composition.md"))
+        words = f"{comp.get('composition') or ''} {comp.get('performance') or ''}"
+        self.assertTrue(take.stated_pulse(words))
+        self.assertEqual(take.broaden_bars(words), 3)
+        slots = take.chord_slots([(35, length)], 1, True, 3)
+        durs = [slot["dur"] for slot in slots]
+        self.assertEqual(len(durs), 35)
+        self.assertLess(take.duration_cv(durs), 0.12)
+        self.assertGreater(durs[-1], durs[0] + 0.4)
+        self.assertTrue(all(abs(d - durs[0]) < 0.002 for d in durs[:-3]))
+        self.assertAlmostEqual(sum(durs), length, delta=0.05)
+
+    def test_durations_vary_unless_the_words_lock_the_pulse(self):
+        from ncperf import take
+        from ncperf.record import with_chord_span
+        pools = {"musicmatter": _chords("musicmatter", "choir")}
+        free = discover.plan_for(
+            dict(COMP, performance="Bright and open; let each chord ring into the next."),
+            seed=11, searchers=_searchers(pools), verify_live=False,
+        )
+        other = discover.plan_for(
+            dict(COMP, performance="Bright and open; let each chord ring into the next."),
+            seed=21, searchers=_searchers(pools), verify_live=False,
+        )
+        steady = discover.plan_for(
+            dict(COMP, performance="A steady pulse, the same tempo all the way."),
+            seed=11, searchers=_searchers(pools), verify_live=False,
+        )
+        locked = discover.plan_for(
+            dict(COMP, performance="Repeat the same sounds over and over."),
+            seed=4, searchers=_searchers(pools), verify_live=False,
+        )
+        per_bar = discover.plan_for(
+            dict(COMP, composition="1 min 20 s. Cm, F, G, Am. 10 seconds per chord.", performance="Let each chord ring into the next."),
+            seed=1, searchers=_searchers(pools), verify_live=False,
+        )
+
+        def durs(plan):
+            return [chord["dur"] for chord in plan["chords"]]
+
+        free_durs = durs(free)
+        self.assertGreater(take.duration_cv(free_durs), 0.22)
+        self.assertFalse(take.looks_alternating(free_durs))
+        self.assertNotEqual([round(d, 2) for d in free_durs], [round(d, 2) for d in durs(other)])
+        self.assertEqual([c["symbol"] for c in free["chords"]], list(CHORDS))
+        self.assertAlmostEqual(sum(free_durs), free["length_s"], delta=0.05)
+        self.assertGreater(min(free_durs), 1.2)
+        self.assertFalse(free["source_mix"]["predictability"]["pulse"])
+        self.assertGreater(free["source_mix"]["predictability"]["duration_cv"], 0.22)
+        offsets = [row["strikes_at"][0] for row in free["source_mix"]["arrangement"]]
+        self.assertGreater(len(set(offsets)), 1)
+        self.assertFalse(all(abs(off) < 0.001 for off in offsets))
+        for row, chord in zip(free["source_mix"]["arrangement"], free["chords"]):
+            self.assertEqual(row["start_s"], chord["t"])
+            self.assertAlmostEqual(row["end_s"], chord["t"] + chord["dur"], places=3)
+        self.assertLess(take.duration_cv(durs(steady)), 0.05)
+        self.assertTrue(steady["source_mix"]["predictability"]["pulse"])
+        self.assertGreater(take.duration_cv(durs(locked)), 0.22)
+        self.assertGreaterEqual(locked["source_mix"]["predictability"]["self_similarity"], 0.99)
+        self.assertEqual(locked["source_mix"]["predictability"]["source_variation"], 0.0)
+        self.assertEqual(len(per_bar["chords"]), 8)
+        self.assertTrue(all(abs(chord["dur"] - 10.0) < 0.05 for chord in per_bar["chords"]))
+        self.assertLess(per_bar["source_mix"]["predictability"]["duration_cv"], 0.05)
+        span = with_chord_span({"at_s": 1.1, "len_s": 2.0, "chord_index": 1}, free["chords"])
+        self.assertEqual(span["chord_start_s"], free["chords"][1]["t"])
+        self.assertAlmostEqual(span["chord_end_s"], free["chords"][1]["t"] + free["chords"][1]["dur"], places=3)
+        self.assertEqual(span["at_s"], 1.1)
+
+    def test_second_half_keeps_its_boundary_and_varies_inside_it(self):
+        from ncperf import take
+        symbols = ("Cm", "Cm7", "Cm9", "Am", "F")
+        pools = {
+            "musicmatter": [
+                _clip("musicmatter", f"Choir {sym}", "choir", f"c-{sym}", kind="supplier", chord=sym)
+                for sym in symbols
+            ],
+        }
+        comp = {
+            "title": "Ambient",
+            "composer": "anonymous",
+            "composition": "2 mins - half Cm, Cm7, Cm9. Second half Cm7, Am, F.",
+            "performance": "ambient vibe, no harsh tones. Don't rush it.",
+        }
+        plan = discover.plan_for(comp, seed=1, searchers=_searchers(pools), verify_live=False)
+        chords = plan["chords"]
+        self.assertEqual(len(chords), 12)
+        self.assertAlmostEqual(plan["length_s"], 120.0, delta=0.1)
+        boundary = next(chord["t"] for chord in chords if chord["section"] == "B")
+        self.assertAlmostEqual(boundary, 60.0, delta=0.05)
+        left = [chord for chord in chords if chord["section"] == "A"]
+        right = [chord for chord in chords if chord["section"] == "B"]
+        self.assertTrue(all(chord["symbol"] in {"Cm", "Cm7", "Cm9"} for chord in left))
+        self.assertTrue(all(chord["symbol"] in {"Cm7", "Am", "F"} for chord in right))
+        self.assertEqual([chord["symbol"] for chord in left], ["Cm", "Cm7", "Cm9", "Cm", "Cm7", "Cm9"])
+        self.assertEqual([chord["symbol"] for chord in right], ["Cm7", "Am", "F", "Cm7", "Am", "F"])
+        self.assertGreater(take.duration_cv([chord["dur"] for chord in left]), 0.18)
+        self.assertGreater(take.duration_cv([chord["dur"] for chord in right]), 0.18)
+        self.assertAlmostEqual(sum(chord["dur"] for chord in left), 60.0, delta=0.05)
+        self.assertAlmostEqual(sum(chord["dur"] for chord in chords), 120.0, delta=0.05)
+        self.assertEqual(plan["sections"][0]["end_s"], plan["sections"][1]["start_s"])
+        self.assertAlmostEqual(plan["sections"][1]["start_s"], 60.0, delta=0.05)
 
 
 def _fs(i: int) -> dict:
@@ -650,6 +751,10 @@ class LayerCapTest(unittest.TestCase):
         self.assertTrue(all(row["built"] == "assembled notes" for row in rows))
         self.assertLessEqual(len(plan["sources"]), 24)
         self.assertEqual(plan["source_mix"]["predictability"]["mode"], "free")
+        self.assertGreater(plan["source_mix"]["predictability"]["duration_cv"], 0.18)
+        leads = [set(ly["lead_by_chord"].values()) for ly in plan["layers"] if ly.get("lead_by_chord")]
+        self.assertTrue(leads)
+        self.assertTrue(any(len(vals) > 1 for vals in leads))
         self.assertNotIn("stretch_to_s", json.dumps(plan))
         check_plan(plan, Settings(), None)
 
