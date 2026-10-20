@@ -57,6 +57,8 @@ jobs:
           TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
           NC_SIGNING_KEY: ${{ secrets.NC_SIGNING_KEY }}
           NC_ADMIN_TOKEN: ${{ secrets.NC_ADMIN_TOKEN }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          CONTACT_TO: ${{ secrets.CONTACT_TO }}
         run: |
           set -euo pipefail
           put() {
@@ -74,3 +76,6 @@ jobs:
           put TURNSTILE_SECRET_KEY "${TURNSTILE_SECRET_KEY}"
           put NC_SIGNING_KEY "${NC_SIGNING_KEY}"
           put NC_ADMIN_TOKEN "${NC_ADMIN_TOKEN}"
+          put RESEND_API_KEY "${RESEND_API_KEY}"
+          put CONTACT_TO "${CONTACT_TO}"
+          echo "CONTACT_FROM is a plain var in wrangler.jsonc, not a secret. An empty RESEND_API_KEY or CONTACT_TO leaves /api/contact unconfigured."

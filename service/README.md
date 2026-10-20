@@ -55,7 +55,8 @@ Unlisted is the default. Unlisted audio is kept 90 days unless someone presses K
 | `GET /.well-known/nc-record-keys.json` | The public Ed25519 key, when a signing key is set. |
 | `POST /api/submit` | A kit record plus its audio. Checked, stored under a `k-` id, not re-rendered, not signed. |
 | `GET /api/feed` | Public Performances whose 24 hour wait has passed. |
-| `GET /api/config` | Site key, limits, whether a model key is configured. |
+| `POST /api/contact` | Contact form. JSON: optional `name` (max 100), `email` (required, max 200), `message` (1 to 5000 characters), `turnstile_token`, and honeypot `website` (must be empty). Sends one plain-text email. Returns `{ok:true}`. |
+| `GET /api/config` | Site key, limits, whether a model key is configured, and `contact` (whether the form is on). |
 | `GET /health` | Liveness. |
 | `GET /` | The Perform page. |
 | `GET /admin` | Today's spend. Needs `Authorization: Bearer <NC_ADMIN_TOKEN>`. |
@@ -63,7 +64,7 @@ Unlisted is the default. Unlisted audio is kept 90 days unless someone presses K
 | `POST /admin/hide` | Body `{id}`. Removes it from the feed. |
 | `POST /admin/takedown` | Body `{id, reason}`. `410` and a tombstone. |
 
-`503` means resting or the queue is full. `429` means this network sent a short burst (more than 3 Performs in 10 seconds), or has hit 3 Performs in 10 minutes or 10 in a day. The 10-minute and daily windows are counted in the service's own state. `403` means the Turnstile check failed. Turnstile is off when `TURNSTILE_SECRET_KEY` is unset.
+`503` means resting or the queue is full. On `POST /api/contact`, `503` with `contact not configured` means `RESEND_API_KEY` or `CONTACT_TO` is unset. Perform still runs in that case. `429` means this network sent a short burst (more than 3 Performs in 10 seconds), or has hit 3 Performs in 10 minutes or 10 in a day. The 10-minute and daily windows are counted in the service's own state. A contact `429` is separate: more than 3 messages in 60 seconds from one IP. `403` means the Turnstile check failed. Turnstile is off when `TURNSTILE_SECRET_KEY` is unset. A contact `400` is a field that failed validation. A contact `403` with `origin` is an Origin other than `https://netcomposer.art` or localhost. A contact `502` means Resend refused the email. Error JSON does not include secrets.
 
 ## Self-host with Docker
 
@@ -170,9 +171,13 @@ Do these steps once, in order.
    | `XAI_API_KEY` | Add this. The key from step 3. If you leave it empty, the workflow skips it and planning stays on the stub. |
    | `NC_SIGNING_KEY` | Add this. The PEM from step 4. If you leave it empty, the workflow skips it and hosted records stay unsigned. |
    | `NC_ADMIN_TOKEN` | Add this. Generate it with `openssl rand -hex 32` and paste that one line. It is the Bearer token for `/admin`. If you leave it empty, the workflow skips it and `/admin` stays off. |
+   | `RESEND_API_KEY` | Add this to turn on the contact form. It is the Resend API key. If you leave it empty, the workflow skips it and `POST /api/contact` returns 503. Perform still runs. |
+   | `CONTACT_TO` | Add this to turn on the contact form. It is the address that receives messages. If you leave it empty, the workflow skips it and the form stays off. |
+
+   `CONTACT_FROM` is not a secret. It is the plain var in `service/worker/wrangler.jsonc`.
 
    Never paste those values into a chat, an issue, or a commit.
-6. Deploy by hand: Actions → **Deploy Perform** → **Run workflow**. The workflow checks out the repo, refuses to continue when `CLOUDFLARE_API_TOKEN` or `CLOUDFLARE_ACCOUNT_ID` is missing, runs `wrangler deploy` from `service/worker`, then sets `XAI_API_KEY`, `TURNSTILE_SECRET_KEY`, `NC_SIGNING_KEY`, and `NC_ADMIN_TOKEN` only when that GitHub secret has a value. It has no push trigger.
+6. Deploy by hand: Actions → **Deploy Perform** → **Run workflow**. The workflow checks out the repo, refuses to continue when `CLOUDFLARE_API_TOKEN` or `CLOUDFLARE_ACCOUNT_ID` is missing, runs `wrangler deploy` from `service/worker`, then sets `XAI_API_KEY`, `TURNSTILE_SECRET_KEY`, `NC_SIGNING_KEY`, `NC_ADMIN_TOKEN`, `RESEND_API_KEY`, and `CONTACT_TO` only when that GitHub secret has a value. It has no push trigger. An empty contact secret does not stop the deploy.
 7. When the run finishes, the log prints a `*.workers.dev` URL. That is the site. Open it and run one short Composition.
 8. Leave the DNS for netcomposer.art alone. The Worker does not require that domain. A custom hostname can be attached later if the DNS moves to Cloudflare.
 
@@ -181,6 +186,22 @@ Do these steps once, in order.
 The container type is `standard-3` (2 vCPU, 8 GiB, 16 GB disk). That is the smallest type that can load Dragonfly and the Python audio stack. `basic` is 1 GiB and `standard-1` is 4 GiB. While the instance is awake the active rate is about **$0.00006 per second** (about $0.22 per hour): 2 × $0.000020 per vCPU-second plus 8 × $0.0000025 per GiB-second. It sleeps 15 minutes after the last request, and that idle time is billed too.
 
 A failed Perform should say `Something went wrong while performing. Please try again. (job id)`. The page reads that sentence from the job JSON. To capture the live error, open Actions → **Diagnose Perform** → **Run workflow**, then press Perform on the site. The workflow prints container status and tails `nc-perform-api` for 5 minutes. It uses the same Cloudflare secrets as deploy and does not print them. It does not deploy. Wrangler has no stored container log, so the tail is the log.
+
+## Contact form
+
+`POST /api/contact` is served by the hosted Worker. The Docker instance does not serve it. The site reads `contact` from `GET /api/config` and shows the form only when that flag is true. The flag is true when both `RESEND_API_KEY` and `CONTACT_TO` are set. The config response does not include either value.
+
+The browser `Origin` must be `https://netcomposer.art`, or `localhost` / `127.0.0.1` on any port (`http` or `https`) for local development. Any other origin gets 403. A response echoes the allowed origin. It does not use `*`.
+
+`website` is a hidden honeypot. If it is filled, the Worker returns `{ok:true}` and sends nothing.
+
+Turnstile uses `TURNSTILE_SECRET_KEY`, the same secret as Perform. When that secret is unset, the bot check is off, same as Perform. The token field is `turnstile_token`.
+
+On success the Worker sends one plain-text email with `fetch` to `https://api.resend.com/emails`. It does not use an SDK, and it does not store the message. The message goes to `CONTACT_TO`. The sender is `CONTACT_FROM`, which defaults to `NetComposer <onboarding@resend.dev>`. `reply_to` is the visitor's email. The subject is `NetComposer contact: <name or email>`. The body holds the name, the email, the message, and the UTC time.
+
+With `onboarding@resend.dev` as the sender, Resend only delivers to the Resend account owner's own address. Put that address in `CONTACT_TO` until a domain is verified. To send from a custom domain, verify the domain in Resend and set `CONTACT_FROM` to an address on that domain, for example `NetComposer <hello@netcomposer.art>`.
+
+The contact rate limit is 3 requests per 60 seconds per IP (`CONTACT_RATE` in `wrangler.jsonc`). Cloudflare's binding only allows a period of 10 or 60 seconds, so this window is 60 seconds. It is separate from the Perform limits.
 
 ## How a model call works
 

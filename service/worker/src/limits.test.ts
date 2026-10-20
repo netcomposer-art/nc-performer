@@ -17,6 +17,7 @@ import {
   type Counter,
   type DayCounter,
 } from "./policy.ts";
+import { CONTACT_LIMIT, CONTACT_PERIOD_S } from "./contact.ts";
 
 const T0 = 1_700_000_000;
 const DAY = "2026-10-19";
@@ -124,13 +125,23 @@ function parseJsonc(text: string): Record<string, unknown> {
 test("wrangler rate limit is a 10-or-60 second burst, not the 10-minute window", () => {
   const file = join(dirname(fileURLToPath(import.meta.url)), "..", "wrangler.jsonc");
   const cfg = parseJsonc(readFileSync(file, "utf8"));
-  const rates = cfg.ratelimits as { name: string; simple: { limit: number; period: number } }[];
-  assert.equal(rates.length, 1);
-  assert.equal(rates[0].name, "PERFORM_RATE");
-  assert.equal(rates[0].simple.limit, BURST_LIMIT);
-  assert.equal(rates[0].simple.period, BURST_PERIOD_S);
-  assert.ok(rates[0].simple.period === 10 || rates[0].simple.period === 60);
-  assert.notEqual(rates[0].simple.period, WINDOW_S);
+  const rates = cfg.ratelimits as { name: string; namespace_id: string; simple: { limit: number; period: number } }[];
+  const perform = rates.find((rate) => rate.name === "PERFORM_RATE");
+  const contact = rates.find((rate) => rate.name === "CONTACT_RATE");
+  assert.ok(perform);
+  assert.equal(perform.simple.limit, BURST_LIMIT);
+  assert.equal(perform.simple.period, BURST_PERIOD_S);
+  assert.ok(perform.simple.period === 10 || perform.simple.period === 60);
+  assert.notEqual(perform.simple.period, WINDOW_S);
+  assert.ok(contact);
+  assert.equal(contact.namespace_id, "1002");
+  assert.notEqual(contact.namespace_id, perform.namespace_id);
+  assert.equal(contact.simple.limit, CONTACT_LIMIT);
+  assert.equal(contact.simple.period, CONTACT_PERIOD_S);
+  assert.ok(contact.simple.period === 10 || contact.simple.period === 60);
+
+  const vars = cfg.vars as { CONTACT_FROM?: string };
+  assert.equal(vars.CONTACT_FROM, "NetComposer <onboarding@resend.dev>");
 
   const r2 = cfg.r2_buckets as { binding: string; bucket_name: string }[];
   assert.deepEqual(r2, [{ binding: "PERFORMANCES", bucket_name: "nc-performances" }]);
