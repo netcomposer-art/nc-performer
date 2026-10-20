@@ -47,11 +47,31 @@ AI planning runs only when the words ask for a line, triplets, or sections. Set 
 
 `POST /api/jobs/:id/cancel` with the job's `claim_token` (or the same secret as `keep_token`) stops a queued or running Perform. The container is destroyed, the queue slot is freed, and files under that id are removed. The status becomes `cancelled` with `error` and `stage_line` `Stopped.`. Calling it again is the same. A job that is already `done`, `failed`, or `rejected` is not changed and its files stay.
 
-A room-tone search runs only when the words ask for air or space. Each supplier search, including each room-tone search, stops after 20 seconds and is skipped. Those searches run together, so one slow supplier does not hold up the others, and a room-tone stall does not skip the remaining origins. Recorded-note files are fetched together. One file is given 20 seconds; the rest of the library is still checked. While that check runs the line is `Checking recorded notes…`.
+A room-tone search runs only when the words ask for air or space. Each supplier search, including each room-tone search, stops after 20 seconds and is skipped. Those searches run together, so one slow supplier does not hold up the others, and a room-tone stall does not skip the remaining origins.
 
-Gather uses the same even-handed search with a 4 second deadline on every supplier, on room tone, and on the note-map wall. It downloads only the sounds that collection kept, on one 5 second clock. One-shot Perform keeps the 20 second budgets. Supplier indexes are cached on disk under `NC_CACHE/indexes` so the next Gather does not refetch them. When the named instrument's note files do not finish inside the deadline, the collection uses whole-chord files that did, including the inversion that matches a written bass. A slash bass that is not a tone of the chord still gets that chord. After the deadline, one room-tone candidate is checked for 1.5 seconds and then dropped if it is not ready.
+Recorded notes come from a precomputed index, `ncperf/data/note-index.json`. Each row is one file: its URL, instrument, measured pitch and cents, onset, length, license, and credit. Perform reads that index, picks the notes, and downloads only the files the plan kept, in parallel. It does not measure those notes again. A pitch the index does not list is left unavailable. Whole-chord files that are not in the index are still measured when they are rendered. Parsed supplier credits are saved under `NC_CACHE/credits`, so a manifest or a Freesound page is not fetched twice. The index is metadata, not the audio.
 
-Cold BWV 846 on this machine (seed 1393160823, instrument Piano, no Freesound API key, Dragonfly loaded, fresh cache): Gather 6.7 s, Perform from that collection 10.5 s, together 17.3 s. The same one-shot Perform was 110.7 s cold and 64.6 s once the files were already on disk. Before the parallel fetch it was 415.5 s. Those clocks are search, pick, and render only. Queue wait, container start, and the R2 copy are not included.
+The index ships with the kit. When R2 has `note-index/v1.json`, the Worker copies it into the container before the job, and that copy wins. `NC_NOTE_INDEX` (a file) or `NC_NOTE_INDEX_URL` also overrides the bundled file. Rebuild it with `python -m ncperf.noteindex`. The manual workflow "Refresh note index" runs that command and uploads the JSON as an artifact. It does not commit and it does not deploy. A weekly schedule can be added later; it is not turned on.
+
+Gather is that index plus the same even-handed search, with a 4 second deadline on every supplier and on room tone. It does not download the note libraries. One-shot Perform keeps the 20 second supplier budgets. Supplier indexes are cached on disk under `NC_CACHE/indexes`. When the index does not cover a chord, the collection uses a whole-chord file, including the inversion that matches a written bass. A slash bass that is not a tone of the chord still gets that chord during Gather. After the deadline, one room-tone candidate is checked for 1.5 seconds and then dropped if it is not ready. A preview plays one file the first time it is requested.
+
+Cold BWV 846 on this machine (seed 1393160823, instrument Piano, no Freesound API key, Dragonfly loaded, fresh cache). These clocks are search, pick, and render only. Queue wait, container start, and the R2 copy are not included.
+
+| Path | Seconds |
+|---|---|
+| One-shot, before parallel fetch | 415.5 |
+| One-shot, parallel fetch, cold disk | 110.7 |
+| One-shot, parallel fetch, files already local | 64.6 |
+| Gather, whole-chord files, notes not in an index | 6.7 |
+| Perform from that Gather | 10.5 |
+| Gather + Perform, whole-chord files | 17.3 |
+| Gather, note index, cold disk | 5.3 |
+| Perform from that Gather (17 UIowa piano notes) | 15.0 |
+| Gather + Perform, note index | 20.3 |
+| Same Perform, those files already local | 12.9 |
+| One-shot, note index, cold disk | 151.6 |
+
+The note-index rows are the same piece, seed, instrument, and machine. Gather read the index and did not measure pitch (0 measurements). It kept 17 University of Iowa piano notes, all already pitch-checked. Perform downloaded those files and rendered them, Dragonfly included. The one-shot still uses the 20 second supplier budget, so its plan was 44.6 seconds (Openverse timed out) and the render was 107.0 seconds. That render also measured nothing; it fetched the same kind of piano files a second time, plus one room-tone clip. Queue wait, container start, and the R2 copy are not in any of these numbers.
 
 The signed record still carries `performance.timeline` and `sounds_used[].spans` as kit 0.2.0 writes them.
 

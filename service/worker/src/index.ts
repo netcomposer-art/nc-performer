@@ -68,6 +68,7 @@ const ALLOWED_HOSTS = [
 ];
 
 const FILES = [...REQUIRED_OUTPUTS];
+const NOTE_INDEX_KEY = "note-index/v1.json";
 
 const FILE_TYPES: Record<string, string> = {
   "performance.flac": "audio/flac",
@@ -734,6 +735,12 @@ async function runContainer(env: Env, id: string): Promise<void> {
   await container.setAllowedHosts(proxyHosts(allowedHosts(env)));
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (env.NC_INTERNAL_TOKEN) headers.authorization = `Bearer ${env.NC_INTERNAL_TOKEN}`;
+  try {
+    await seedNoteIndex(env, container, id, headers);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    console.error(JSON.stringify({ event: "note_index", id, detail }));
+  }
   if (requested.gather_id && requested.kind !== "gather") {
     await seedGatherCache(env, container, id, requested.gather_id, headers);
   }
@@ -924,6 +931,20 @@ function audioType(ext: string | undefined): string {
   if (low === ".ogg") return "audio/ogg";
   if (low === ".aif" || low === ".aiff") return "audio/aiff";
   return "application/octet-stream";
+}
+
+async function seedNoteIndex(env: Env, container: DurableObjectStub<RenderContainer>, id: string, headers: Record<string, string>): Promise<void> {
+  // A newer index in R2 replaces the copy shipped in the image. Metadata only.
+  const obj = await env.PERFORMANCES.get(NOTE_INDEX_KEY);
+  if (!obj || obj.size <= 0 || obj.size > 8 * 1024 * 1024) return;
+  const seeded = await containerFetch(container, id, "http://container/internal/note-index", {
+    method: "POST",
+    headers,
+    body: await obj.arrayBuffer(),
+  });
+  if (!seeded.ok && seeded.status !== 204) {
+    console.error(JSON.stringify({ event: "note_index", id, status: seeded.status }));
+  }
 }
 
 async function copyGather(env: Env, container: DurableObjectStub<RenderContainer>, id: string, headers: Record<string, string>): Promise<GatherDoc> {
@@ -1188,10 +1209,27 @@ function publicJob(
 
 async function gatherAudio(env: Env, id: string, sid: string): Promise<Response> {
   if (!ID_RE.test(id) || !/^[A-Za-z0-9._-]{1,80}$/.test(sid)) return json({ error: "not found" }, 404);
-  const obj = await env.PERFORMANCES.get(`gathers/${id}/audio/${sid}`);
-  if (!obj) return json({ error: "not found" }, 404);
+  let obj = await env.PERFORMANCES.get(`gathers/${id}/audio/${sid}`);
   const doc = (await readJsonKey(env, `gathers/${id}/collection.json`)) as GatherDoc | null;
   const row = (doc?.files || []).find((file) => file.sid === sid);
+  if (!obj && row?.url && row.url.startsWith("https://")) {
+    // Gather stored the URL. The first play fetches that one file.
+    try {
+      const upstream = await fetch(row.url);
+      if (upstream.ok) {
+        const bytes = await upstream.arrayBuffer();
+        if (bytes.byteLength > 0 && bytes.byteLength <= 80 * 1024 * 1024) {
+          await env.PERFORMANCES.put(`gathers/${id}/audio/${sid}`, bytes, {
+            httpMetadata: { contentType: audioType(row.ext) },
+          });
+          obj = await env.PERFORMANCES.get(`gathers/${id}/audio/${sid}`);
+        }
+      }
+    } catch {
+      obj = null;
+    }
+  }
+  if (!obj) return json({ error: "not found" }, 404);
   return new Response(obj.body, {
     headers: {
       "content-type": audioType(row?.ext),

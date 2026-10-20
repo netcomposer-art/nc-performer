@@ -265,6 +265,8 @@ def make_handler(app: App):
                 return self._internal_post()
             if path == "/internal/cache":
                 return self._internal_cache()
+            if path == "/internal/note-index":
+                return self._internal_note_index()
             self._send(404, {"error": "not found"})
 
         def _gather(self):
@@ -419,16 +421,25 @@ def make_handler(app: App):
             pos = app.store.position(job_id) if job["state"] == "queued" else None
             self._send(200, _public_job(job_id, job["state"], job["stage"], job["percent"], job.get("error"), app, pos, job=job))
 
-        def _gather_audio(self, job_id, sid):
+        def _gather_audio(self, job_id, sid, fetch_missing=True):
             if not ID_RE.match(job_id) or not re.fullmatch(r"[A-Za-z0-9._-]{1,80}", sid):
                 return self._send(404, {"error": "not found"})
-            doc = load_collection(app.storage, job_id) or {}
-            row = next((f for f in (doc.get("files") or []) if isinstance(f, dict) and f.get("sid") == sid), None)
-            data = app.storage.get(f"gathers/{job_id}/audio/{sid}")
-            if not data:
+            # The worker copies stored bytes after Gather. It must not download
+            # the collection. A person playing one preview fetches that file.
+            if not fetch_missing:
+                doc = load_collection(app.storage, job_id) or {}
+                row = next((f for f in (doc.get("files") or []) if isinstance(f, dict) and f.get("sid") == sid), None)
+                data = app.storage.get(f"gathers/{job_id}/audio/{sid}")
+                if not data:
+                    return self._send(404, {"error": "not found"})
+                from ncperf.gather import _audio_type
+                return self._send(200, data, _audio_type((row or {}).get("ext")), extra={"Cache-Control": "public, max-age=3600"})
+            from ncperf.gather import read_audio
+            got = read_audio(app.storage, job_id, sid)
+            if not got:
                 return self._send(404, {"error": "not found"})
-            from ncperf.gather import _audio_type
-            self._send(200, data, _audio_type((row or {}).get("ext")), extra={"Cache-Control": "public, max-age=3600"})
+            data, ctype = got
+            self._send(200, data, ctype, extra={"Cache-Control": "public, max-age=3600"})
 
         def _file(self, job_id, name):
             if not re.fullmatch(r"[A-Za-z0-9._-]{1,80}", name):
@@ -811,7 +822,7 @@ def make_handler(app: App):
                 return self._send(200, raw, "application/json")
             m = re.fullmatch(r"/internal/jobs/([hkg]-[0-9a-z]+)/audio/([A-Za-z0-9._-]+)", path)
             if m:
-                return self._gather_audio(m.group(1), m.group(2))
+                return self._gather_audio(m.group(1), m.group(2), fetch_missing=False)
             m = re.fullmatch(r"/internal/jobs/([hkg]-[0-9a-z]+)/files/([a-z0-9._-]+)", path)
             if m:
                 return self._file(m.group(1), m.group(2))
@@ -832,6 +843,22 @@ def make_handler(app: App):
             range_bytes = int(range_raw) if range_raw else None
             from ncperf import fetch as kit_fetch
             kit_fetch.seed_file(url, data, ext=ext, range_bytes=range_bytes)
+            self._send(204, b"")
+
+        def _internal_note_index(self):
+            if not _internal_ok(app, self):
+                return self._send(401, {"error": "internal token required"})
+            raw = self._read(8 * 1024 * 1024)
+            if not raw:
+                raise Reject("The note index is empty.")
+            try:
+                doc = json.loads(raw)
+            except json.JSONDecodeError as exc:
+                raise Reject("The note index is not JSON.") from exc
+            if not isinstance(doc, dict) or not isinstance(doc.get("libraries"), list):
+                raise Reject("The note index has no libraries.")
+            from ncperf import noteindex
+            noteindex.install_bytes(raw)
             self._send(204, b"")
 
     return Handler

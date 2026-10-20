@@ -1,7 +1,8 @@
 """Gather a collection, then Perform it later without searching again.
 
-Gather asks every supplier, with a short deadline, and downloads only the
-sounds that collection kept. Perform renders that plan from the cached files.
+Gather reads the note index and asks every supplier, with a short deadline.
+It does not download the note libraries and it does not measure pitch.
+Perform downloads the files that collection kept, in parallel.
 One-shot Perform does not call this module, and it keeps the 20 second budgets.
 """
 from __future__ import annotations
@@ -20,8 +21,8 @@ from .parallel import run_all
 _fetch_until: contextvars.ContextVar[float | None] = contextvars.ContextVar("nc_gather_fetch", default=None)
 
 # Wall clock for one Gather. Searches run together, so this is the slowest
-# supplier, not the sum. The note-map wall uses the same number. Chosen files
-# then download together under FETCH_S.
+# supplier, not the sum. The note index is already on disk, so Gather does
+# not spend this clock downloading note libraries.
 ORIGIN_S = 4.0
 NOTE_S = 4.0
 FETCH_S = 5.0
@@ -45,8 +46,27 @@ def picked_from_plan(plan: dict) -> tuple[list[str], list[str]]:
     return list(dict.fromkeys(keys)), list(dict.fromkeys(samples))
 
 
+def source_rows(plan: dict) -> list[dict]:
+    """URLs for the sounds this collection kept. The bytes are fetched later."""
+    rows = []
+    for sid, src in (plan.get("sources") or {}).items():
+        if not isinstance(src, dict):
+            continue
+        url = src.get("audio_url") or src.get("url")
+        if not url:
+            continue
+        ext = os.path.splitext(str(url).split("?")[0])[1] or ".bin"
+        rows.append({
+            "sid": sid,
+            "url": url,
+            "ext": ext,
+            "range_bytes": src.get("range_bytes"),
+        })
+    return rows
+
+
 def build(comp: dict, *, seed: int = 1, instrument: str | None = None, avoid_keys=None, avoid_sample_ids=None, host_ok_fn=None, registry_url=None, verify_live: bool = True, searchers=None, note_maps=None, progress_cb=None) -> dict:
-    """Search, pick, and download. If the previous collection leaves a chord empty, keep those sounds."""
+    """Search and pick. If the previous collection leaves a chord empty, keep those sounds."""
     kwargs = dict(
         seed=seed,
         instrument=instrument,
@@ -75,7 +95,9 @@ def build(comp: dict, *, seed: int = 1, instrument: str | None = None, avoid_key
         reset_wall(wall)
     plan["from_gather"] = True
     picks = [str(item) for item in (plan.pop("gather_picks", None) or []) if item]
-    files = cache_sources(plan, FETCH_S)
+    # The note index already names the files. Downloading them is Perform's job,
+    # and a preview fetches the one file someone actually plays.
+    files = source_rows(plan)
     keys, samples = picked_from_plan(plan)
     keys = list(dict.fromkeys(picks + keys))
     samples = list(dict.fromkeys([item for item in picks if item] + samples))
@@ -164,8 +186,9 @@ def public_sounds(plan: dict, gather_id: str, base: str, files: list[dict] | Non
             "preview_url": preview,
             "page": str(src.get("page") or ""),
         }
-        if file.get("url"):
-            row["source_url"] = file["url"]
+        source_url = file.get("url") or src.get("audio_url") or src.get("url")
+        if source_url:
+            row["source_url"] = source_url
         sounds.append(row)
     return sounds
 
@@ -176,10 +199,13 @@ def save_collection(storage, gather_id: str, doc: dict, files: list[dict]) -> No
     stored = []
     for row in files or []:
         sid = str(row.get("sid") or "")
-        data = row.get("data")
-        if not sid or not isinstance(data, (bytes, bytearray)):
+        if not sid:
             continue
-        storage.put(f"gathers/{gather_id}/audio/{sid}", bytes(data), _audio_type(row.get("ext")))
+        data = row.get("data")
+        if isinstance(data, (bytes, bytearray)) and data:
+            storage.put(f"gathers/{gather_id}/audio/{sid}", bytes(data), _audio_type(row.get("ext")))
+        if not row.get("url") and not (isinstance(data, (bytes, bytearray)) and data):
+            continue
         stored.append({
             "sid": sid,
             "url": row.get("url"),
@@ -211,6 +237,35 @@ def save_collection(storage, gather_id: str, doc: dict, files: list[dict]) -> No
         }, ensure_ascii=False).encode(),
         "application/json",
     )
+
+
+def read_audio(storage, gather_id: str, sid: str) -> tuple[bytes, str] | None:
+    """One gathered file. The first play downloads that file and keeps the bytes."""
+    doc = load_collection(storage, gather_id) or {}
+    row = next((item for item in (doc.get("files") or []) if isinstance(item, dict) and item.get("sid") == sid), None)
+    data = storage.get(f"gathers/{gather_id}/audio/{sid}")
+    if data:
+        return bytes(data), _audio_type((row or {}).get("ext"))
+    src = ((doc.get("plan") or {}).get("sources") or {}).get(sid)
+    if not isinstance(src, dict) or not src.get("kind"):
+        return None
+    try:
+        resolved = fetch.resolve(dict(src))
+    except Exception:
+        return None
+    path = resolved.get("path")
+    if not path or not os.path.isfile(path):
+        return None
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read()
+    except OSError:
+        return None
+    if not data:
+        return None
+    ext = os.path.splitext(path)[1] or (row or {}).get("ext") or ".bin"
+    storage.put(f"gathers/{gather_id}/audio/{sid}", data, _audio_type(ext))
+    return data, _audio_type(ext)
 
 
 def load_collection(storage, gather_id: str) -> dict | None:

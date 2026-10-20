@@ -33,8 +33,17 @@ class Renderer:
         s = self.P['sources'][sid]; r = fetch.resolve(s); r['id'] = sid
         y = decode(r['path']); r['offset_s'] = 0.0
         if 'segment' in s:
-            segs = pitch.segment_run(y.mean(1), SR, s['segment'].get('drop_db', 40.0)); i = s['segment']['index']
-            t0, t1 = segs[i]; r['segment'] = dict(index=i, t0=round(t0, 3), t1=round(t1, 3), of=len(segs)); r['offset_s'] = t0
+            seg = s['segment']
+            # The note index already stored the slice. Do not scan the file again.
+            if seg.get('t0') is not None and seg.get('t1') is not None:
+                t0, t1 = float(seg['t0']), float(seg['t1'])
+                count = seg.get('of')
+            else:
+                segs = pitch.segment_run(y.mean(1), SR, seg.get('drop_db', 40.0)); i = seg['index']
+                t0, t1 = segs[i]
+                count = len(segs)
+            i = seg['index']
+            r['segment'] = dict(index=i, t0=round(t0, 3), t1=round(t1, 3), of=count); r['offset_s'] = t0
             y = y[int(t0 * SR):int(t1 * SR)]
         r['y'] = y
         with self._src_lock:
@@ -64,7 +73,7 @@ class Renderer:
             r = self.source(sid); s = self.P['sources'][sid]
             checked = s.get('pitch_checked') and s.get('expect_midi') is not None and int(s.get('expect_midi')) == int(expect)
             if checked:
-                m = {'accepted': True, 'cents': s.get('cents'), 'note': pitch.NOTE(int(expect)), 'checked': 'gather'}
+                m = {'accepted': True, 'cents': s.get('cents'), 'note': pitch.NOTE(int(expect)), 'checked': 'index'}
             else:
                 m = pitch.measure_fft(r['y'], expect, hi=s.get('fft_hi_hz', 2000.0)) if s.get('pitch_method') == 'fft' else pitch.measure(r['y'], expect); m['accepted'] = pitch.accept(m, expect, self.P.get('pitch_tolerance_cents', 15.0))
             self.meas[(sid, expect)] = m
@@ -82,12 +91,15 @@ class Renderer:
 
     def note(self, sid, dur=None, pre=0.004):
         r = self.res[sid]; y = r['y']
-        if self.P['sources'][sid].get('segment') is None:
-            o = max(0, onset(y) - int(pre * SR)); z = y[o:] ; so = o / SR
-        else: z = y; so = r['offset_s']
-        if self.P['sources'][sid].get('segment') is None: so = so
+        src = self.P['sources'][sid]
+        if src.get('segment') is not None:
+            z = y; so = r['offset_s']
+        elif src.get('onset_s') is not None:
+            o = max(0, int(round(float(src['onset_s']) * SR)) - int(pre * SR)); z = y[o:]; so = o / SR
+        else:
+            o = max(0, onset(y) - int(pre * SR)); z = y[o:]; so = o / SR
         if dur: z = z[:int(dur * SR)]
-        return z, (so if self.P['sources'][sid].get('segment') is None else r['offset_s'])
+        return z, so
 
     def _lead(self, ly, i, default):
         table = ly.get('lead_by_chord') or {}
@@ -302,7 +314,9 @@ class Renderer:
 
     def run(self, name='performance'):
         os.makedirs(self.out, exist_ok=True)
-        if self.P.get('from_gather'):
+        # Download the files this plan kept, together. The note index already
+        # checked their pitch, so this does not measure the libraries.
+        if self.P.get('sources'):
             self._warm()
         for ly in self.P['layers']:
             self.log(f"layer {ly['id']} ({ly['type']})"); getattr(self, 'L_' + ly['type'])(ly)

@@ -83,12 +83,13 @@
       "type": "object", "required": ["kind"],
       "properties": {
         "kind": {"type": "string", "enum": ["supplier", "freesound", "uiowa_mis", "url", "commons"], "description": "supplier: a manifest from a registered Supplier. freesound: a sound id (license read from the live page, HQ preview used). uiowa_mis: a UIowa MIS file URL (terms checked live). commons: a file from the open commons whose license is checked on its live page. url: any other file with a declared license, checked on its page when given. Hosted Perform does not accept kind=url."},
-        "manifest": {"type": "string"}, "id": {"type": "string"}, "url": {"type": "string"}, "page": {"type": "string"},
+        "manifest": {"type": "string"}, "id": {"type": "string"}, "url": {"type": "string"}, "audio_url": {"type": "string", "description": "Direct audio URL when a credit lookup or the note index already resolved it."}, "page": {"type": "string"},
         "license": {"type": "string", "description": "kind=url only: CC0-1.0, CC-BY-x.y, CC-BY-SA-x.y or PD."},
         "author": {"type": "string"}, "title": {"type": "string"}, "source": {"type": "string"},
         "range_bytes": {"type": "integer", "minimum": 1000, "description": "Fetch only the first N bytes (for long field recordings)."},
-        "segment": {"type": "object", "required": ["index"], "properties": {"index": {"type": "integer", "minimum": 0}, "drop_db": {"type": "number"}}, "description": "Multi-note run: use the index-th note found by silence segmentation."},
+        "segment": {"type": "object", "required": ["index"], "properties": {"index": {"type": "integer", "minimum": 0}, "drop_db": {"type": "number"}, "t0": {"type": "number"}, "t1": {"type": "number"}}, "description": "Multi-note run: use the index-th note. t0 and t1 are the slice the note index already measured."},
         "expect_midi": {"type": "integer", "description": "For pitched clips used outside banks: the note it must measure as."},
+        "cents": {"type": "number"}, "pitch_checked": {"type": "boolean"}, "onset_s": {"type": "number"}, "length_s": {"type": "number"}, "credit_checked": {"type": "string"},
         "pitch_method": {"type": "string", "enum": ["pyin", "fft"]}, "fft_hi_hz": {"type": "number"},
         "pitched": {"type": "boolean"}
       }

@@ -607,14 +607,16 @@ class ServiceTest(unittest.TestCase):
         self.assertEqual(mode, "llm-cache")
         self.assertEqual(calls["n"], 1)
 
-        # Ordinary notes do not call xAI. They use even-handed discovery.
+        # Ordinary notes do not call xAI. Suppliers are blocked here, and the
+        # pitch-checked notes still come from the local note index.
         from ncperf.interpret import read_composition
         glass = read_composition(os.path.join(ROOT, "examples", "glass-garden.composition.md"))
         glass["composer"] = glass.get("composer") or "anonymous"
         with egress_guard(s):
-            with self.assertRaises(Reject):
-                app.runner._interpret(glass, 1, {})
+            discovered, mode = app.runner._interpret(glass, 1, {})
         self.assertEqual(calls["n"], 1)
+        self.assertEqual(mode, "discover")
+        self.assertTrue(any(src.get("pitch_checked") for src in (discovered.get("sources") or {}).values()))
 
         # Portable kit submission of this record, unsigned, through nc submit.
         rec2 = json.loads(json.dumps(rec))

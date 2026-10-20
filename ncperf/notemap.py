@@ -3,9 +3,10 @@
 A chord can be built by stacking these at the MIDI pitch they were recorded at.
 Nothing here pitch-shifts or time-stretches. A chromatic run is cut on silence,
 with the same segmentation the renderer uses, and a slice is kept only when it
-measures as that note. Libraries and note files are fetched together. One file
-still has 20 seconds; a slow file does not hold the rest of the library.
-Gather can arm a shorter wall-clock budget. One-shot Perform does not.
+measures as that note.
+
+Perform and Gather read the precomputed note index and do not download or
+measure these libraries. The live fill below is the offline refresh job.
 """
 from __future__ import annotations
 
@@ -602,15 +603,32 @@ def library_status(refresh: bool = False) -> dict:
 
 
 def ensure(symbols: list[str], refresh_status: bool = False, hint: str | None = None) -> tuple[list[dict], dict]:
-    """Load or build a pitch-verified note map for each instrument. Network when a note is missing.
+    """Return the precomputed note index. Perform does not measure libraries.
 
-    The libraries are filled together. Within a library, the note files that
-    cover the missing pitches are fetched together. The saved map is still one
-    file per library, written after that library's files have been measured.
-    Gather arms a short wall and names an instrument: that instrument's libraries
-    go first and get the file slots. The other libraries run only if time is left.
-    One-shot Perform does not arm the wall, so every library still runs together.
+    refresh_status is the offline rebuild. Gather and Perform pass False, read
+    the index, and leave any pitch the index does not list unavailable. They
+    do not fall back to downloading and measuring the libraries.
     """
+    if not refresh_status:
+        from . import noteindex
+        doc = noteindex.load()
+        if doc:
+            maps, status = noteindex.index_to_maps(doc)
+            for mp in maps:
+                print(json.dumps({
+                    "event": "note_map",
+                    "id": mp["id"],
+                    "notes": len(mp["notes"]),
+                    "source": "index",
+                }), flush=True)
+            return maps, status
+        print(json.dumps({"event": "note_map", "source": "missing"}), flush=True)
+        return [], {"v": MAP_VERSION, "skipped": [], "error": "note index is not installed"}
+    return _ensure_live(symbols, refresh_status=True, hint=hint)
+
+
+def _ensure_live(symbols: list[str], refresh_status: bool = False, hint: str | None = None) -> tuple[list[dict], dict]:
+    """Download and measure missing notes. The refresh job calls this, not Perform."""
     needed: set[int] = set()
     for sym in symbols:
         for _name, notes in CH.voicings(sym):

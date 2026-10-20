@@ -37,6 +37,7 @@ from collections import Counter
 
 from . import cancel as job_cancel
 from . import chords as CH
+from . import creditcache
 from . import deadline
 from . import fetch
 from . import interpret
@@ -420,6 +421,16 @@ def _texture_ok(cand: dict) -> bool:
 def _manifest_credit(url: str) -> dict | None:
     if not url:
         return None
+    cached = creditcache.get("manifest:" + url)
+    if cached:
+        return cached
+    credit = _manifest_credit_fetch(url)
+    if credit:
+        creditcache.put("manifest:" + url, credit)
+    return credit
+
+
+def _manifest_credit_fetch(url: str) -> dict | None:
     try:
         manifest = _json(url)
     except Exception as exc:
@@ -448,7 +459,7 @@ def _manifest_credit(url: str) -> dict | None:
             bass_pc = int(chord["bass_midi"]) % 12
     elif isinstance(chord, str):
         symbol = CH.spell(chord)
-    return {
+    credit = {
         "title": str(title).strip(),
         "author": str(author).strip(),
         "license": parsed[0],
@@ -456,11 +467,26 @@ def _manifest_credit(url: str) -> dict | None:
         "chord_symbol": symbol,
         "bass_pc": bass_pc,
     }
+    if manifest.get("audio"):
+        credit["audio_url"] = manifest["audio"]
+    if manifest.get("sha256"):
+        credit["sha256"] = manifest["sha256"]
+    return credit
 
 
 def _freesound_credit(sid: str) -> dict | None:
     if not sid:
         return None
+    cached = creditcache.get("freesound:" + str(sid))
+    if cached:
+        return cached
+    credit = _freesound_credit_fetch(sid)
+    if credit:
+        creditcache.put("freesound:" + str(sid), credit)
+    return credit
+
+
+def _freesound_credit_fetch(sid: str) -> dict | None:
     try:
         raw = _get(f"https://freesound.org/s/{sid}/")
     except Exception as exc:
@@ -488,7 +514,8 @@ def _freesound_credit(sid: str) -> dict | None:
     text = " ".join(parts)
     if not parts[0].strip() or not parts[1].strip():
         return None
-    return {
+    lq = re.search(r'https://cdn\.freesound\.org/previews/\d+/[\w-]+-lq\.ogg', page)
+    credit = {
         "title": parts[0].strip(),
         "author": parts[1].strip(),
         "license": found[0],
@@ -496,6 +523,9 @@ def _freesound_credit(sid: str) -> dict | None:
         "text": text,
         "og_type": (og_type.group(1).strip().lower() if og_type else ""),
     }
+    if lq:
+        credit["audio_url"] = lq.group(0).replace("-lq.ogg", "-hq.ogg")
+    return credit
 
 
 def _ensure_credit(cand: dict, verify_live: bool, bass=None) -> dict | None:
@@ -514,12 +544,16 @@ def _ensure_credit(cand: dict, verify_live: bool, bass=None) -> dict | None:
         if credit.get("bass_pc") is not None:
             cand["bass_pc"] = credit["bass_pc"]
         src.update({k: credit[k] for k in _CREDIT_KEYS})
+        if credit.get("audio_url"):
+            src["audio_url"] = credit["audio_url"]
     elif verify_live and kind == "freesound":
         credit = _freesound_credit(str(src.get("id") or ""))
         if not credit:
             return None
         src.update({k: credit[k] for k in _CREDIT_KEYS})
-        cand["text"] = credit["text"]
+        if credit.get("audio_url"):
+            src["audio_url"] = credit["audio_url"]
+        cand["text"] = credit.get("text") or ""
         cand["og_type"] = credit.get("og_type") or ""
     else:
         for key in _CREDIT_KEYS:
@@ -679,6 +713,9 @@ def search_musicmatter(terms, hint, chords, seed, host_ok_fn=None, registry_url=
                 "license": "CC-BY-SA-4.0",
                 "_host_ok": host_ok_fn,
             }
+            if off.get("audio"):
+                src["url"] = off["audio"]
+                src["audio_url"] = off["audio"]
             cand = _cand("musicmatter", title, author, "CC-BY-SA-4.0", f"{title} {blob}", src, terms, hint, chords)
             if not cand:
                 continue
@@ -1466,7 +1503,7 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
             sid = f"n{len(sources)}x{len(sample_ids)}"
         sample_ids[key] = sid
         keep = {}
-        for field in ("kind", "url", "id", "page", "title", "author", "license", "pitched", "expect_midi", "segment"):
+        for field in ("kind", "url", "id", "audio_url", "page", "title", "author", "license", "pitched", "expect_midi", "segment", "onset_s", "length_s", "credit_checked"):
             if sample.get(field) not in (None, ""):
                 keep[field] = sample[field]
         if sample.get("cents") is not None:
