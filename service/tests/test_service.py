@@ -141,6 +141,31 @@ class ServiceTest(unittest.TestCase):
             check_plan(plan, s, None)
         self.assertIn("evil.example", str(bad_host.exception))
 
+    def test_uiowa_mis_audio_outside_the_old_library_is_allowed(self):
+        s = Settings(allowed_hosts=("theremin.music.uiowa.edu",))
+        plan = _tiny_plan("https://musicmatter.art/x.nc.json")
+        plan["interpreter"] = {"kind": "discover"}
+        url = "https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/violin/Violin.pizz.mf.sulG.G3B3.aiff"
+        plan["sources"] = {
+            "pz": {
+                "kind": "uiowa_mis",
+                "url": url,
+                "page": "https://theremin.music.uiowa.edu/MISviolin.html",
+                "title": "Violin pizzicato G3",
+                "author": "University of Iowa Electronic Music Studios",
+                "license": "PD-equivalent",
+                "pitched": True,
+                "expect_midi": 55,
+                "segment": {"index": 0},
+            },
+        }
+        plan["layers"][0]["events"][0]["source"] = "pz"
+        check_plan(plan, s, {"suppliers": []})
+        plan["sources"]["pz"]["url"] = "https://philharmonia.co.uk/samples/violin.wav"
+        with self.assertRaises(Reject) as bad:
+            check_plan(plan, s, None)
+        self.assertIn("not a UIowa MIS", str(bad.exception))
+
     def test_chord_audio_host_is_allowed(self):
         s = Settings()
         self.assertTrue(s.host_allowed("audio.musicmatter.art"))

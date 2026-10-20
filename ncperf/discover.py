@@ -5,14 +5,14 @@ commons: Freesound, Openverse, the Internet Archive, Wikimedia Commons,
 ccMixter, and the bundled UIowa MIS library. Each origin is queried with the
 same words. A failure in one origin is skipped.
 
-A chord strike has to be that chord. musicmatter files are chosen by the
-root and quality on the offering (exact voicing, then an alternate voicing of
-the same chord, then the piano recording of that chord). A pitched clip from
-anywhere else is used only when its title declares that same chord. Texture is
-unpitched: a field recording, room tone, or pad, never a song. Every source
-kept in the plan has a title, an author, a license, and a page. Clips are
-trimmed, layered, and crossfaded. Nothing here asks for pitch-shift or
-time-stretch.
+A chord strike has to be that chord. It is either a whole-chord file of that
+root and quality, or the chord built from single notes that were recorded at
+those pitches (one sample per tone, layered with a small onset jitter). Notes
+are not pitch-shifted or time-stretched. No origin supplies more than half the
+strikes unless the notes name that origin, and unless it is the only origin
+that can play the chords. Texture is unpitched: a field recording, room tone,
+or pad, never a song. Every source kept in the plan has a title, an author, a
+license, and a page.
 """
 from __future__ import annotations
 
@@ -22,11 +22,14 @@ import random
 import re
 import urllib.parse
 import urllib.request
+import zlib
 from collections import Counter
 
 from . import chords as CH
 from . import interpret
 from . import licenses as LIC
+from . import notemap
+from . import pitch
 
 UA = "nc-performer-kit/0.1 (+https://netcomposer.art/agents/)"
 ORIGINS = (
@@ -812,11 +815,10 @@ def search_ccmixter(terms, hint, chords, seed, host_ok_fn=None, registry_url=Non
 
 
 def search_uiowa(terms, hint, chords, seed, host_ok_fn=None, registry_url=None) -> list[dict]:
-    """UIowa MIS is a library of single notes.
+    """UIowa MIS is single notes and chromatic runs, not beds or whole-chord files.
 
-    The terms are public-domain equivalent (see ncperf.fetch.IOWA_TERMS) and
-    fetch.resolve checks them live. A single note is not a chord strike, and it
-    is not an unpitched bed, so this search contributes nothing.
+    Strikes use those notes through the pitch-verified map (see ncperf.notemap).
+    This search stays empty so a run is not dropped in as texture.
     """
     return []
 
@@ -943,7 +945,76 @@ def _declared_on_page(cand: dict) -> bool:
     return False
 
 
-def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_fn=None, searchers=None, registry_url=None, verify_live: bool = True) -> dict:
+def _pluckish(name: str) -> bool:
+    n = (name or "").lower()
+    return any(word in n for word in ("pizz", "guitar", "harp", "pluck"))
+
+
+def _mentioned(text: str) -> list[str]:
+    low = text.lower()
+    out = []
+    for word in ("pluck", "pizz", *LEXICON):
+        if word not in out and re.search(rf"\b{re.escape(word)}", low):
+            out.append(word)
+    return out
+
+
+def _wants(opt: dict, word: str) -> bool:
+    if word in ("pluck", "pizz") and opt.get("pluck"):
+        return True
+    return _hint_ok(opt.get("instrument") or "", word)
+
+
+def assign_strikes(groups: list[list[dict]], seed: int, hint: str | None, mentioned: list[str], cap: int) -> list[dict] | None:
+    """One strike per chord, with no origin used more than ``cap`` times."""
+    n = len(groups)
+    chosen: list = [None] * n
+    counts: Counter = Counter()
+    used: Counter = Counter()
+    pluck_wanted = any(word in ("pluck", "pizz") for word in mentioned)
+
+    def rank(i: int, opt: dict):
+        inst = opt.get("instrument") or ""
+        origin = opt.get("origin") or ""
+        return (
+            0 if pluck_wanted and opt.get("pluck") else 1,
+            0 if hint and _wants(opt, hint) else 1,
+            0 if any(_wants(opt, word) for word in mentioned) else 1,
+            counts[origin],
+            int(opt.get("tier") or 0),
+            1 if used[inst] else 0,
+            zlib.adler32(f"{seed}|{i}|{origin}|{inst}|{opt.get('built')}".encode()) % 1000,
+        )
+
+    def bt(i: int) -> bool:
+        if i == n:
+            return True
+        seen = set()
+        for opt in sorted(groups[i], key=lambda row: rank(i, row)):
+            origin = opt.get("origin") or ""
+            inst = opt.get("instrument") or ""
+            if counts[origin] >= cap:
+                continue
+            pair = (origin, inst, opt.get("built"))
+            if pair in seen:
+                continue
+            seen.add(pair)
+            counts[origin] += 1
+            used[inst] += 1
+            chosen[i] = opt
+            if bt(i + 1):
+                return True
+            counts[origin] -= 1
+            used[inst] -= 1
+            chosen[i] = None
+        return False
+
+    if not bt(0):
+        return None
+    return chosen
+
+
+def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_fn=None, searchers=None, registry_url=None, verify_live: bool = True, note_maps=None) -> dict:
     """Build a plan from an even-handed search. Raises ValueError if nothing usable came back."""
     found = CH.find_full(comp.get("composition") or "") or CH.find_full(
         f"{comp.get('composition') or ''} {comp.get('performance') or ''}"
@@ -1047,7 +1118,10 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
 
     sources = {}
     events = []
+    banks: dict = {}
+    note_layers = []
     used: dict[str, str] = {}
+    sample_ids: dict[str, str] = {}
 
     def sid_for(cand: dict, suffix: str) -> str:
         if cand["key"] in used:
@@ -1057,28 +1131,66 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
         sources[sid] = cand["source"]
         return sid
 
+    def sid_for_sample(sample: dict) -> str:
+        seg = (sample.get("segment") or {}).get("index")
+        key = f"{sample.get('url') or sample.get('id')}|{seg}"
+        if key in sample_ids:
+            return sample_ids[key]
+        sid = f"n{len(sources)}"
+        while sid in sources:
+            sid = f"n{len(sources)}x{len(sample_ids)}"
+        sample_ids[key] = sid
+        keep = {}
+        for field in ("kind", "url", "id", "page", "title", "author", "license", "pitched", "expect_midi", "segment"):
+            if sample.get(field) not in (None, ""):
+                keep[field] = sample[field]
+        sources[sid] = keep
+        return sid
+
+    if note_maps is None and verify_live:
+        try:
+            note_maps, library_meta = notemap.ensure(syms)
+        except Exception as exc:
+            note_maps, library_meta = [], {"skipped": [], "error": str(exc)[:180]}
+    else:
+        library_meta = {}
+        if note_maps is None:
+            note_maps = []
+    assembly = notemap.assemblies_for(syms, note_maps or [], _EXCLUDE)
+
     seq = found
     reps = max(1, round(length / (len(seq) * 9.0)))
     seq = (seq * reps)[:12]
     dur = length / len(seq)
     chords = []
-    strike_cands: list[dict] = []
     per_chord = []
-    missing = []
+    option_groups: list[list[dict]] = []
     for i, (sym, bass) in enumerate(seq):
         usable = [
             c for c in pool
             if c.get("chord_symbol") == sym and not c.get("_wrong_chord") and not c.get("_blocked") and c.get("origin") != "uiowa"
         ]
-        picked = None
-        for cand in _strike_order(usable, hint, seed, i, named):
-            picked = accept(cand, sym, bass)
-            if picked:
-                break
-        if not picked:
-            missing.append(sym)
-            continue
-        strike_cands.append(picked)
+        opts = []
+        for row in assembly.get(sym) or []:
+            if any(_hint_ok(row.get("instrument") or "", word) for word in _EXCLUDE):
+                continue
+            opts.append(dict(row))
+        for cand in _strike_order(usable, hint, seed, i, None):
+            opts.append({
+                "built": "whole-chord file",
+                "origin": cand.get("origin"),
+                "instrument": cand.get("instrument"),
+                "pluck": _pluckish(cand.get("instrument") or ""),
+                "tier": _tier(cand),
+                "cand": cand,
+            })
+        option_groups.append(opts)
+    if named and option_groups and all(any(row.get("origin") == named for row in group) for group in option_groups):
+        option_groups = [[row for row in group if row.get("origin") == named] for group in option_groups]
+    origins_here = {row.get("origin") for group in option_groups for row in group}
+    missing = []
+
+    def add_whole(i: int, sym: str, bass, picked: dict) -> None:
         sid = sid_for(picked, str(len(sources)))
         match = _match_label(picked)
         chords.append({
@@ -1104,19 +1216,145 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
             "bass": bass,
             "origin": picked["origin"],
             "instrument": picked["instrument"],
+            "built": "whole-chord file",
             "match": match,
             "title": picked["title"],
             "author": picked["author"],
             "license": picked["license"],
+            "licenses": [picked["license"]],
             "page": picked["page"],
             "source": sid,
         })
-    if missing:
-        _EXCLUDE = previous_exclude
-        raise ValueError(
-            "No exact chord recording for: " + ", ".join(dict.fromkeys(missing))
-            + ". A pitched clip in another key was not used."
-        )
+
+    def add_assembled(i: int, sym: str, bass, opt: dict) -> None:
+        voicing = [int(n) for n in opt["voicing"]]
+        bank_id = f"strike-{i}"
+        notes = {}
+        tones = []
+        for sample in opt["samples"]:
+            sid = sid_for_sample(sample)
+            midi = int(sample["midi"])
+            notes.setdefault(str(midi), []).append(sid)
+            tones.append({
+                "midi": midi,
+                "note": pitch.NOTE(midi),
+                "title": sample.get("title"),
+                "author": sample.get("author"),
+                "license": sample.get("license"),
+                "page": sample.get("page"),
+                "cents": sample.get("cents"),
+            })
+        banks[bank_id] = {"notes": notes}
+        note_layers.append({
+            "id": f"notes-{i}",
+            "type": "chord_notes",
+            "bus": "keys",
+            "bank": bank_id,
+            "style": "strike",
+            "jitter_s": 0.06,
+            "offset_s": 0.05,
+            "gain": 0.72,
+            "first_gain": 0.85,
+            "note_s": 6.5,
+            "fade_out_s": 2.4,
+            "last_note_s": 9.0,
+            "last_fade_out_s": 4.0,
+            "role": f"{opt['instrument']} ({opt['origin']}) {sym} assembled from native-pitch notes",
+            "per_chord": [{"chord": i, "strikes_at": [0.0]}],
+        })
+        chords.append({
+            "t": round(i * dur, 3),
+            "dur": round(dur, 3),
+            "symbol": sym,
+            "voicing": voicing,
+            "section": "A" if i < len(seq) / 2 else "B",
+        })
+        per_chord.append({
+            "symbol": sym,
+            "bass": bass,
+            "origin": opt["origin"],
+            "instrument": opt["instrument"],
+            "built": "assembled notes",
+            "match": "native pitch",
+            "title": opt.get("title"),
+            "author": opt.get("author"),
+            "license": opt.get("license"),
+            "licenses": list(opt.get("licenses") or []),
+            "page": opt.get("page"),
+            "voicing": voicing,
+            "tones": tones,
+        })
+
+    if len(origins_here) < 2:
+        for i, (sym, bass) in enumerate(seq):
+            usable = [
+                c for c in pool
+                if c.get("chord_symbol") == sym and not c.get("_wrong_chord") and not c.get("_blocked") and c.get("origin") != "uiowa"
+            ]
+            picked = None
+            for cand in _strike_order(usable, hint, seed, i, named):
+                picked = accept(cand, sym, bass)
+                if picked:
+                    break
+            if not picked:
+                missing.append(sym)
+                continue
+            add_whole(i, sym, bass, picked)
+        if missing:
+            _EXCLUDE = previous_exclude
+            raise ValueError(
+                "No exact chord recording for: " + ", ".join(dict.fromkeys(missing))
+                + ". A pitched clip in another key was not used."
+            )
+    else:
+        cap = max(1, len(seq) // 2)
+        dead: list[set] = [set() for _ in seq]
+        chosen = None
+        missing_syms: list[str] = []
+        for _attempt in range(48):
+            current = []
+            for i, group in enumerate(option_groups):
+                current.append([
+                    row for row in group
+                    if not (row.get("built") == "whole-chord file" and id(row.get("cand")) in dead[i])
+                ])
+            missing_syms = [seq[i][0] for i, group in enumerate(current) if not group]
+            if missing_syms:
+                chosen = None
+                break
+            chosen = assign_strikes(current, seed, hint, _mentioned(words), cap)
+            if not chosen:
+                missing_syms = [sym for sym, _bass in seq]
+                break
+            failed = False
+            for i, opt in enumerate(chosen):
+                if opt.get("built") != "whole-chord file":
+                    continue
+                if opt.get("accepted"):
+                    continue
+                got = accept(opt["cand"], seq[i][0], seq[i][1])
+                if not got:
+                    dead[i].add(id(opt["cand"]))
+                    failed = True
+                    break
+                opt["accepted"] = got
+            if not failed:
+                break
+        else:
+            chosen = None
+        if not chosen:
+            _EXCLUDE = previous_exclude
+            raise ValueError(
+                "No exact chord recording or native-pitch notes for: "
+                + ", ".join(dict.fromkeys(missing_syms or [sym for sym, _bass in seq]))
+                + ". A pitched clip in another key was not used."
+            )
+        for i, opt in enumerate(chosen):
+            sym, bass = seq[i]
+            if opt.get("built") == "assembled notes":
+                add_assembled(i, sym, bass, opt)
+            else:
+                add_whole(i, sym, bass, opt["accepted"])
     bed = None
     textures = []
     for cand in pool:
@@ -1139,13 +1377,16 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
             continue
         bed = got
         break
-    layers = [{
-        "id": "strikes",
-        "type": "clips",
-        "bus": "keys",
-        "role": "chord strikes matched to the composition, trimmed, not time-stretched",
-        "events": events,
-    }]
+    layers = []
+    if events:
+        layers.append({
+            "id": "strikes",
+            "type": "clips",
+            "bus": "keys",
+            "role": "whole-chord strikes matched to the composition, trimmed, not time-stretched",
+            "events": events,
+        })
+    layers.extend(note_layers)
     bed_note = "Texture: none. No unpitched field recording, room tone, or pad passed the rights check."
     if bed:
         sid = sid_for(bed, "bed")
@@ -1172,19 +1413,18 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
             "events": bed_events,
         })
         bed_note = f"Texture: {bed['title']} ({bed['origin']}, {bed['license']})."
-    mix_counts: Counter = Counter(c["origin"] for c in strike_cands)
+    mix_counts: Counter = Counter(row["origin"] for row in per_chord)
     instruments = []
-    for cand in strike_cands:
-        if cand["instrument"] not in instruments:
-            instruments.append(cand["instrument"])
-    if bed:
-        mix_counts[bed["origin"]] += 1
-        if bed["instrument"] not in instruments:
-            instruments.append(bed["instrument"])
+    for row in per_chord:
+        if row["instrument"] not in instruments:
+            instruments.append(row["instrument"])
+    if bed and bed["instrument"] not in instruments:
+        instruments.append(bed["instrument"])
     total = sum(mix_counts.values()) or 1
     mix = {
         "by_origin": dict(mix_counts),
         "share": {k: round(v / total, 2) for k, v in mix_counts.items()},
+        "strike_share": {k: round(v / total, 2) for k, v in mix_counts.items()},
         "instruments": instruments,
         "queried": order,
         "returned": {k: len(v) for k, v in groups.items()},
@@ -1198,21 +1438,25 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
             "license": bed["license"],
             "page": bed["page"],
         },
+        "libraries": library_meta.get("skipped") or [],
         "rule": (
-            "Chord match wins over origin balance. A strike is an exact root/quality/bass match, "
-            "then an alternate voicing of that same chord, then the piano recording of that chord. "
-            "A pitched clip in any other key is not used. Texture is unpitched (field recording, room tone, pad) "
-            "and is omitted when none is safe. Every source has a title, author, license, and page."
+            "A strike is that chord: a whole-chord file of the same root, quality, and bass, "
+            "or the chord assembled from single notes recorded at those pitches. "
+            "No origin is more than half the strikes unless the notes name it, or it is the only origin that can play them. "
+            "Share counts strikes only; the texture bed is separate. "
+            "Nothing is pitch-shifted or time-stretched. Every source has a title, author, license, and page."
         ),
     }
     chord_note = "; ".join(
-        f"{row['symbol']} {row['match']} via {row['instrument']} ({row['origin']})"
+        f"{row['symbol']} {row.get('built', row['match'])} via {row['instrument']} ({row['origin']})"
         for row in per_chord
     )
+    share_note = ", ".join(f"{name} {count}/{total}" for name, count in mix_counts.items())
     note = (
         "Per chord: " + chord_note
+        + ". Strike share: " + (share_note or "none")
         + ". " + bed_note
-        + " No pitch-shift and no time-stretch; strikes are trimmed and the bed is layered from unaltered clips."
+        + " No pitch-shift and no time-stretch. Assembled tones keep their recorded pitch and are layered with a small onset jitter."
     )
     title = (comp.get("title") or "Untitled")
     soft = bool(re.search(r"ambient|soft|calm|slow|gentle|dark|no harsh", words, re.I))
@@ -1229,7 +1473,7 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
         "interpreter": {
             "kind": "discover",
             "at": __import__("datetime").datetime.now().astimezone().isoformat(timespec="seconds"),
-            "note": "Each chord strike matches that chord's root and quality. Texture is an unpitched field recording, room tone, or pad. musicmatter is one Supplier, not the default.",
+            "note": "Each chord strike is that chord, either a whole-chord file or notes assembled at their recorded pitch. No origin is more than half the strikes unless the notes name it. Texture is an unpitched field recording, room tone, or pad.",
         },
         "seed": int(seed),
         "length_s": round(length, 3),
@@ -1242,7 +1486,7 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
         ],
         "chords": chords,
         "sources": sources,
-        "banks": {},
+        "banks": banks,
         "layers": layers,
         "master": {
             "buses": {

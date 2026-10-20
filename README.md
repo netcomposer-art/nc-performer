@@ -14,7 +14,7 @@ The rules are those of netcomposer.art and the kit enforces them:
 - Inputs: **CC0, CC BY, CC BY-SA or public domain**. NC, ND, Sampling+ and custom licenses are rejected.
   Licenses are read **live** at render time (Freesound: the sound's own page; Suppliers: the manifest;
   UIowa MIS: the terms page).
-- **No pitch-shifting and no time-stretching.** A recording keeps the pitch and the duration it was published with. A pad is made by layering and crossfading unaltered copies.
+- **No pitch-shifting and no time-stretching.** A recording keeps the pitch and the duration it was published with. A pad is made by layering and crossfading unaltered copies. A chord can be assembled from single notes that were recorded at the voicing's pitches.
 - Pitch is **measured** (pYIN, FFT for bells), never taken from a label. A bank lists candidates per note;
   the first one that measures as the note within the tolerance (default 15 cents) is used, and every
   rejection is written into the record.

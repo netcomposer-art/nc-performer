@@ -10,7 +10,10 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
 
-from ncperf import discover, licenses as LIC
+from collections import Counter
+
+from ncperf import chords as CH
+from ncperf import discover, licenses as LIC, notemap
 from ncperf.fetch import IOWA_TERMS
 from ncperf.interpret import from_plan
 from ncperf.schema import validate
@@ -163,10 +166,15 @@ class DiscoverTest(unittest.TestCase):
             "musicmatter": _chords("musicmatter", "piano", prefix="p") + _chords("musicmatter", "choir", prefix="c"),
             "wikimedia": _chords("wikimedia", "choir", kind="commons", prefix="w"),
         }
+        pools["freesound"] = _chords("freesound", "choir", kind="freesound", prefix="fs")
         plan = discover.plan_for(COMP, seed=4, instrument="choir", searchers=_searchers(pools), verify_live=False)
         for row in plan["source_mix"]["per_chord"]:
             self.assertEqual(row["instrument"], "choir")
             self.assertNotEqual(row["match"], "piano fallback")
+            self.assertEqual(row["built"], "whole-chord file")
+        counts = Counter(row["origin"] for row in plan["source_mix"]["per_chord"])
+        self.assertGreaterEqual(len(counts), 3)
+        self.assertLessEqual(max(counts.values()), 2)
         self.assertEqual(plan["source_mix"]["instrument_hint"], "choir")
         self.assertIn("musicmatter", plan["source_mix"]["queried"])
 
@@ -251,7 +259,103 @@ class DiscoverTest(unittest.TestCase):
     def test_uiowa_terms_are_public_domain_equivalent_and_unused(self):
         self.assertIn("without restrictions", IOWA_TERMS)
         self.assertTrue(LIC.allowed("PD-equivalent"))
+        # Single notes are assembled from the pitch map, not returned as beds.
         self.assertEqual(discover.search_uiowa(["violin"], None, ["Ebsus2"], 1), [])
+
+
+def _note(origin, instrument, midi, pluck=False):
+    sample = {
+        "midi": midi,
+        "title": f"{instrument} {midi}",
+        "author": "Ada",
+        "license": "PD-equivalent" if origin == "uiowa" else "CC0-1.0",
+        "page": "https://theremin.music.uiowa.edu/MIS.html" if origin == "uiowa" else f"https://freesound.org/s/{600000 + midi}/",
+        "pitched": True,
+        "expect_midi": midi,
+        "cents": 1.0,
+    }
+    if origin == "uiowa":
+        sample["kind"] = "uiowa_mis"
+        sample["url"] = f"https://theremin.music.uiowa.edu/sound%20files/MIS/{instrument}/{midi}.aiff"
+    else:
+        sample["kind"] = "freesound"
+        sample["id"] = str(600000 + midi)
+    return sample
+
+
+def _map(origin, instrument, pluck=False):
+    notes = {}
+    for sym in CHORDS:
+        _name, midis = min(CH.voicings(sym), key=lambda row: (len(row[1]), max(row[1]) - min(row[1])))
+        for midi in midis:
+            notes[str(midi)] = _note(origin, instrument, midi)
+    return {
+        "origin": origin,
+        "instrument": instrument,
+        "pluck": pluck,
+        "page": "https://theremin.music.uiowa.edu/MIS.html",
+        "notes": notes,
+    }
+
+
+class AssembledStrikeTest(unittest.TestCase):
+    def test_native_pitch_notes_count_toward_the_strike_cap(self):
+        pools = {"musicmatter": _chords("musicmatter", "choir")}
+        maps = [_map("uiowa", "cello pizzicato", pluck=True), _map("freesound", "flute")]
+        plan = discover.plan_for(
+            COMP, seed=11, searchers=_searchers(pools), verify_live=False, note_maps=maps,
+        )
+        self.assertEqual(validate(plan), [])
+        self.assertNotIn("stretch_to_s", json.dumps(plan))
+        rows = plan["source_mix"]["per_chord"]
+        self.assertEqual([row["symbol"] for row in rows], list(CHORDS))
+        counts = Counter(row["origin"] for row in rows)
+        self.assertLessEqual(max(counts.values()), 2)
+        self.assertGreaterEqual(len(counts), 3)
+        self.assertLessEqual(counts.get("musicmatter", 0), 2)
+        self.assertTrue(any(row["built"] == "assembled notes" for row in rows))
+        self.assertEqual(plan["source_mix"]["share"], plan["source_mix"]["strike_share"])
+        for src in plan["sources"].values():
+            for key in ("title", "author", "license", "page"):
+                self.assertTrue(src.get(key), src)
+
+    def test_pluck_is_a_real_plucked_string(self):
+        comp = dict(COMP, performance="Layer a plucked string with a fat synth. Vary the color on each chord.")
+        pools = {"musicmatter": _chords("musicmatter", "fat synth", prefix="fat")}
+        maps = [
+            _map("uiowa", "violin pizzicato", pluck=True),
+            _map("freesound", "guitar", pluck=True),
+            _map("uiowa", "piano"),
+        ]
+        plan = discover.plan_for(
+            comp, seed=13, searchers=_searchers(pools), verify_live=False, note_maps=maps,
+        )
+        rows = plan["source_mix"]["per_chord"]
+        counts = Counter(row["origin"] for row in rows)
+        self.assertLessEqual(counts.get("musicmatter", 0), 2)
+        self.assertLessEqual(max(counts.values()), 2)
+        plucked = [row for row in rows if row["instrument"] in ("violin pizzicato", "guitar")]
+        self.assertGreaterEqual(len(plucked), 2)
+        for row in plucked:
+            self.assertEqual(row["built"], "assembled notes")
+        self.assertNotIn("piano", [row["instrument"] for row in rows])
+
+    def test_sparse_and_custom_libraries_are_not_a_chord(self):
+        glass = ("Ebsus2", "Cm-add9", "Ab6-9", "Bb7sus4", "Eb6")
+        for sym in glass:
+            self.assertFalse(notemap.voicing_covered(sym, notemap.VSCO_PIZZ_MIDIS))
+            self.assertFalse(notemap.voicing_covered(sym, {60}))
+        custom = (
+            "You are free to use these samples. The only restriction is that they must not be "
+            "sold or made available 'as is' (as a sampler instrument). "
+            "https://creativecommons.org/licenses/by-sa/4.0/"
+        )
+        self.assertFalse(notemap.philharmonia_compatible(custom))
+        self.assertTrue(notemap.philharmonia_compatible(
+            "Licensed https://creativecommons.org/publicdomain/zero/1.0/ with no further restriction."
+        ))
+        self.assertFalse(notemap.note_ok({"midi": 60, "cents": 2, "spread_cents": 3}, 61))
+        self.assertTrue(notemap.note_ok({"midi": 60, "cents": 4, "spread_cents": 3}, 60))
 
     def test_discover_kind_survives_loading_a_plan(self):
         plan = discover.plan_for(

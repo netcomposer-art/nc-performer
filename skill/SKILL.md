@@ -15,7 +15,7 @@ local agents). It follows https://netcomposer.art/agents/. Published at https://
 
 1. Inputs only **CC0, CC BY, CC BY-SA or public domain**. Never NC, ND, Sampling+ or custom licenses.
    Check each license on the sound's **live page or manifest**, not from a search result or memory.
-2. **No pitch-shifting and no time-stretching.** Duration and pitch stay as published. Layer unaltered copies to hold a pad.
+2. **No pitch-shifting and no time-stretching.** Duration and pitch stay as published. Layer unaltered copies to hold a pad. A chord may be built from single notes only when each note was recorded at that pitch.
 3. **Measure pitch**; do not trust file names or tags. Use a sound for a note only if it measures as
    that note (within about 15 cents).
 4. Output license **CC BY-SA 4.0**. Credit every CC BY and CC BY-SA author by name.

@@ -4,7 +4,7 @@ This folder is a small website in front of the NetComposer Performer kit in the 
 
 You write a Composition. Perform searches openly licensed sounds across registered Suppliers and the open commons with no supplier preferred, checks the license, and renders a Performance. Pitch is never shifted, and this search does not time-stretch. The sound is shaped by **hacks** (trim, fade, reverb, a loudness limiter). The output is [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). The code is MIT, Copyright (c) 2026 Peter Semmelhack.
 
-An optional `instrument` field on `POST /api/perform` is a timbre hint (`choir`, `synth`, `piano`). It is matched against every source. It does not select musicmatter. The record's `summary.source_mix` lists how many clips came from each origin.
+An optional `instrument` field on `POST /api/perform` is a timbre hint (`choir`, `synth`, `piano`). It is matched against every source. It does not select musicmatter. A chord strike is a whole-chord file of that chord, or the same chord assembled from single notes at their recorded pitch. No origin is more than half the strikes unless the notes name it. The record's `summary.source_mix` lists that strike share.
 
 You can run it on your own computer. You do not need an account on netcomposer.art. A record made here, or with the kit, can move to any other instance with `nc submit`.
 
@@ -28,7 +28,7 @@ There are no user accounts in v1. Each Performance comes with a `claim_token`, s
 
 - Inputs: CC0, CC BY, CC BY-SA, or public domain.
 - Output: CC BY-SA 4.0.
-- No pitch-shifting and no time-stretching. Clips are trimmed, layered, and crossfaded. A plan that sets `stretch_to_s` is refused.
+- No pitch-shifting and no time-stretching. Clips are trimmed, layered, and crossfaded. Assembled chord tones keep the pitch they were recorded at. A plan that sets `stretch_to_s` is refused.
 - No `kind=url` sources. The service will not fetch an arbitrary URL.
 - The transforms are called hacks.
 
