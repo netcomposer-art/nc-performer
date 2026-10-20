@@ -242,12 +242,20 @@ export const STAGE_LINES: Record<string, string> = {
   cancelled: "Stopped.",
 };
 
-export type FoundSound = { title: string; supplier: string; license: string };
+export type FoundSound = {
+  title: string;
+  supplier: string;
+  license: string;
+  chord?: number;
+  id?: string;
+  preview_url?: string;
+  symbol?: string;
+};
 
 export function foundSounds(rows: unknown): FoundSound[] {
   if (!Array.isArray(rows)) return [];
   const out: FoundSound[] = [];
-  const seen = new Set<string>();
+  const seen = new Map<string, number>();
   for (const row of rows) {
     if (!row || typeof row !== "object") continue;
     const item = row as Record<string, unknown>;
@@ -255,10 +263,20 @@ export function foundSounds(rows: unknown): FoundSound[] {
     const supplier = String(item.supplier || "").trim();
     const license = String(item.license || "").trim();
     if (!title || !supplier || !license) continue;
-    const key = `${title}\0${supplier}\0${license}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push({ title, supplier, license });
+    const chord = typeof item.chord === "number" && Number.isFinite(item.chord) ? Math.trunc(item.chord) : null;
+    const key = chord == null ? `${title}\0${supplier}\0${license}` : `chord\0${chord}`;
+    const sound: FoundSound = { title, supplier, license };
+    if (chord != null) sound.chord = chord;
+    if (typeof item.id === "string" && item.id.trim()) sound.id = item.id.trim();
+    if (typeof item.preview_url === "string" && item.preview_url.trim()) sound.preview_url = item.preview_url.trim();
+    if (typeof item.symbol === "string" && item.symbol.trim()) sound.symbol = item.symbol.trim();
+    const at = seen.get(key);
+    if (at != null) {
+      out[at] = sound;
+      continue;
+    }
+    seen.set(key, out.length);
+    out.push(sound);
   }
   return out;
 }

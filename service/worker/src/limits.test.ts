@@ -226,3 +226,18 @@ test("public job status always has trimmed, seed, found sounds, and a stage line
   assert.equal(idle.tester, false);
   assert.equal(jobStatusFields({ stage: "queued", tester: true }).tester, true);
 });
+
+test("a chord row keeps its position and preview, and a later pick replaces that chord", () => {
+  const live = jobStatusFields({
+    stage: "gathering",
+    found_sounds: [
+      { title: "Choir Cm", supplier: "Musicmatter", license: "CC-BY-SA-4.0", chord: 0, id: "c0", preview_url: "/api/jobs/g-0123456789ab/audio/c0", symbol: "Cm" },
+      { title: "Choir F", supplier: "Musicmatter", license: "CC-BY-SA-4.0", chord: 1, id: "c1", preview_url: "/api/jobs/g-0123456789ab/audio/c1", symbol: "F" },
+      { title: "Piano Cm", supplier: "Musicmatter", license: "CC-BY-SA-4.0", chord: 0, id: "c0", preview_url: "/api/jobs/g-0123456789ab/audio/c0", symbol: "Cm" },
+    ],
+  });
+  assert.deepEqual(live.found_sounds, [
+    { title: "Piano Cm", supplier: "Musicmatter", license: "CC-BY-SA-4.0", chord: 0, id: "c0", preview_url: "/api/jobs/g-0123456789ab/audio/c0", symbol: "Cm" },
+    { title: "Choir F", supplier: "Musicmatter", license: "CC-BY-SA-4.0", chord: 1, id: "c1", preview_url: "/api/jobs/g-0123456789ab/audio/c1", symbol: "F" },
+  ]);
+});

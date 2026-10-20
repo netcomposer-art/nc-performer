@@ -28,6 +28,8 @@ _fetch_until: contextvars.ContextVar[float | None] = contextvars.ContextVar("nc_
 ORIGIN_S = 4.0
 NOTE_S = 4.0
 FETCH_S = 5.0
+# One clock for the whole raw Gather. A chord with no live hit by then uses the index.
+GATHER_S = 8.0
 
 
 def picked_from_plan(plan: dict) -> tuple[list[str], list[str]]:
@@ -85,10 +87,11 @@ def build(comp: dict, *, seed: int = 1, instrument: str | None = None, avoid_key
         seed=seed, instrument=instrument, host_ok_fn=host_ok_fn, searchers=searchers,
         registry_url=registry_url, verify_live=verify_live, note_maps=note_maps,
         progress_cb=progress_cb, origin_budget_s=ORIGIN_S, avoid_keys=avoid_keys,
-        avoid_sample_ids=avoid_sample_ids,
+        avoid_sample_ids=avoid_sample_ids, gather_deadline_s=GATHER_S,
+        settle_s=assemble.GATHER_SETTLE_S,
     )
     avoided = bool(avoid_keys or avoid_sample_ids)
-    wall = arm_wall(ORIGIN_S)
+    wall = arm_wall(GATHER_S)
     try:
         try:
             plan = assemble.plan_raw(comp, **kwargs)

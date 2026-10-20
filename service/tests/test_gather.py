@@ -66,6 +66,7 @@ class GatherKitTest(unittest.TestCase):
         self.assertIsNone(params["note_budget_s"].default)
         self.assertEqual(gather.ORIGIN_S, 4.0)
         self.assertEqual(gather.NOTE_S, 4.0)
+        self.assertEqual(gather.GATHER_S, 8.0)
 
     def test_gather_passes_the_short_deadline(self):
         seen = {}

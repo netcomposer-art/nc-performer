@@ -42,7 +42,7 @@ from ncperf.discover import plan_for
 from ncperf.fit import fit_plan
 import ncperf.gather as gather
 from ncperf.gather import load_collection, public_sounds, restore_cache, save_collection, wipe_gather
-from ncperf.progress import STAGE_LINES, merge_sounds, sounds_from_sources
+from ncperf.progress import STAGE_LINES, merge_sounds, sounds_from_sources, with_preview
 from .cancel import wipe_performance, write_cancelled_status
 from .planner import PRICE_SOURCE, cache_key, compute_cost, llm_cost, llm_price_card, wants_model
 from .sign import Signer, apply_signature
@@ -290,6 +290,8 @@ class Runner:
                 instrument = (comp.get("instrument") or "").strip() or None
 
                 def progress_cb(line, sound=None):
+                    if isinstance(sound, dict):
+                        sound = with_preview(sound, job_id, settings.public_base_url)
                     self._progress(job_id, stage_line=line, sound=sound, seed=seed)
 
                 try:
@@ -334,11 +336,15 @@ class Runner:
             )
             check_plan(plan, settings, suppliers)
             trimmed = plan.get("trimmed")
+            if plan.get("assembly") == "raw":
+                heard = public_sounds(plan, job_id, settings.public_base_url.rstrip("/"), gather.source_rows(plan))
+            else:
+                heard = sounds_from_sources(plan.get("sources"))
             self._progress(
                 job_id,
                 seed=int(plan.get("seed") or seed),
                 trimmed=trimmed if isinstance(trimmed, str) and trimmed.strip() else None,
-                sounds=sounds_from_sources(plan.get("sources")),
+                sounds=heard,
             )
             self._stage(job_id, "fetching", stage_t, mark)
             out = self._render(job_id, plan, comp, req, stage_t, mark)
@@ -371,6 +377,8 @@ class Runner:
         self._progress(job_id, seed=seed, trimmed=None)
 
         def progress_cb(line, sound=None):
+            if isinstance(sound, dict):
+                sound = with_preview(sound, job_id, settings.public_base_url)
             self._progress(job_id, stage_line=line, sound=sound, seed=seed)
 
         try:
@@ -421,7 +429,7 @@ class Runner:
         result = {
             "seed": int(plan.get("seed") or seed),
             "trimmed": trimmed,
-            "found_sounds": sounds_from_sources(plan.get("sources")),
+            "found_sounds": sounds if plan.get("assembly") == "raw" else sounds_from_sources(plan.get("sources")),
             "sounds": sounds,
             "stage_line": STAGE_LINES["gathered"],
             "gather_id": job_id,
@@ -517,6 +525,10 @@ class Runner:
                 self._stage(job_id, "mastering", stage_t, mark)
             preview = os.path.join(work, "preview.mp3")
             os.replace(mp3, preview)
+            # The page can play this as soon as the bytes are stored and read back.
+            # The record and the signature finish after, and done still waits for them.
+            with open(preview, "rb") as fh:
+                self._publish_preview(job_id, fh.read())
             master = os.path.join(work, "performance.flac")
             if flac != master:
                 os.replace(flac, master)
@@ -539,6 +551,23 @@ class Runner:
             return files
         finally:
             shutil.rmtree(work, ignore_errors=True)
+
+    def _publish_preview(self, job_id: str, data: bytes) -> None:
+        """Store the MP3 and say so only after those bytes can be read back.
+
+        The record is not part of this claim. ``done`` still waits for it.
+        """
+        if not data:
+            return
+        key = f"performances/{job_id}/preview.mp3"
+        self.storage.put(key, data, "audio/mpeg")
+        got = self.storage.get(key)
+        if not got or len(got) != len(data):
+            return
+        result = self._snapshot(job_id)
+        result["preview_ready"] = True
+        result["stage_line"] = "The recording is ready."
+        self.store.update(job_id, result=result)
 
     def _store_outputs(self, job_id: str, files: dict, req: dict, mode: str, usage: dict | None = None) -> None:
         base = f"performances/{job_id}/"

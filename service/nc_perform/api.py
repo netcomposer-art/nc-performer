@@ -10,6 +10,7 @@ import json
 import os
 import re
 import threading
+import time
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
@@ -211,6 +212,10 @@ def make_handler(app: App):
                 from . import __version__
                 self._send(200, {"ok": True, "service": "nc-perform", "version": __version__})
                 return
+            if path == "/api/warm":
+                # This process is already up. The Worker starts the container.
+                self._send(200, {"ok": True, "warming": False})
+                return
             if path == "/api/config":
                 s = app.settings
                 self._send(200, {
@@ -292,6 +297,9 @@ def make_handler(app: App):
                 return self._internal_cache()
             if path == "/internal/note-index":
                 return self._internal_note_index()
+            m = re.fullmatch(r"/internal/jobs/([hkg]-[0-9a-z]+)/cancel", path)
+            if m:
+                return self._internal_cancel(m.group(1))
             self._send(404, {"error": "not found"})
 
         def _gather(self):
@@ -553,20 +561,26 @@ def make_handler(app: App):
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             last = None
-            for _ in range(settings_timeout_loops(app)):
+            deadline = time.monotonic() + app.settings.job_timeout_s
+            while time.monotonic() < deadline:
                 job = app.store.get(job_id)
                 if not job:
                     break
                 view = _public_job(job_id, job["state"], job["stage"], job["percent"], job.get("error"), app, job=job)
-                snap = (job["state"], job["stage"], job["percent"], view.get("stage_line"), len(view.get("found_sounds") or []), view.get("trimmed"))
+                heard = tuple(
+                    (row.get("chord"), row.get("id"), row.get("title"), row.get("supplier"), row.get("license"), row.get("preview_url"))
+                    for row in (view.get("found_sounds") or [])
+                    if isinstance(row, dict)
+                )
+                snap = (job["state"], job["stage"], job["percent"], view.get("stage_line"), heard, view.get("trimmed"), view.get("preview_ready"))
                 if snap != last:
                     payload = json.dumps(view)
                     self.wfile.write(f"data: {payload}\n\n".encode())
                     self.wfile.flush()
                     last = snap
-                if job["state"] in ("done", "failed", "rejected", "cancelled"):
+                if job["state"] in ("done", "failed", "rejected", "cancelled", "gathered"):
                     break
-                app.runner._stop.wait(1.0)
+                app.runner._stop.wait(0.25)
             self.close_connection = True
 
         def _cancel(self, job_id):
@@ -804,6 +818,25 @@ def make_handler(app: App):
                 app.storage.delete(f"performances/{job_id}/{name}")
             self._send(200, {"id": job_id, "tombstone": tomb})
 
+        def _internal_cancel(self, job_id):
+            """Stop one job. The Worker calls this so a shared container stays up."""
+            if not _internal_ok(app, self):
+                return self._send(401, {"error": "internal token required"})
+            job = app.store.get(job_id)
+            if not job:
+                return self._send(404, {"error": "not found"})
+            if job.get("state") in ("done", "failed", "rejected"):
+                return self._send(200, {"id": job_id, "state": job["state"], "stopped": False})
+            app.runner.request_cancel(job_id)
+            left = app.store.mark_cancelled(job_id, CANCELLED_MESSAGE)
+            job = app.store.get(job_id) or job
+            if left in ("done", "failed", "rejected"):
+                return self._send(200, {"id": job_id, "state": job.get("state"), "stopped": False})
+            wipe_performance(app.storage, job_id)
+            wipe_gather(app.storage, job_id)
+            write_cancelled_status(app.storage, job_id)
+            return self._send(200, {"id": job_id, "state": "cancelled", "stopped": True})
+
         def _internal_post(self):
             if not _internal_ok(app, self):
                 return self._send(401, {"error": "internal token required"})
@@ -843,6 +876,7 @@ def make_handler(app: App):
                     "found_sounds": fields["found_sounds"],
                     "sounds": result.get("sounds") or [],
                     "stage_line": fields["stage_line"],
+                    "preview_ready": result.get("preview_ready") is True,
                 })
             m = re.fullmatch(r"/internal/jobs/([hkg]-[0-9a-z]+)/collection", path)
             if m:
@@ -1064,6 +1098,11 @@ def _public_job(job_id, state, stage, percent, error, app: App, position=None, j
         out["sounds"] = sounds or []
     elif sounds:
         out["sounds"] = sounds
+    preview_ready = result.get("preview_ready") is True or (isinstance(status, dict) and status.get("preview_ready") is True)
+    if preview_ready and state != "done":
+        base = app.settings.public_base_url.rstrip("/")
+        out["preview_ready"] = True
+        out["files"] = {"mp3": f"{base}/api/jobs/{job_id}/files/preview.mp3"}
     if state == "done":
         base = app.settings.public_base_url.rstrip("/")
         stored = status if isinstance(status, dict) else {}

@@ -6,6 +6,7 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -39,8 +40,9 @@ def _pools():
 
 def _plan(seed=1, **kwargs):
     comp = kwargs.pop("comp", COMP)
+    searchers = kwargs.pop("searchers", None) or _searchers(_pools())
     return assemble.plan_raw(
-        comp, seed=seed, searchers=_searchers(_pools()), verify_live=False, note_maps=[], **kwargs,
+        comp, seed=seed, searchers=searchers, verify_live=False, note_maps=[], **kwargs,
     )
 
 
@@ -111,6 +113,80 @@ class RawPlanTest(unittest.TestCase):
         self.assertEqual(source_cap({}, settings), 24)
         self.assertEqual(source_cap({"assembly": "raw"}, settings), 40 * 8)
         self.assertGreater(source_cap({"assembly": "raw"}, settings), 35)
+
+    def test_each_chord_is_listed_as_soon_as_it_is_chosen(self):
+        heard = []
+        started = time.perf_counter()
+        slow = {"done": False}
+
+        def linger(*_args):
+            time.sleep(3)
+            slow["done"] = True
+            return []
+
+        searchers = _searchers(_pools())
+        searchers["openverse"] = linger
+
+        def cb(_line, sound=None):
+            if sound:
+                heard.append((time.perf_counter() - started, sound))
+
+        plan = _plan(1, searchers=searchers, progress_cb=cb, settle_s=0.15, gather_deadline_s=3)
+        elapsed = time.perf_counter() - started
+        self.assertTrue(heard)
+        self.assertLess(heard[0][0], 1.5)
+        self.assertLess(elapsed, 2.0)
+        self.assertFalse(slow["done"])
+        chords = sorted({row["chord"] for _at, row in heard})
+        self.assertEqual(chords, list(range(len(plan["chords"]))))
+        for _at, row in heard:
+            self.assertEqual(row["id"], f"c{row['chord']}")
+            for key in ("title", "supplier", "license", "symbol"):
+                self.assertTrue(row.get(key), row)
+
+    def test_the_deadline_uses_the_disk_index_and_does_not_wait(self):
+        from ncperf import discover
+
+        tmp = tempfile.mkdtemp(prefix="nc-deadline-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        previous = os.environ.get("NC_CACHE")
+        os.environ["NC_CACHE"] = tmp
+        url = "https://example.test/suppliers-deadline.json"
+        offerings = [
+            {
+                "audio": f"https://audio.musicmatter.art/fullchords/choir/{sym}.flac",
+                "manifest": f"https://audio.musicmatter.art/fullchords/choir/{sym}.nc.json",
+                "chord": sym,
+                "instrument_name": "Choir",
+                "default_voicing": True,
+            }
+            for sym in ("Cm", "F", "G", "Am", "Dm")
+        ]
+        discover._write_index_disk(url, offerings)
+        discover._MM_CACHE.pop(url, None)
+        slow = {"done": False}
+
+        def linger(*_args):
+            time.sleep(5)
+            slow["done"] = True
+            return []
+
+        started = time.perf_counter()
+        try:
+            plan = assemble.plan_raw(
+                COMP, seed=1, searchers={"openverse": linger}, verify_live=False, note_maps=[],
+                registry_url=url, gather_deadline_s=0.35, settle_s=2,
+            )
+        finally:
+            discover._MM_CACHE.pop(url, None)
+            if previous is None:
+                os.environ.pop("NC_CACHE", None)
+            else:
+                os.environ["NC_CACHE"] = previous
+        self.assertLess(time.perf_counter() - started, 1.0)
+        self.assertFalse(slow["done"])
+        self.assertTrue(all(clip["built"] == "whole-chord file" for clip in plan["clips"]))
+        self.assertTrue(all("Choir" in clip["title"] for clip in plan["clips"]))
 
 
 class RawRenderTest(unittest.TestCase):
@@ -186,6 +262,75 @@ class RawApiTest(unittest.TestCase):
             self.fail("expected 404")
         except urllib.error.HTTPError as exc:
             self.assertEqual(exc.code, 404)
+
+    def test_warm_is_already_up(self):
+        tmp = tempfile.mkdtemp(prefix="nc-warm-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        settings = _settings(tmp, suppliers="http://127.0.0.1/suppliers.json", llm_base="", llm_model="")
+        _app, httpd = _api(settings)
+        self.addCleanup(_close, httpd)
+        origin = f"http://127.0.0.1:{httpd.server_address[1]}"
+        with urllib.request.urlopen(origin + "/api/warm", timeout=5) as res:
+            body = json.loads(res.read())
+        self.assertEqual(body, {"ok": True, "warming": False})
+
+
+class PreviewReadyTest(unittest.TestCase):
+    def test_the_mp3_is_claimed_only_after_it_is_read_back(self):
+        from nc_perform.api import _public_job
+        from nc_perform.jobs import Store
+        from nc_perform.runner import Runner
+
+        tmp = tempfile.mkdtemp(prefix="nc-preview-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        settings = _settings(tmp, suppliers="http://127.0.0.1/suppliers.json", llm_base="", llm_model="")
+        settings.public_base_url = "https://perform.example"
+
+        class Mem:
+            def __init__(self):
+                self.rows = {}
+                self.short = False
+
+            def put(self, key, data, content_type="application/octet-stream", overwrite=True):
+                self.rows[key] = bytes(data)
+
+            def get(self, key):
+                data = self.rows.get(key)
+                if data is None:
+                    return None
+                return data[:-1] if self.short and data else data
+
+        store = Store(os.path.join(tmp, "jobs.sqlite"))
+        storage = Mem()
+        store.create({"id": "h-0123456789ab", "state": "rendering", "stage": "rendering", "request": {}})
+        runner = Runner(settings, store, storage, None)
+        storage.short = True
+        runner._publish_preview("h-0123456789ab", b"ID3-preview")
+        job = store.get("h-0123456789ab")
+        self.assertFalse((job.get("result") or {}).get("preview_ready"))
+        storage.short = False
+        runner._publish_preview("h-0123456789ab", b"ID3-preview")
+        job = store.get("h-0123456789ab")
+        self.assertTrue(job["result"]["preview_ready"])
+        self.assertEqual(storage.rows["performances/h-0123456789ab/preview.mp3"], b"ID3-preview")
+
+        class App:
+            pass
+
+        app = App()
+        app.settings = settings
+        app.storage = storage
+        view = _public_job("h-0123456789ab", "rendering", "rendering", 40, None, app, job=job)
+        self.assertTrue(view["preview_ready"])
+        self.assertTrue(view["files"]["mp3"].endswith("/api/jobs/h-0123456789ab/files/preview.mp3"))
+        from ncperf.progress import with_preview
+        row = with_preview(
+            {"chord": 0, "id": "c0", "title": "Choir Cm", "supplier": "Musicmatter", "license": "CC-BY-SA-4.0"},
+            "g-0123456789ab",
+            "https://perform.example",
+        )
+        self.assertEqual(row["preview_url"], "https://perform.example/api/jobs/g-0123456789ab/audio/c0")
+        self.assertEqual(row["chord"], 0)
 
 
 def _tone(path, amp, seconds=0.5, freq=220.0):

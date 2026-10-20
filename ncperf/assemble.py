@@ -11,6 +11,10 @@ import json
 import os
 import random
 import subprocess
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import contextvars
 
 import numpy as np
 import soundfile as sf
@@ -32,6 +36,10 @@ from .util import SR, decode
 FADE_S = 0.012
 CLIP_LUFS = -20.0
 PEAK = 0.98
+# The whole Gather stops here. A supplier that is still out does not hold the list.
+GATHER_DEADLINE_S = 8.0
+# Fast suppliers get this long to join the pool. A slow one does not move the first chord.
+GATHER_SETTLE_S = 1.0
 
 
 def plan_raw(
@@ -47,6 +55,8 @@ def plan_raw(
     origin_budget_s: float = 4.0,
     avoid_keys=None,
     avoid_sample_ids=None,
+    gather_deadline_s: float = GATHER_DEADLINE_S,
+    settle_s: float = GATHER_SETTLE_S,
 ) -> dict:
     """One clip per chord. Whole-chord files first; indexed notes only as a stack.
 
@@ -69,7 +79,7 @@ def plan_raw(
         return _plan(
             comp, found, syms, words, comp_text, seed, hint, host_ok_fn, searchers,
             registry_url, verify_live, note_maps, progress_cb, origin_budget_s,
-            avoid_keys, avoid_sample_ids,
+            avoid_keys, avoid_sample_ids, gather_deadline_s, settle_s,
         )
     finally:
         discover._EXCLUDE = previous_exclude
@@ -216,7 +226,7 @@ def render(plan: dict, out_dir: str, name: str = "performance", log=print):
 def _plan(
     comp, found, syms, words, comp_text, seed, hint, host_ok_fn, searchers,
     registry_url, verify_live, note_maps, progress_cb, origin_budget_s,
-    avoid_keys, avoid_sample_ids,
+    avoid_keys, avoid_sample_ids, gather_deadline_s, settle_s,
 ) -> dict:
     query = discover.terms_for(comp, hint, seed)
     named = discover._named_origin(words)
@@ -232,12 +242,13 @@ def _plan(
         if not progress_cb:
             return
         if sound:
-            row = progress.sound_row(sound.get("title"), sound.get("supplier"), sound.get("license"))
+            row = progress.clip_row(sound)
             if not row:
                 sound = None
             else:
-                key = (row["title"], row["supplier"], row["license"])
-                if key in heard:
+                key = ("chord", row["chord"]) if "chord" in row else (row["title"], row["supplier"], row["license"])
+                # A chord can be replaced when a later supplier wins it. Search hits stay unique.
+                if key in heard and "chord" not in row:
                     sound = None
                 else:
                     heard.add(key)
@@ -245,24 +256,33 @@ def _plan(
         if line or sound:
             progress_cb(line, sound)
 
-    def query_origin(fn, origin_seed):
+    started = time.monotonic()
+    deadline_at = started + max(0.2, float(gather_deadline_s))
+    indexed = _indexed_hits(query, syms, seed, host_ok_fn, registry_url)
+    live_hits: list = []
+    errors: dict = {}
+    pending: set[str] = set()
+    live_lock = threading.Lock()
+    note_box: dict = {}
+
+    def remember(origin, hits, err):
+        with live_lock:
+            if err:
+                errors[origin] = err
+            for hit in hits or []:
+                if hit:
+                    live_hits.append(hit)
+            pending.discard(origin)
+
+    def query_origin(fn, origin_seed, budget):
         try:
-            with deadline.limit(origin_budget_s):
+            with deadline.limit(max(0.05, budget)):
                 hits = fn(query, hint, syms, origin_seed, host_ok_fn, registry_url) or []
         except deadline.SearchTimeout:
             return [], "timed out"
         except Exception as exc:
             return [], str(exc)[:180]
         return [hit for hit in hits if hit], None
-
-    jobs = []
-    for origin in order:
-        fn = fns.get(origin)
-        if not fn:
-            continue
-        tell(progress.finding_line(origin, query))
-        jobs.append((origin, lambda fn=fn: query_origin(fn, seed)))
-    note_box: dict = {}
 
     def load_index():
         if note_maps is not None:
@@ -275,82 +295,86 @@ def _plan(
             maps = []
         note_box["maps"] = maps
 
-    results = run_all(
-        [job for _origin, job in jobs] + [load_index],
-        workers=max(1, len(jobs) + 1),
-    )
-    groups: dict[str, list] = {}
-    errors = {}
-    for (origin, _job), (hits, err) in zip(jobs, results[:-1]):
-        if err:
-            errors[origin] = err
-        hits.sort(key=lambda cand: (-cand.get("fit", 0), cand.get("title") or ""))
-        for hit in hits:
-            groups.setdefault(hit.get("origin") or origin, []).append(hit)
-            tell(None, {
-                "title": hit.get("title"),
-                "supplier": progress.origin_label(hit.get("origin") or origin),
-                "license": hit.get("license"),
-            })
-    for origin in discover.ORIGINS:
-        groups.setdefault(origin, [])
-    blocked = {str(item) for item in (avoid_keys or []) if item}
-    blocked |= {str(item) for item in (avoid_sample_ids or []) if item}
-    pool = [cand for hits in groups.values() for cand in hits]
-    if blocked:
-        pool = [cand for cand in pool if not _kept_out(cand, blocked)]
-    for cand in pool:
-        if cand.get("chord_symbol"):
-            spelled = CH.spell(str(cand["chord_symbol"])) or cand["chord_symbol"]
-            cand["chord_symbol"] = spelled
-            if spelled not in syms:
-                cand["_wrong_chord"] = True
-        elif discover._declared_chord(cand.get("title") or "", syms):
-            declared = discover._declared_chord(cand.get("title") or "", syms)
-            cand["chord_symbol"] = declared
-            cand["voicing_kind"] = cand.get("voicing_kind") or "exact"
-            cand["pitched"] = True
-        if cand.get("origin") != "musicmatter" and not discover._rights_ok(discover._blob(cand)):
-            cand["_blocked"] = True
-    maps = discover._drop_avoided_notes(note_box.get("maps") or [], blocked)
-    assembly = notemap.assemblies_for(syms, maps, discover._EXCLUDE)
-    print(json.dumps({
-        "event": "assemble",
-        "terms": query,
-        "order": order,
-        "counts": {key: len(value) for key, value in groups.items()},
-        "errors": errors,
-        "note_libraries": len(maps or []),
-    }, ensure_ascii=False), flush=True)
+    threads = []
+    for origin in order:
+        fn = fns.get(origin)
+        if not fn:
+            continue
+        tell(progress.finding_line(origin, query))
+        pending.add(origin)
+        budget = min(float(origin_budget_s), max(0.05, deadline_at - time.monotonic()))
+
+        def run(origin=origin, fn=fn, budget=budget):
+            hits, err = query_origin(fn, seed, budget)
+            remember(origin, hits, err)
+
+        thread = threading.Thread(target=run, name=f"nc-gather-{origin}", daemon=True)
+        thread.start()
+        threads.append(thread)
+    index_thread = threading.Thread(target=load_index, name="nc-gather-notes", daemon=True)
+    index_thread.start()
 
     seq, slots, section_spec, slice_note = _clock(comp_text, words, found, seed)
     if not seq:
         raise ValueError('no chord symbols found in the Composition (e.g. "Cm, Am, F")')
-    option_groups = []
-    for index, (sym, _bass) in enumerate(seq):
-        whole = []
-        usable = [
-            cand for cand in pool
-            if cand.get("chord_symbol") == sym
-            and not cand.get("_wrong_chord")
-            and not cand.get("_blocked")
-            and cand.get("origin") != "uiowa"
-        ]
-        for cand in discover._strike_order(usable, hint, seed, index, named):
-            whole.append(_whole_opt(cand))
-        notes = []
-        for row in assembly.get(sym) or []:
-            if any(discover._hint_ok(row.get("instrument") or "", word) for word in discover._EXCLUDE):
-                continue
-            notes.append(_note_opt(row))
-        # A whole-chord recording is the clip. Notes are only the fallback
-        # for a chord no recording covers, so a note library is not a second
-        # piano entry beside the piano files.
-        option_groups.append(whole or notes)
-    if named and option_groups and all(any(row.get("origin") == named for row in group) for group in option_groups):
-        option_groups = [[row for row in group if row.get("origin") == named] for group in option_groups]
+    blocked = {str(item) for item in (avoid_keys or []) if item}
+    blocked |= {str(item) for item in (avoid_sample_ids or []) if item}
+    settle_at = started + max(0.0, float(settle_s))
+
+    def snapshot():
+        with live_lock:
+            arrived = list(live_hits)
+            still = set(pending)
+        return _annotate([*indexed, *arrived], blocked, syms), still
+
+    pool, still = snapshot()
+    while still and time.monotonic() < deadline_at:
+        pool, still = snapshot()
+        if _covers(pool, seq) and time.monotonic() >= settle_at:
+            break
+        time.sleep(0.02)
+        pool, still = snapshot()
+    index_thread.join(timeout=max(0.0, deadline_at - time.monotonic()))
+    pool, _still = snapshot()
+    maps = discover._drop_avoided_notes(note_box.get("maps") or [], blocked)
+    assembly = notemap.assemblies_for(syms, maps, discover._EXCLUDE)
+    counts: dict[str, int] = {}
+    for cand in pool:
+        counts[cand.get("origin") or "?"] = counts.get(cand.get("origin") or "?", 0) + 1
+    print(json.dumps({
+        "event": "assemble",
+        "terms": query,
+        "order": order,
+        "counts": counts,
+        "errors": errors,
+        "note_libraries": len(maps or []),
+        "indexed": len(indexed),
+        "deadline_s": round(float(gather_deadline_s), 3),
+    }, ensure_ascii=False), flush=True)
+
+    option_groups = _option_groups(seq, pool, assembly, hint, seed, named)
     prefer = take.prefer_from(words)
-    chosen = _choose_files(option_groups, seq, seed, prefer, verify_live)
+
+    def on_pick(index, opt):
+        sym = seq[index][0]
+        title = opt.get("title")
+        license_id = opt.get("license")
+        origin = opt.get("origin")
+        if opt.get("accepted"):
+            got = opt["accepted"]
+            title = got.get("title") or title
+            license_id = got.get("license") or license_id
+            origin = (got.get("source") or {}).get("kind") or origin
+        tell(None, {
+            "chord": index,
+            "id": f"c{index}",
+            "title": title,
+            "supplier": progress.origin_label(origin),
+            "license": license_id,
+            "symbol": sym,
+        })
+
+    chosen = _choose_files(option_groups, seq, seed, prefer, verify_live, on_pick=on_pick)
     if any(row is None for row in chosen):
         missing = [seq[i][0] for i, row in enumerate(chosen) if row is None]
         raise ValueError(
@@ -469,7 +493,75 @@ def _accept(opt: dict, sym: str, bass, verify_live: bool):
     return opt
 
 
-def _choose_files(groups, seq, seed, prefer, verify_live):
+def _indexed_hits(terms, syms, seed, host_ok_fn, registry_url) -> list:
+    """Whole-chord files already on disk. No network. This is the deadline fallback."""
+    url = registry_url or "https://netcomposer.art/suppliers.json"
+    disk = discover._read_index_disk(url)
+    if not disk:
+        return []
+    with discover._MM_LOCK:
+        discover._MM_CACHE.setdefault(url, disk)
+    try:
+        return discover.search_musicmatter(terms, None, syms, seed, host_ok_fn, registry_url) or []
+    except Exception:
+        return []
+
+
+def _annotate(cands, blocked, syms) -> list:
+    pool = [cand for cand in cands if not (blocked and _kept_out(cand, blocked))]
+    for cand in pool:
+        if cand.get("chord_symbol"):
+            spelled = CH.spell(str(cand["chord_symbol"])) or cand["chord_symbol"]
+            cand["chord_symbol"] = spelled
+            if spelled not in syms:
+                cand["_wrong_chord"] = True
+        elif discover._declared_chord(cand.get("title") or "", syms):
+            declared = discover._declared_chord(cand.get("title") or "", syms)
+            cand["chord_symbol"] = declared
+            cand["voicing_kind"] = cand.get("voicing_kind") or "exact"
+            cand["pitched"] = True
+        if cand.get("origin") != "musicmatter" and not discover._rights_ok(discover._blob(cand)):
+            cand["_blocked"] = True
+    return pool
+
+
+def _covers(pool, seq) -> bool:
+    have = {
+        cand.get("chord_symbol")
+        for cand in pool
+        if cand.get("chord_symbol") and not cand.get("_wrong_chord") and not cand.get("_blocked") and cand.get("origin") != "uiowa"
+    }
+    return all(sym in have for sym, _bass in seq)
+
+
+def _option_groups(seq, pool, assembly, hint, seed, named) -> list:
+    option_groups = []
+    for index, (sym, _bass) in enumerate(seq):
+        whole = []
+        usable = [
+            cand for cand in pool
+            if cand.get("chord_symbol") == sym
+            and not cand.get("_wrong_chord")
+            and not cand.get("_blocked")
+            and cand.get("origin") != "uiowa"
+        ]
+        for cand in discover._strike_order(usable, hint, seed, index, named):
+            whole.append(_whole_opt(cand))
+        notes = []
+        for row in assembly.get(sym) or []:
+            if any(discover._hint_ok(row.get("instrument") or "", word) for word in discover._EXCLUDE):
+                continue
+            notes.append(_note_opt(row))
+        # A whole-chord recording is the clip. Notes are only the fallback
+        # for a chord no recording covers, so a note library is not a second
+        # piano entry beside the piano files.
+        option_groups.append(whole or notes)
+    if named and option_groups and all(any(row.get("origin") == named for row in group) for group in option_groups):
+        option_groups = [[row for row in group if row.get("origin") == named] for group in option_groups]
+    return option_groups
+
+
+def _choose_files(groups, seq, seed, prefer, verify_live, on_pick=None):
     dead = [set() for _ in groups]
     for salt in range(24):
         current = []
@@ -487,6 +579,12 @@ def _choose_files(groups, seq, seed, prefer, verify_live):
             index for index, opt in enumerate(chosen)
             if opt and opt.get("built") == "whole-chord file" and not opt.get("accepted")
         ]
+        # Notes and files that are already accepted need no network. List them now.
+        if on_pick:
+            for index, opt in enumerate(chosen):
+                if not opt or index in pending:
+                    continue
+                on_pick(index, opt)
 
         def one(index):
             sym, bass = seq[index]
@@ -494,9 +592,18 @@ def _choose_files(groups, seq, seed, prefer, verify_live):
 
         failed = []
         if pending:
-            for index, got in run_all([lambda index=index: one(index) for index in pending], workers=min(8, len(pending))):
-                if got is None:
-                    failed.append(index)
+            contexts = [contextvars.copy_context() for _ in pending]
+            width = max(1, min(8, len(pending)))
+            with ThreadPoolExecutor(max_workers=width, thread_name_prefix="nc-accept") as pool:
+                futs = [pool.submit(ctx.run, one, index) for ctx, index in zip(contexts, pending)]
+                for fut in as_completed(futs):
+                    index, got = fut.result()
+                    if got is None:
+                        failed.append(index)
+                        continue
+                    chosen[index] = got
+                    if on_pick:
+                        on_pick(index, got)
         if not failed:
             return chosen
         for index in failed:

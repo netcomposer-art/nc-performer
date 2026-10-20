@@ -92,6 +92,10 @@ const DUMMY_TOKEN = "XXXX.DUMMY.TOKEN.XXXX";
 const ID_RE = /^[hkg]-[0-9abcdefghjkmnpqrstvwxyz]{12}$/;
 /** Importing Dragonfly and the Python audio stack on a cold instance can take a few minutes. */
 const PORT_READY_MS = 300_000;
+/** One container for every Perform, so a focus ping warms the next job. */
+const WARM_ID = "nc-warm";
+const POLL_MS = 300;
+const JOB_WALL_MS = 10 * 60 * 1000;
 
 export interface Env {
   JOBS: DurableObjectNamespace<JobDO>;
@@ -139,6 +143,7 @@ type Job = {
   sounds?: GatherSound[];
   stage_line?: string;
   tester?: boolean;
+  preview_ready?: boolean;
 };
 
 type GatherSound = {
@@ -349,7 +354,7 @@ async function getSigner(env: Env): Promise<Signer | null> {
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     if (request.method === "OPTIONS") {
     return new Response(null, {
       status: 204,
@@ -361,7 +366,7 @@ export default {
     });
   }
     try {
-      return await route(request, env);
+      return await route(request, env, ctx);
     } catch (err) {
       return json({ error: logInternal(null, err), code: "error" }, 500);
     }
@@ -401,7 +406,7 @@ export default {
   },
 };
 
-async function route(request: Request, env: Env): Promise<Response> {
+async function route(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/$/, "") || "/";
   const base = publicBase(request, env);
@@ -412,6 +417,7 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (request.method === "GET" && path === "/health") {
     return json({ ok: true, service: "nc-perform", version: "0.2.0" });
   }
+  if (request.method === "GET" && path === "/api/warm") return warm(env, ctx);
   if (request.method === "GET" && path === "/api/config") return config(env);
   if (request.method === "GET" && path === "/.well-known/nc-record-keys.json") return keys(env);
   if (request.method === "GET" && path === "/api/feed") return feed(env, base);
@@ -732,7 +738,7 @@ async function runContainer(env: Env, id: string): Promise<void> {
   if (job.state === "done" || job.state === "failed" || job.state === "rejected" || job.state === "gathered") return;
   await budget(env).dequeue(id);
   if (await abandonIfCancelled(env, id)) return;
-  const container = getContainer(env.RENDER, id);
+  const container = getContainer(env.RENDER, WARM_ID);
   const requested = JSON.parse(job.request_json) as { public_base?: string; gather_id?: string; kind?: string };
   const base = (env.NC_PUBLIC_BASE_URL || requested.public_base || "").replace(/\/$/, "");
   const envVars = containerEnv(env, base);
@@ -760,6 +766,10 @@ async function runContainer(env: Env, id: string): Promise<void> {
   if (!started.ok && started.status !== 202) {
     throw new Error(`container rejected the job (${started.status})`);
   }
+  if (await abandonIfCancelled(env, id)) {
+    await signalContainerCancel(env, id);
+    return;
+  }
   let last: {
     state?: string;
     stage?: string;
@@ -771,6 +781,7 @@ async function runContainer(env: Env, id: string): Promise<void> {
     found_sounds?: FoundSound[];
     sounds?: GatherSound[];
     stage_line?: string;
+    preview_ready?: boolean;
   } = {};
   let loggedFault = false;
   const pageError = (error: string | null | undefined): string | null => {
@@ -782,13 +793,29 @@ async function runContainer(env: Env, id: string): Promise<void> {
     }
     return publicInternalError(id);
   };
-  for (let i = 0; i < 300; i++) {
-    if (await abandonIfCancelled(env, id)) return;
-    await sleep(2000);
-    if (await abandonIfCancelled(env, id)) return;
+  let previewOnR2 = false;
+  const wallAt = Date.now() + JOB_WALL_MS;
+  while (Date.now() < wallAt) {
+    if (await abandonIfCancelled(env, id)) {
+      await signalContainerCancel(env, id);
+      return;
+    }
+    await sleep(POLL_MS);
+    if (await abandonIfCancelled(env, id)) {
+      await signalContainerCancel(env, id);
+      return;
+    }
     const res = await containerFetch(container, id, `http://container/internal/jobs/${id}`, { headers });
     if (!res.ok) continue;
     last = await res.json();
+    if (last.preview_ready === true && !previewOnR2) {
+      try {
+        previewOnR2 = await copyPreviewEarly(env, container, id, headers);
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        console.error(JSON.stringify({ event: "preview_early", id, detail }));
+      }
+    }
     const page = containerPageUpdate(last);
     const patch: Partial<Job> = {
       state: page.state,
@@ -801,7 +828,11 @@ async function runContainer(env: Env, id: string): Promise<void> {
     if (Array.isArray(last.found_sounds)) patch.found_sounds = last.found_sounds;
     if (Array.isArray(last.sounds)) patch.sounds = last.sounds;
     if (page.stage_line) patch.stage_line = page.stage_line;
-    if (await abandonIfCancelled(env, id)) return;
+    if (previewOnR2) patch.preview_ready = true;
+    if (await abandonIfCancelled(env, id)) {
+      await signalContainerCancel(env, id);
+      return;
+    }
     // Publish gathered only after the files are in R2. Until then the page stays on gathering.
     if (last.state === "gathered") {
       await stub.patch({ ...patch, state: "gathering", stage: "gathering", percent: 90, stage_line: "Gathering the sounds…" });
@@ -810,7 +841,10 @@ async function runContainer(env: Env, id: string): Promise<void> {
     await stub.patch(patch);
     if (last.state === "done" || last.state === "failed" || last.state === "rejected") break;
   }
-  if (await abandonIfCancelled(env, id)) return;
+  if (await abandonIfCancelled(env, id)) {
+    await signalContainerCancel(env, id);
+    return;
+  }
   if (last.state === "gathered") {
     const doc = await copyGather(env, container, id, headers);
     last.sounds = Array.isArray(doc.sounds) ? doc.sounds : [];
@@ -818,19 +852,31 @@ async function runContainer(env: Env, id: string): Promise<void> {
     if (doc.seed != null) last.seed = Number(doc.seed);
   } else if (last.state === "done") {
     await sleep(400);
-    if (await abandonIfCancelled(env, id)) return;
+    if (await abandonIfCancelled(env, id)) {
+      await signalContainerCancel(env, id);
+      return;
+    }
     const again = await containerFetch(container, id, `http://container/internal/jobs/${id}`, { headers });
     if (again.ok) last = await again.json();
     if (last.state === "done") {
-      if (await abandonIfCancelled(env, id)) return;
+      if (await abandonIfCancelled(env, id)) {
+        await signalContainerCancel(env, id);
+        return;
+      }
       await copyOutputs(env, container, id, headers);
-      if (await abandonIfCancelled(env, id)) return;
+      if (await abandonIfCancelled(env, id)) {
+        await signalContainerCancel(env, id);
+        return;
+      }
       await confirmStored(env, id);
     }
   } else if (last.state !== "failed" && last.state !== "rejected") {
     throw new Error("container did not finish within 10 minutes");
   }
-  if (await abandonIfCancelled(env, id)) return;
+  if (await abandonIfCancelled(env, id)) {
+    await signalContainerCancel(env, id);
+    return;
+  }
   const cost = Number(last.cost_usd || 0);
   const shown = pageError(last.error);
   await budget(env).addSpend(cost);
@@ -914,6 +960,48 @@ function allowedHosts(env: Env): string[] {
     }
   }
   return [...hosts];
+}
+
+function warm(env: Env, ctx: ExecutionContext): Response {
+  ctx.waitUntil(warmContainer(env).catch((err) => {
+    const detail = err instanceof Error ? err.message : String(err);
+    console.error(JSON.stringify({ event: "warm", detail }));
+  }));
+  return json({ ok: true, warming: true });
+}
+
+async function warmContainer(env: Env): Promise<void> {
+  const container = getContainer(env.RENDER, WARM_ID);
+  const base = (env.NC_PUBLIC_BASE_URL || "").replace(/\/$/, "");
+  await container.startAndWaitForPorts({
+    startOptions: { envVars: containerEnv(env, base), enableInternet: false },
+    cancellationOptions: { portReadyTimeoutMS: PORT_READY_MS, instanceGetTimeoutMS: PORT_READY_MS },
+  });
+  await container.setAllowedHosts(proxyHosts(allowedHosts(env)));
+  await containerFetch(container, WARM_ID, "http://container/health");
+}
+
+async function signalContainerCancel(env: Env, id: string): Promise<void> {
+  const container = getContainer(env.RENDER, WARM_ID);
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (env.NC_INTERNAL_TOKEN) headers.authorization = `Bearer ${env.NC_INTERNAL_TOKEN}`;
+  try {
+    await containerFetch(container, id, `http://container/internal/jobs/${id}/cancel`, { method: "POST", headers, body: "{}" });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    console.error(JSON.stringify({ event: "cancel_container", id, detail }));
+  }
+}
+
+/** Copy preview.mp3 and advertise it only after one byte comes back from R2. */
+async function copyPreviewEarly(env: Env, container: DurableObjectStub<RenderContainer>, id: string, headers: Record<string, string>): Promise<boolean> {
+  const res = await containerFetch(container, id, `http://container/internal/jobs/${id}/files/preview.mp3`, { headers });
+  if (!res.ok) return false;
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  if (!bytes.byteLength) return false;
+  await putOnce(env, `performances/${id}/preview.mp3`, bytes, "audio/mpeg", false);
+  const obj = await env.PERFORMANCES.get(`performances/${id}/preview.mp3`, { range: { offset: 0, length: 1 } });
+  return objectHasBytes(obj);
 }
 
 async function containerFetch(container: DurableObjectStub<RenderContainer>, id: string, url: string, init?: RequestInit): Promise<Response> {
@@ -1210,6 +1298,10 @@ function publicJob(
   } else if (job?.sounds && job.sounds.length) {
     out.sounds = job.sounds;
   }
+  if (job?.preview_ready === true && state !== "done" && state !== "failed" && state !== "rejected" && state !== "cancelled") {
+    out.preview_ready = true;
+    out.files = { mp3: `${base}/api/jobs/${id}/files/preview.mp3` };
+  }
   if (state === "done") {
     if (extras?.cost_estimate) out.cost_estimate = extras.cost_estimate;
     const files: Record<string, string> = {
@@ -1354,7 +1446,8 @@ async function events(env: Env, id: string, base: string): Promise<Response> {
   const stream = new ReadableStream({
     async start(controller) {
       let last = "";
-      for (let i = 0; i < 600; i++) {
+      const end = Date.now() + JOB_WALL_MS;
+      while (Date.now() < end) {
         const job = await jobs(env, id).get();
         if (!job) break;
         const extras = job.state === "done" ? await doneExtras(env, id) : undefined;
@@ -1365,8 +1458,8 @@ async function events(env: Env, id: string, base: string): Promise<Response> {
           controller.enqueue(encoder.encode(`data: ${line}\n\n`));
           last = line;
         }
-        if (job.state === "done" || job.state === "failed" || job.state === "rejected" || job.state === "cancelled") break;
-        await sleep(1000);
+        if (job.state === "done" || job.state === "failed" || job.state === "rejected" || job.state === "cancelled" || job.state === "gathered") break;
+        await sleep(400);
       }
       controller.close();
     },
@@ -1410,12 +1503,7 @@ async function cancelJob(request: Request, env: Env, id: string, base: string): 
     return json(publicJob(id, current.state, current.stage, current.percent, current.error, base, pos, extras, current, doneMeta));
   }
   await budget(env).dequeue(id);
-  try {
-    await getContainer(env.RENDER, id).destroy();
-  } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
-    console.error(JSON.stringify({ event: "cancel_container", id, detail }));
-  }
+  if (job.state !== "queued") await signalContainerCancel(env, id);
   await wipePerformance(env, id);
   await writeCancelledStatus(env, id);
   const fresh = (await stub.get()) || result.job;
