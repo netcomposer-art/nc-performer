@@ -22,6 +22,8 @@ import {
   corsHeaders,
   publishedRegistryStats,
   registryPublicStats,
+  siteverifyFields,
+  turnstileToken,
 } from "./policy.ts";
 
 const T0 = 1_700_000_000;
@@ -227,6 +229,15 @@ test("registry stats are counts only", () => {
     recheck_days: 90,
   });
   assert.equal(publishedRegistryStats({ size: 4, ok: 4, rejected: 0 }).size, 4);
+});
+
+test("siteverify reads turnstile_token and does not send the client ip", () => {
+  assert.equal(turnstileToken({ turnstile_token: "  fresh-token  " }), "fresh-token");
+  assert.equal(turnstileToken({ turnstile: "other" }), "");
+  assert.equal(turnstileToken({ probe: true }), "");
+  const fields = siteverifyFields("secret", "fresh-token");
+  assert.deepEqual(fields, { secret: "secret", response: "fresh-token" });
+  assert.equal("remoteip" in fields, false);
 });
 
 test("public job status always has trimmed, seed, found sounds, and a stage line", () => {

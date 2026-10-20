@@ -381,6 +381,89 @@ class ServiceTest(unittest.TestCase):
             self.assertEqual(e.code, 503)
             self.assertIn("resting", e.read().decode())
 
+    def test_one_token_passes_gather_and_the_container_hop(self):
+        """A mismatched remoteip rejects a fresh token. The hop must not spend it again."""
+        seen = []
+        used = set()
+
+        class Siteverify(BaseHTTPRequestHandler):
+            def do_POST(self):
+                n = int(self.headers.get("Content-Length") or 0)
+                form = urllib.parse.parse_qs(self.rfile.read(n).decode())
+                seen.append(form)
+                token = (form.get("response") or [""])[0]
+                if "remoteip" in form:
+                    payload = {"success": False, "error-codes": ["invalid-input-response"]}
+                elif token in used:
+                    payload = {"success": False, "error-codes": ["timeout-or-duplicate"]}
+                else:
+                    used.add(token)
+                    payload = {"success": True}
+                raw = json.dumps(payload).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+
+            def log_message(self, fmt, *args):
+                return
+
+        httpd, verify = _serve(Siteverify)
+        self.addCleanup(_close, httpd)
+        tmp = tempfile.mkdtemp(prefix="nc-turnstile-once-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        s = _settings(tmp, suppliers="http://127.0.0.1/suppliers.json", llm_base="", llm_model="")
+        s.turnstile_secret = "not-a-test-secret"
+        s.turnstile_verify_url = verify + "/siteverify"
+        s.queue_autostart = False
+        s.perform_enabled = True
+        s.internal_token = ""
+        app, api = _api(s)
+        self.addCleanup(_close, api)
+
+        def quiet(job_id):
+            app.store.update(job_id, state="gathered", stage="gathered", percent=100, result={"sounds": [], "clock": None})
+
+        app.runner.run_job = quiet
+        base = f"http://127.0.0.1:{api.server_address[1]}"
+        token = "one-use-token"
+
+        def post(path, payload):
+            req = urllib.request.Request(base + path, json.dumps(payload).encode(), {"Content-Type": "application/json"})
+            try:
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    return r.status, json.loads(r.read())
+            except urllib.error.HTTPError as e:
+                return e.code, json.loads(e.read())
+
+        code, body = post("/api/gather", {"probe": True})
+        self.assertEqual(code, 403)
+        self.assertEqual(body["code"], "turnstile")
+        self.assertEqual(seen, [])
+
+        code, body = post("/api/gather", {"composition": "Cm.", "turnstile_token": token})
+        self.assertEqual(code, 200, body)
+        self.assertEqual(len(seen), 1)
+        self.assertNotIn("remoteip", seen[0])
+        self.assertEqual(seen[0]["response"], [token])
+        self.assertTrue(body["gather_id"].startswith("g-"))
+
+        hop = new_id("g")
+        code, hopped = post("/internal/jobs", {
+            "id": hop,
+            "ip_hash": "abc",
+            "request": {"kind": "gather", "turnstile_token": token, "composition": {"composition": "Cm."}},
+        })
+        self.assertEqual(code, 202, hopped)
+        self.assertEqual(len(seen), 1)
+
+        code, again = post("/api/gather", {"composition": "Cm.", "turnstile_token": token})
+        self.assertEqual(code, 403)
+        self.assertEqual(again["code"], "turnstile")
+        self.assertEqual(len(seen), 2)
+        self.assertEqual(seen[1].get("response"), [token])
+
     def test_rolling_day_names_when_the_next_slot_frees(self):
         tmp = tempfile.mkdtemp(prefix="nc-rate-")
         self.addCleanup(shutil.rmtree, tmp, True)

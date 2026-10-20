@@ -78,7 +78,7 @@ FILE_TYPES = {
 }
 
 
-def verify_turnstile(settings: Settings, token: str | None, ip: str) -> bool:
+def verify_turnstile(settings: Settings, token: str | None, _ip: str) -> bool:
     """Return True if the bot gate is off, or if Turnstile accepts the token.
 
     The three documented test secrets are decided locally so a self-check does
@@ -92,10 +92,12 @@ def verify_turnstile(settings: Settings, token: str | None, ip: str) -> bool:
         return _TURNSTILE_TEST[secret] and token == _DUMMY_TOKEN
     if not token:
         return False
+    # remoteip is omitted. Turnstile compares it with the IP that solved the
+    # widget, and a mismatch rejects a fresh token. The Worker checks once.
+    # The container hop (/internal/jobs) does not check again.
     data = urllib.parse.urlencode({
         "secret": secret,
         "response": token,
-        "remoteip": ip,
     }).encode()
     req = urllib.request.Request(settings.turnstile_verify_url, data=data, method="POST")
     with urllib.request.urlopen(req, timeout=15) as r:

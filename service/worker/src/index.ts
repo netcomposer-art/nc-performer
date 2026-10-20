@@ -41,7 +41,7 @@ import {
 } from "./keep";
 import { CANCELLED_MESSAGE, cancelToken, queueErrorIsCancel } from "./cancel";
 import { REQUIRED_OUTPUTS, containerPageUpdate, missingOutputs, readableBytes } from "./outputs";
-import { applyPerformHit, burstBlock, claimToken, corsHeaders, forPage, GATHER_CACHE, isInternalFailure, jobStatusFields, newId, PER_10MIN, PER_DAY, proxyHosts, publicInternalError, publishedRegistryStats, registryPublicStats, rejectPlan, testerPass, wordsTooLong, type FoundSound, type RateBlock, type RegistryStats } from "./policy";
+import { applyPerformHit, burstBlock, claimToken, corsHeaders, forPage, GATHER_CACHE, isInternalFailure, jobStatusFields, newId, PER_10MIN, PER_DAY, proxyHosts, publicInternalError, publishedRegistryStats, registryPublicStats, rejectPlan, siteverifyFields, testerPass, turnstileToken, wordsTooLong, type FoundSound, type RateBlock, type RegistryStats } from "./policy";
 
 // @cloudflare/containers 0.3.7 looks up this exact export on ctx.exports when
 // allowedHosts is set. It is a WorkerEntrypoint, not a Durable Object, so it
@@ -512,7 +512,7 @@ async function gather(request: Request, env: Env, base: string): Promise<Respons
   if (!on || spend >= 5) return json({ error: "Perform is resting until tomorrow.", code: "resting" }, 503);
   const body = (await readJson(request)) as Record<string, unknown>;
   const ip = clientIp(request);
-  if (env.TURNSTILE_SECRET_KEY && !(await turnstile(env, body.turnstile_token, ip))) {
+  if (env.TURNSTILE_SECRET_KEY && !(await turnstile(env, turnstileToken(body)))) {
     return json({ error: "The bot check failed. Reload the page and try again.", code: "turnstile" }, 403);
   }
   const comp = compositionFrom(body);
@@ -650,7 +650,7 @@ async function perform(request: Request, env: Env, base: string, processed = fal
   if (!on || spend >= 5) return json({ error: "Perform is resting until tomorrow.", code: "resting" }, 503);
   const body = (await readJson(request)) as Record<string, unknown>;
   const ip = clientIp(request);
-  if (env.TURNSTILE_SECRET_KEY && !(await turnstile(env, body.turnstile_token, ip))) {
+  if (env.TURNSTILE_SECRET_KEY && !(await turnstile(env, turnstileToken(body)))) {
     return json({ error: "The bot check failed. Reload the page and try again.", code: "turnstile" }, 403);
   }
   const kept = await keptGather(env, body);
@@ -812,7 +812,7 @@ async function keepTake(request: Request, env: Env, base: string): Promise<Respo
     throw err;
   }
   const ip = clientIp(request);
-  if (env.TURNSTILE_SECRET_KEY && !(await turnstile(env, fields.turnstile_token, ip))) {
+  if (env.TURNSTILE_SECRET_KEY && !(await turnstile(env, turnstileToken(fields)))) {
     return json({ error: "The bot check failed. Reload the page and try again.", code: "turnstile" }, 403);
   }
   const kept = await keptGather(env, fields);
@@ -2115,15 +2115,14 @@ async function sweep(env: Env): Promise<void> {
   } while (cursor);
 }
 
-async function turnstile(env: Env, token: unknown, ip: string): Promise<boolean> {
+async function turnstile(env: Env, token: string): Promise<boolean> {
   const secret = env.TURNSTILE_SECRET_KEY || "";
   if (!secret) return true;
   if (secret in TURNSTILE_TEST) return TURNSTILE_TEST[secret] && token === DUMMY_TOKEN;
   if (!token) return false;
-  const body = new URLSearchParams({ secret, response: String(token), remoteip: ip });
   const res = await fetch(env.TURNSTILE_VERIFY_URL || "https://challenges.cloudflare.com/turnstile/v0/siteverify", {
     method: "POST",
-    body,
+    body: new URLSearchParams(siteverifyFields(secret, token)),
   });
   const data = (await res.json()) as { success?: boolean };
   return Boolean(data.success);
