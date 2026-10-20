@@ -321,15 +321,18 @@ def save_collection(storage, gather_id: str, doc: dict, files: list[dict]) -> No
         }).encode(),
         "application/json",
     )
+    status = {
+        "id": gather_id,
+        "state": "gathered",
+        "stage_line": "Gathered.",
+        "seed": body.get("seed"),
+        "sounds": body.get("sounds") or [],
+    }
+    if "clock" in body:
+        status["clock"] = body.get("clock")
     storage.put(
         f"gathers/{gather_id}/status.json",
-        json.dumps({
-            "id": gather_id,
-            "state": "gathered",
-            "stage_line": "Gathered.",
-            "seed": body.get("seed"),
-            "sounds": body.get("sounds") or [],
-        }, ensure_ascii=False).encode(),
+        json.dumps(status, ensure_ascii=False).encode(),
         "application/json",
     )
 

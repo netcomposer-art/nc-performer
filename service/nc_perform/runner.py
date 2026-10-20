@@ -32,6 +32,7 @@ from .config import Settings
 from .ids import sha256_text
 from .jobs import Store
 import ncperf.assemble as assemble
+import ncperf.assembly as assembly
 from .limits import Reject, check_plan, load_suppliers, source_cap
 from ncperf.cancel import MESSAGE as CANCELLED_MESSAGE
 from ncperf.cancel import bind as bind_cancel
@@ -260,6 +261,9 @@ class Runner:
         if req.get("kind") == "gather":
             self._gather_job(job, stage_t)
             return
+        if req.get("kind") == "keep-take":
+            self._keep_job(job, stage_t)
+            return
 
         mark = ["planning", time.perf_counter()]
         self._stage(job_id, "planning", stage_t, mark)
@@ -411,7 +415,18 @@ class Runner:
         )
         check_plan(plan, settings, suppliers)
         base = settings.public_base_url.rstrip("/")
-        sounds = public_sounds(plan, job_id, base, built["files"])
+        files = built["files"]
+        clock = None
+        if plan.get("assembly") == "raw":
+            self._progress(job_id, stage_line="Copying the recordings…", seed=seed)
+            try:
+                files, measured = assembly.materialize(plan, files, budget_s=gather.FETCH_S)
+            except ValueError as exc:
+                raise Reject(str(exc)) from exc
+            clock = assembly.written_clock(comp, plan)
+        sounds = public_sounds(plan, job_id, base, files)
+        if plan.get("assembly") == "raw":
+            assembly.annotate_sounds(sounds, measured)
         trimmed = plan.get("trimmed")
         trimmed = trimmed if isinstance(trimmed, str) and trimmed.strip() else None
         doc = {
@@ -424,8 +439,9 @@ class Runner:
             "picked_keys": built["picked_keys"],
             "picked_sample_ids": built["picked_sample_ids"],
             "excluded_gather_id": req.get("excluded_gather_id"),
+            "clock": clock,
         }
-        save_collection(self.storage, job_id, doc, built["files"])
+        save_collection(self.storage, job_id, doc, files)
         result = {
             "seed": int(plan.get("seed") or seed),
             "trimmed": trimmed,
@@ -433,10 +449,110 @@ class Runner:
             "sounds": sounds,
             "stage_line": STAGE_LINES["gathered"],
             "gather_id": job_id,
+            "clock": clock,
         }
         self._guard(job_id)
         if not self.store.mark_gathered(job_id, result):
             self._settle_cancelled(job_id)
+
+    def _keep_job(self, job: dict, stage_t: dict) -> None:
+        """Validate an assembly plan and render that plan. The page already played it."""
+        settings = self.settings
+        job_id = job["id"]
+        req = job["request"]
+        mark = ["fetching", time.perf_counter()]
+        self._stage(job_id, "fetching", stage_t, mark)
+        gather_id = str(req.get("gather_id") or "")
+        doc = load_collection(self.storage, gather_id)
+        if not doc or not isinstance(doc.get("plan"), dict):
+            raise Reject("That Gather is not ready.", "rejected")
+        kept = req.get("assembly_plan")
+        errors = assembly.validate(kept, doc, max_length_s=settings.max_length_s)
+        if errors:
+            raise Reject(errors[0], "rejected")
+        title = req.get("title")
+        if isinstance(title, str):
+            title = title.strip() or None
+        plan = assembly.plan_for_record(doc["plan"], kept, title=title)
+        comp = dict(doc.get("composition") or {})
+        if title:
+            comp["title"] = title
+        seed = int(plan.get("seed") or 1)
+        self._progress(job_id, seed=seed, trimmed=None, sounds=doc.get("sounds") or [])
+        out = self._render_kept(job_id, plan, kept, gather_id, comp, stage_t, mark)
+        self._stage(job_id, "storing", stage_t, mark)
+        self._store_outputs(job_id, out, req, "raw", {})
+        self._read_back(job_id)
+        self._guard(job_id)
+        self._stage(job_id, "done", stage_t, mark)
+        done = self._snapshot(job_id)
+        done.update({
+            "record_url": f"{settings.public_base_url}/records/{job_id}.json",
+            "page_url": f"{settings.public_base_url}/records/{job_id}",
+            "interpreter": "raw",
+            "seed": seed,
+            "stage_line": STAGE_LINES["done"],
+            "gather_id": gather_id,
+        })
+        done["trimmed"] = None
+        if not self.store.mark_done(job_id, result=done):
+            self._settle_cancelled(job_id)
+
+    def _render_kept(self, job_id, plan, assembly_plan, gather_id, comp, stage_t, mark) -> dict:
+        settings = self.settings
+        work = tempfile.mkdtemp(prefix="nc-keep-")
+        try:
+            os.environ["NC_PERFORMER"] = settings.instance_name
+            comp_path = os.path.join(work, "composition.md")
+            open(comp_path, "w", encoding="utf-8").write(_composition_md(comp, raw=True))
+            plan_path = os.path.join(work, "plan.json")
+            json.dump(plan, open(plan_path, "w", encoding="utf-8"), indent=1, ensure_ascii=False)
+
+            def log(line: str):
+                self._stage(job_id, "rendering", stage_t, mark)
+
+            self._stage(job_id, "rendering", stage_t, mark)
+            flac, mp3, _rlog = assembly.render_take(
+                self.storage, gather_id, plan, assembly_plan, work, log=log,
+            )
+            preview = os.path.join(work, "preview.mp3")
+            os.replace(mp3, preview)
+            with open(preview, "rb") as fh:
+                self._publish_preview(job_id, fh.read())
+            master = os.path.join(work, "performance.flac")
+            if flac != master:
+                os.replace(flac, master)
+            record_url = f"{settings.public_base_url}/records/{job_id}.json"
+            _tag(master, preview, plan.get("title") or comp.get("title") or "Performance",
+                 comp.get("composer") or "anonymous", record_url)
+            self._stage(job_id, "verifying", stage_t, mark)
+            rec_path = os.path.join(work, "record.json")
+            # uses.json is written by render_take. record.build reads that log.
+            rlog = json.load(open(os.path.join(work, "uses.json"), encoding="utf-8"))
+            record.build(plan, plan_path, rlog, master, preview, rec_path,
+                         performer=settings.instance_name, composition_path=comp_path)
+            rec = json.load(open(rec_path, encoding="utf-8"))
+            apply_signature(rec, self.signer, settings.instance_name)
+            json.dump(rec, open(rec_path, "w", encoding="utf-8"), indent=1, ensure_ascii=False)
+            ok, lines = record.verify(rec_path, audio_dir=work)
+            if not ok:
+                raise Reject("verify-record failed:\n" + "\n".join(lines), "verify")
+            files = {}
+            for name in ("performance.flac", "preview.mp3", "record.json", "plan.json", "uses.json", "composition.md"):
+                files[name] = open(os.path.join(work, name), "rb").read()
+            return files
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+
+    def _read_back(self, job_id: str) -> None:
+        """done is not published until the stored bytes can be read back."""
+        missing = []
+        for name in ("performance.flac", "preview.mp3", "record.json", "plan.json", "uses.json", "composition.md"):
+            got = self.storage.get(f"performances/{job_id}/{name}")
+            if not got:
+                missing.append(name)
+        if missing:
+            raise Reject("Stored files were not readable: " + ", ".join(missing), "verify")
 
     def _interpret(self, comp: dict, seed: int, usage: dict, force_stub: bool = False, job_id: str | None = None) -> tuple[dict, str]:
         settings = self.settings

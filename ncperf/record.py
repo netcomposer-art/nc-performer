@@ -32,9 +32,13 @@ def hacks_chain(plan, log=None):
     the per-clip loudness match, and the peak guard.
     """
     if plan.get('assembly') == 'raw':
+        if plan.get('assembly_plan'):
+            fade = 'equal-power fades from the assembly plan, each at most 50 ms, placed at the plan\'s start time'
+        else:
+            fade = '12 ms equal-power fade in and out, overlapped 12 ms at each join'
         return [
             dict(n=1, tool='trim', type='each clip cut to its chord slot; a shorter clip ends, and the rest of the slot is silence'),
-            dict(n=2, tool='fade', type='12 ms equal-power fade in and out, overlapped 12 ms at each join'),
+            dict(n=2, tool='fade', type=fade),
             dict(n=3, tool='loudness', type='each clip matched to the same integrated loudness', target_lufs=-20, mode_actual='per-clip'),
             dict(n=4, tool='peak', type='one gain on the sum so the peak stays under full scale', ceiling=0.98),
         ]
@@ -140,6 +144,8 @@ def build(plan, plan_path, log, flac, mp3, out_path, performer='nc-performer kit
       provenance_files=dict(plan=dict(path=os.path.basename(plan_path), sha256=sha256_file(plan_path)), uses_log=dict(path='uses.json', sha256=sha256_file(os.path.join(os.path.dirname(out_path), 'uses.json')))),
       created_at=now.isoformat(timespec='seconds'),
       signature=dict(status='UNSIGNED', signed_by=None, algorithm=None, key_id=None, value=None, note='Placeholder. Open decision #33 (signed usage records) is not decided.'), amendments=[])
+    if plan.get('assembly_plan'):
+        rec['assembly_plan'] = plan['assembly_plan']
     rec['record_hash'] = dict(algorithm='sha256', over='canonical JSON (sorted keys, no whitespace) of the record without record_hash and signature', value=rhash(rec))
     json.dump(rec, open(out_path, 'w'), indent=1, ensure_ascii=False, default=float)
     return rec

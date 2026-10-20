@@ -250,7 +250,36 @@ export type FoundSound = {
   id?: string;
   preview_url?: string;
   symbol?: string;
+  clip_id?: string;
+  url?: string;
+  author?: string;
+  credit?: string;
+  page?: string;
+  pos?: number;
+  start_s?: number;
+  end_s?: number;
+  duration_s?: number;
+  loudness_lufs?: number;
+  gain_db?: number;
 };
+
+/** Clip responses: echo netcomposer.art, and allow every other caller. */
+export function corsHeaders(origin: string | null | undefined): Record<string, string> {
+  const headers: Record<string, string> = {
+    "access-control-allow-headers": "Content-Type, Authorization, X-NC-Tester",
+    "access-control-allow-methods": "GET, POST, OPTIONS",
+  };
+  const text = (origin || "").trim();
+  if (/^https:\/\/([a-z0-9-]+\.)*netcomposer\.art$/i.test(text)) {
+    headers["access-control-allow-origin"] = text;
+    headers.vary = "Origin";
+  } else {
+    headers["access-control-allow-origin"] = "*";
+  }
+  return headers;
+}
+
+export const GATHER_CACHE = "public, max-age=31536000, immutable";
 
 export function foundSounds(rows: unknown): FoundSound[] {
   if (!Array.isArray(rows)) return [];
@@ -270,6 +299,15 @@ export function foundSounds(rows: unknown): FoundSound[] {
     if (typeof item.id === "string" && item.id.trim()) sound.id = item.id.trim();
     if (typeof item.preview_url === "string" && item.preview_url.trim()) sound.preview_url = item.preview_url.trim();
     if (typeof item.symbol === "string" && item.symbol.trim()) sound.symbol = item.symbol.trim();
+    for (const field of ["clip_id", "url", "author", "credit", "page"] as const) {
+      const value = item[field];
+      if (typeof value === "string" && value.trim()) sound[field] = value.trim();
+    }
+    if (typeof item.pos === "number" && Number.isFinite(item.pos)) sound.pos = Math.trunc(item.pos);
+    for (const field of ["start_s", "end_s", "duration_s", "loudness_lufs", "gain_db"] as const) {
+      const value = item[field];
+      if (typeof value === "number" && Number.isFinite(value)) sound[field] = value;
+    }
     const at = seen.get(key);
     if (at != null) {
       out[at] = sound;

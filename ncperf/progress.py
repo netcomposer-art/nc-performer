@@ -78,10 +78,15 @@ def clip_row(sound) -> dict | None:
             row["chord"] = int(sound["chord"])
         except (TypeError, ValueError):
             pass
-    for key in ("id", "preview_url", "symbol"):
+    for key in ("id", "preview_url", "symbol", "clip_id", "url", "author", "credit", "page"):
         value = sound.get(key)
         if value not in (None, ""):
             row[key] = str(value)
+    for key in ("pos", "start_s", "end_s", "duration_s", "loudness_lufs", "gain_db"):
+        value = sound.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        row[key] = int(value) if key == "pos" else float(value)
     return row
 
 

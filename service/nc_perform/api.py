@@ -130,7 +130,11 @@ def make_handler(app: App):
             return
 
         def _cors(self):
-            self.send_header("Access-Control-Allow-Origin", "*")
+            from ncperf.assembly import allow_origin
+            origin, vary = allow_origin(self.headers.get("Origin"))
+            self.send_header("Access-Control-Allow-Origin", origin)
+            if vary:
+                self.send_header("Vary", "Origin")
             self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-NC-Tester")
             self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 
@@ -286,6 +290,8 @@ def make_handler(app: App):
                 return self._gather()
             if path == "/api/perform":
                 return self._perform()
+            if path == "/api/keep-take":
+                return self._keep_take()
             if path == "/api/perform-processed":
                 if not app.settings.processed:
                     return self._send(404, {"error": "not found"})
@@ -306,6 +312,8 @@ def make_handler(app: App):
                 return self._internal_post()
             if path == "/internal/cache":
                 return self._internal_cache()
+            if path == "/internal/gather-file":
+                return self._internal_gather_file()
             if path == "/internal/note-index":
                 return self._internal_note_index()
             if path == "/internal/registry":
@@ -460,6 +468,91 @@ def make_handler(app: App):
                 "note": "Save claim_token. It is not shown again. A later account can use it to adopt this Performance. v1 has no accounts.",
             })
 
+        def _keep_take(self):
+            """Render the page's assembly plan and sign that recording."""
+            s = app.settings
+            if not app.perform_enabled() or app.store.spend_today() >= s.daily_hard_usd:
+                return self._send(503, {"error": "Perform is resting until tomorrow.", "code": "resting"})
+            body = json.loads(self._read(s.max_plan_bytes + 8000).decode() or "{}")
+            if s.turnstile_required and not verify_turnstile(s, body.get("turnstile_token"), self._ip()):
+                return self._send(403, {"error": "The bot check failed. Reload the page and try again.", "code": "turnstile"})
+            gathered = _perform_gather(app, body)
+            if isinstance(gathered, tuple):
+                return self._send(gathered[0], gathered[1])
+            if not gathered:
+                return self._send(400, {"error": "gather_id is required.", "code": "rejected"})
+            plan = body.get("plan")
+            if not isinstance(plan, dict):
+                return self._send(400, {"error": "plan must be a JSON object.", "code": "rejected"})
+            if len(json.dumps(plan).encode()) > s.max_plan_bytes:
+                return self._send(400, {"error": "The assembly plan is too large.", "code": "rejected"})
+            doc = _gather_doc(app, gathered["gather_id"])
+            from ncperf import assembly
+            errors = assembly.validate(plan, doc or {}, max_length_s=s.max_length_s)
+            if errors:
+                return self._send(400, {"error": errors[0], "errors": errors, "code": "rejected"})
+            title = body.get("title")
+            if title not in (None, ""):
+                title = str(title).strip()
+                if not title or len(title) > 200:
+                    return self._send(400, {"error": "title must be a short name.", "code": "rejected"})
+            else:
+                title = None
+            if "listed" in body and body.get("listed") not in (True, False):
+                return self._send(400, {"error": "listed must be true or false.", "code": "rejected"})
+            listed = body.get("listed") is True
+            allowed, tester = self._rate_block_or_tester()
+            if not allowed:
+                return
+            if app.store.queued_count() >= s.max_queue or app.store.running_count() >= s.max_concurrency:
+                return self._send(503, {"error": "Busy, try in a minute.", "code": "busy"})
+            token = claim_token()
+            job_id = new_id("h")
+            req = {
+                "kind": "keep-take",
+                "composition": gathered["composition"],
+                "gather_id": gathered["gather_id"],
+                "assembly_plan": plan,
+                "visibility": "public" if listed else "unlisted",
+                "seed": int(plan.get("seed") or gathered["seed"]),
+                "keep": True,
+                "title": title,
+                "claim_hash": sha256_text(token),
+                "tester": tester,
+            }
+            app.store.create({
+                "id": job_id,
+                "state": "queued",
+                "stage": "queued",
+                "request": req,
+                "ip_hash": self._ip_hash(),
+                "claim_hash": req["claim_hash"],
+            })
+            app.runner.run_job(job_id)
+            job = app.store.get(job_id) or {}
+            state = job.get("state")
+            record_url = f"{s.public_base_url}/records/{job_id}.json"
+            page_url = f"{s.public_base_url}/records/{job_id}"
+            if state == "done":
+                return self._send(200, {
+                    "id": job_id,
+                    "gather_id": gathered["gather_id"],
+                    "status": "done",
+                    "state": "done",
+                    "claim_token": token,
+                    "record_url": record_url,
+                    "page_url": page_url,
+                    "poll": f"/api/jobs/{job_id}",
+                })
+            code = 400 if state == "rejected" else 500
+            return self._send(code, {
+                "error": job.get("error") or "Keep failed.",
+                "code": job.get("error_code") or "error",
+                "id": job_id,
+                "gather_id": gathered["gather_id"],
+                "poll": f"/api/jobs/{job_id}",
+            })
+
         def _job(self, job_id):
             if not ID_RE.match(job_id):
                 return self._send(404, {"error": "not found"})
@@ -479,6 +572,7 @@ def make_handler(app: App):
                 return self._send(404, {"error": "not found"})
             # The worker copies stored bytes after Gather. It must not download
             # the collection. A person playing one preview fetches that file.
+            from ncperf.assembly import CACHE_CONTROL
             if not fetch_missing:
                 doc = load_collection(app.storage, job_id) or {}
                 row = next((f for f in (doc.get("files") or []) if isinstance(f, dict) and f.get("sid") == sid), None)
@@ -486,13 +580,13 @@ def make_handler(app: App):
                 if not data:
                     return self._send(404, {"error": "not found"})
                 from ncperf.gather import _audio_type
-                return self._send(200, data, _audio_type((row or {}).get("ext")), extra={"Cache-Control": "public, max-age=3600"})
+                return self._send(200, data, _audio_type((row or {}).get("ext")), extra={"Cache-Control": CACHE_CONTROL})
             from ncperf.gather import read_audio
             got = read_audio(app.storage, job_id, sid)
             if not got:
                 return self._send(404, {"error": "not found"})
             data, ctype = got
-            self._send(200, data, ctype, extra={"Cache-Control": "public, max-age=3600"})
+            self._send(200, data, ctype, extra={"Cache-Control": CACHE_CONTROL})
 
         def _file(self, job_id, name):
             if not re.fullmatch(r"[A-Za-z0-9._-]{1,80}", name):
@@ -889,7 +983,7 @@ def make_handler(app: App):
                 from ncperf.progress import public_fields
                 fields = public_fields(job, stage=job.get("stage"))
                 result = job.get("result") if isinstance(job.get("result"), dict) else {}
-                return self._send(200, {
+                payload = {
                     "id": job["id"], "state": job["state"], "stage": job["stage"],
                     "percent": job["percent"], "error": job.get("error"),
                     "cost_usd": job.get("cost_usd") or 0,
@@ -899,7 +993,10 @@ def make_handler(app: App):
                     "sounds": result.get("sounds") or [],
                     "stage_line": fields["stage_line"],
                     "preview_ready": result.get("preview_ready") is True,
-                })
+                }
+                if "clock" in result:
+                    payload["clock"] = result.get("clock")
+                return self._send(200, payload)
             m = re.fullmatch(r"/internal/jobs/([hkg]-[0-9a-z]+)/collection", path)
             if m:
                 raw = app.storage.get(f"gathers/{m.group(1)}/collection.json")
@@ -929,6 +1026,22 @@ def make_handler(app: App):
             range_bytes = int(range_raw) if range_raw else None
             from ncperf import fetch as kit_fetch
             kit_fetch.seed_file(url, data, ext=ext, range_bytes=range_bytes)
+            self._send(204, b"")
+
+        def _internal_gather_file(self):
+            """Copy one gathered object from R2 into this container before Keep renders it."""
+            if not _internal_ok(app, self):
+                return self._send(401, {"error": "internal token required"})
+            key = self.headers.get("X-Gather-Key") or ""
+            if not re.fullmatch(r"gathers/g-[0-9a-z]+/(collection\.json|meta\.json|status\.json|audio/[A-Za-z0-9._-]{1,80})", key):
+                raise Reject("X-Gather-Key is not a gathered file.")
+            n = int(self.headers.get("Content-Length") or 0)
+            if n <= 0 or n > 80 * 1024 * 1024:
+                raise Reject("The gathered file is missing or too large.")
+            data = self.rfile.read(n)
+            if len(data) != n:
+                raise Reject("The gathered file is incomplete.")
+            app.storage.put(key, data, self.headers.get("Content-Type") or "application/octet-stream")
             self._send(204, b"")
 
         def _internal_note_index(self):
@@ -1060,7 +1173,7 @@ def _gather_doc(app: App, gather_id: str) -> dict | None:
 
 def _gather_body(app: App, job_id: str, token: str, job: dict, excluded) -> dict:
     result = job.get("result") if isinstance(job.get("result"), dict) else {}
-    return {
+    body = {
         "gather_id": job_id,
         "id": job_id,
         "claim_token": token,
@@ -1069,6 +1182,9 @@ def _gather_body(app: App, job_id: str, token: str, job: dict, excluded) -> dict
         "poll": f"/api/jobs/{job_id}",
         "excluded_gather_id": excluded,
     }
+    if "clock" in result:
+        body["clock"] = result.get("clock")
+    return body
 
 
 def _perform_gather(app: App, body: dict):
@@ -1138,6 +1254,10 @@ def _public_job(job_id, state, stage, percent, error, app: App, position=None, j
     if str(job_id).startswith("g-"):
         out["gather_id"] = job_id
         out["sounds"] = sounds or []
+        if "clock" in result:
+            out["clock"] = result.get("clock")
+        elif isinstance(status, dict) and "clock" in status:
+            out["clock"] = status.get("clock")
     elif sounds:
         out["sounds"] = sounds
     preview_ready = result.get("preview_ready") is True or (isinstance(status, dict) and status.get("preview_ready") is True)

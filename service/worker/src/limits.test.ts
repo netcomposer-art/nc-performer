@@ -19,6 +19,7 @@ import {
   PER_DAY,
   testerPass,
   WINDOW_S,
+  corsHeaders,
   registryPublicStats,
 } from "./policy.ts";
 
@@ -259,4 +260,35 @@ test("a chord row keeps its position and preview, and a later pick replaces that
     { title: "Piano Cm", supplier: "Musicmatter", license: "CC-BY-SA-4.0", chord: 0, id: "c0", preview_url: "/api/jobs/g-0123456789ab/audio/c0", symbol: "Cm" },
     { title: "Choir F", supplier: "Musicmatter", license: "CC-BY-SA-4.0", chord: 1, id: "c1", preview_url: "/api/jobs/g-0123456789ab/audio/c1", symbol: "F" },
   ]);
+});
+
+test("a gathered chord keeps the fields the page assembles with", () => {
+  const live = jobStatusFields({
+    stage: "gathered",
+    found_sounds: [{
+      title: "Choir Cm",
+      supplier: "Musicmatter",
+      license: "CC-BY-SA-4.0",
+      chord: 0,
+      id: "c0",
+      preview_url: "/api/jobs/g-0123456789ab/audio/c0",
+      symbol: "Cm",
+      clip_id: "c0",
+      pos: 0,
+      url: "/api/jobs/g-0123456789ab/audio/c0",
+      gain_db: 1.5,
+      duration_s: 2.5,
+      start_s: 0,
+      end_s: 2.5,
+      loudness_lufs: -21.5,
+      credit: "Choir Cm by Ada",
+    }],
+  });
+  assert.equal(live.found_sounds[0].gain_db, 1.5);
+  assert.equal(live.found_sounds[0].duration_s, 2.5);
+  assert.equal(live.found_sounds[0].clip_id, "c0");
+  assert.equal(corsHeaders("https://netcomposer.art")["access-control-allow-origin"], "https://netcomposer.art");
+  assert.equal(corsHeaders("https://play.netcomposer.art").vary, "Origin");
+  assert.equal(corsHeaders("https://evil.example")["access-control-allow-origin"], "*");
+  assert.equal(corsHeaders(null)["access-control-allow-origin"], "*");
 });
