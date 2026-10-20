@@ -556,10 +556,11 @@ def _option_groups(seq, pool, assembly, hint, seed, named) -> list:
             if any(discover._hint_ok(row.get("instrument") or "", word) for word in discover._EXCLUDE):
                 continue
             notes.append(_note_opt(row))
-        # A whole-chord recording is the clip. Notes are only the fallback
-        # for a chord no recording covers, so a note library is not a second
-        # piano entry beside the piano files.
-        option_groups.append(whole or notes)
+        # A family with a file of this chord and a family that can stack it
+        # from indexed notes are both eligible. The draw is among families
+        # that can play the whole piece, so a note stack is not dropped just
+        # because some other family has a recording.
+        option_groups.append(whole + notes)
     if named and option_groups and all(any(row.get("origin") == named for row in group) for group in option_groups):
         option_groups = [[row for row in group if row.get("origin") == named] for group in option_groups]
     return option_groups

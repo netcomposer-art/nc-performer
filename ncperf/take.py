@@ -665,26 +665,34 @@ def _coverage(groups: list[list[dict]], avoid: tuple | None = None) -> dict[tupl
 
 
 def pick_recording(by_key: dict, n: int, seed: int, prefer: list[str] | None) -> tuple | None:
-    """One recording that can play these chords.
+    """One recording that can play every chord.
 
-    The recordings that cover the most chords are the candidates. When the
-    prompt names an instrument and one of those recordings is that instrument,
-    the others drop out. Families then draw with equal weight, so piano notes
-    and piano files together are one chance, not two, and no larger than choir
-    or a synth. The seed picks the family, then one recording inside it.
-    An exact voicing is kept ahead of an inversion. Assembled notes are not
-    ranked ahead of a whole-chord file.
+    A family is in the draw when one of its recordings covers the piece: a
+    whole-chord file for each chord, or a stack of indexed notes for each
+    chord. Families draw with equal weight. Piano files and piano notes are
+    one family, the same size as choir, guitar, or a synth. The word "piano"
+    does not shrink that draw. Another named instrument does, when that
+    family can cover. The seed picks the family, then a recording inside it.
+    A whole-chord file ranks ahead of a note stack. An exact voicing ranks
+    ahead of an inversion. A family that cannot cover the piece is not used
+    to fill the gaps.
     """
-    del n
     if not by_key:
         return None
-    best = max(len(rows) for rows in by_key.values())
-    pool = [key for key, rows in by_key.items() if len(rows) == best]
-    if prefer:
+    full = [key for key, rows in by_key.items() if len(rows) == n and n]
+    if full:
+        pool = full
+    else:
+        best = max(len(rows) for rows in by_key.values())
+        pool = [key for key, rows in by_key.items() if len(rows) == best]
+    # Piano in the words is not a default. Choir, guitar, strings, and the
+    # other named families still keep the draw when they can play the chords.
+    asked = [word for word in (prefer or []) if word != "piano"]
+    if asked:
         named = []
         for key in pool:
             sample = next(iter(by_key[key].values()))
-            if matches_any(sample, prefer):
+            if matches_any(sample, asked):
                 named.append(key)
         if named:
             pool = named
@@ -696,16 +704,20 @@ def pick_recording(by_key: dict, n: int, seed: int, prefer: list[str] | None) ->
     rng.shuffle(names)
     options = list(families[names[0]])
     rng.shuffle(options)
-    options.sort(key=lambda key: min(_tier_value(opt) for opt in by_key[key].values()))
+    options.sort(key=lambda key: (
+        0 if key[2] == "whole-chord file" else 1,
+        min(_tier_value(opt) for opt in by_key[key].values()),
+    ))
     return options[0]
 
 
 def choose(groups: list[list[dict]], seed: int, prefer: list[str] | None, hint: str | None, long: bool, avoid: tuple | None = None) -> tuple[list, tuple | None]:
     """One ensemble for these chords. The next seed can choose another family.
 
-    ``hint`` and ``long`` do not choose the ensemble. The prompt's instrument
-    words do, via ``prefer``. A recording that cannot play a chord is not
-    used for that chord. Nothing is pitch-shifted to fill a gap.
+    ``hint`` and ``long`` do not choose the ensemble. A named choir, guitar,
+    or synth does, via ``prefer``, when that family can cover. The word
+    "piano" does not. A recording that cannot play a chord is not used to
+    fill one. Nothing is pitch-shifted to fill a gap.
     """
     del hint, long
     n = len(groups)

@@ -285,6 +285,45 @@ class RawPlanTest(unittest.TestCase):
         self.assertEqual(clip["built"], "whole-chord file")
         self.assertIn("inv3", plan["sources"][clip["sids"][0]]["url"])
 
+    def test_the_word_piano_does_not_take_the_whole_draw(self):
+        comp = dict(COMP, performance="Piano. Let each chord ring. One ensemble, clear and unhurried.")
+        families = [_plan(seed, comp=comp)["ensemble"]["family"] for seed in range(1, 11)]
+        self.assertGreater(len(set(families)), 1)
+        self.assertLess(families.count("piano"), 10)
+        named = dict(COMP, performance="A choir, clear and unhurried.")
+        choir = _plan(3, comp=named)
+        self.assertEqual(choir["ensemble"]["family"], "choir")
+
+    def test_a_note_family_that_covers_every_chord_joins_the_draw(self):
+        groups = []
+        for sym in ("Cm", "F", "G", "Am", "Dm"):
+            groups.append([
+                {"built": "whole-chord file", "origin": "musicmatter", "instrument": "piano", "tier": 0, "title": f"piano {sym}"},
+                {"built": "assembled notes", "origin": "uiowa", "instrument": "guitar", "tier": 0, "title": f"guitar {sym}"},
+            ])
+        # Guitar misses the last chord, so it cannot cover the piece and does not fill the gap.
+        short = [list(group) for group in groups]
+        short[-1] = [row for row in short[-1] if row["instrument"] == "piano"]
+        families = []
+        for seed in range(1, 21):
+            chosen, _primary = take.choose(groups, seed, ["piano"], None, False)
+            self.assertTrue(chosen)
+            self.assertTrue(all(row["instrument"] == chosen[0]["instrument"] for row in chosen))
+            families.append(take.family_of(chosen[0]["instrument"]))
+            held, _primary = take.choose(short, seed, ["piano"], None, False)
+            self.assertTrue(all(row["instrument"] == "piano" for row in held))
+        self.assertIn("piano", families)
+        self.assertIn("guitar", families)
+        choir_groups = []
+        for sym in ("Cm", "F", "G", "Am", "Dm"):
+            choir_groups.append([
+                {"built": "whole-chord file", "origin": "musicmatter", "instrument": "choir", "tier": 0, "title": f"choir {sym}"},
+                {"built": "assembled notes", "origin": "uiowa", "instrument": "guitar", "tier": 0, "title": f"guitar {sym}"},
+            ])
+        for seed in range(1, 6):
+            chosen, _primary = take.choose(choir_groups, seed, ["choir"], None, False)
+            self.assertTrue(all(row["instrument"] == "choir" for row in chosen))
+
 
 class RawRenderTest(unittest.TestCase):
     def test_a_short_clip_ends_and_only_the_fades_are_applied(self):

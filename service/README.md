@@ -94,7 +94,7 @@ Seed 1, no instrument field, no Freesound API key, Dragonfly present and unused.
 
 Both passes are inside the targets (Gather under about 10 seconds, Perform-from-gather under about 5–10 seconds). The piece is 35 chords, 35 whole-chord files, fat synth, musicmatter, length 121.739 s. The prose mentions a room; this path did not search for one.
 
-Canon in D from that Gather, seed 1, rendered in 1.0 s. The 12-bar blues in A gathered in 4.2 s (Openverse used the deadline) and rendered in 1.1 s. The blues is piano because the words say "Piano."
+Canon in D from that Gather, seed 1, rendered in 1.0 s. The 12-bar blues in A gathered in 4.2 s (Openverse used the deadline) and rendered in 1.1 s.
 
 ### While the page is waiting
 
@@ -123,23 +123,25 @@ Hosted container cold start was not measured here (no Cloudflare credentials). T
 
 Slash bass, this machine, disk index and the checked-sounds registry already loaded. Queue wait, container start, and the R2 copy are not included. Every seed gathered and rendered. The prelude is 35 chords, 121.739 s. Thirty-three use a matching inversion. `F#dim7/G` and `G7/C` have no such voicing, so each is the chord file plus one UIowa piano bass note (G2, C3). Canon and blues have no slash bass.
 
+The word "Piano." in the Canon and blues Performance lines does not lock the family. The draw is the families that can play every chord: a whole-chord file for each one, or a stack of indexed notes for each one. Piano files and piano notes are one family. On this index, choir, fat synth, piano, and synth arp each have the files. UIowa guitar, strings, and winds do not contain every tone of these chords, so they are not in the draw. A named choir still wins when the words ask for one.
+
 | Piece | Seed | Gather | Render | Ensemble |
 |---|---|---|---|---|
-| C major Prelude | 1 | 0.923 | 4.866 | piano |
-| C major Prelude | 2 | 0.820 | 2.798 | fat synth |
-| C major Prelude | 3 | 1.044 | 2.188 | piano |
-| C major Prelude | 4 | 1.031 | 3.930 | choir |
-| C major Prelude | 5 | 0.781 | 4.232 | synth arp |
-| Canon in D | 1 | 1.020 | 1.106 | piano |
-| Canon in D | 2 | 1.031 | 0.872 | piano |
-| Canon in D | 3 | 1.030 | 0.850 | piano |
-| Canon in D | 4 | 1.031 | 0.865 | piano |
-| Canon in D | 5 | 1.028 | 0.865 | piano |
-| 12-bar blues in A | 1 | 1.021 | 0.930 | piano |
-| 12-bar blues in A | 2 | 1.023 | 0.805 | piano |
-| 12-bar blues in A | 3 | 1.023 | 0.844 | piano |
-| 12-bar blues in A | 4 | 1.026 | 0.688 | piano |
-| 12-bar blues in A | 5 | 1.025 | 0.582 | piano |
+| C major Prelude | 1 | 0.893 | 2.706 | piano |
+| C major Prelude | 2 | 0.865 | 2.293 | fat synth |
+| C major Prelude | 3 | 0.799 | 2.103 | piano |
+| C major Prelude | 4 | 0.825 | 2.609 | choir |
+| C major Prelude | 5 | 0.800 | 2.616 | synth arp |
+| Canon in D | 1 | 1.003 | 1.006 | piano |
+| Canon in D | 2 | 1.028 | 1.627 | fat synth |
+| Canon in D | 3 | 1.031 | 0.874 | piano |
+| Canon in D | 4 | 1.013 | 1.523 | choir |
+| Canon in D | 5 | 1.032 | 1.499 | synth arp |
+| 12-bar blues in A | 1 | 0.961 | 0.665 | piano |
+| 12-bar blues in A | 2 | 1.021 | 1.288 | fat synth |
+| 12-bar blues in A | 3 | 0.962 | 0.663 | piano |
+| 12-bar blues in A | 4 | 1.026 | 1.385 | choir |
+| 12-bar blues in A | 5 | 0.963 | 1.591 | synth arp |
 
 ### Canon in D, 10 seeds, no instrument named
 
@@ -158,7 +160,7 @@ The published Performance line says "Piano." This run used the 16-bar harmony an
 | 9 | synth arp | musicmatter | whole-chord file | synth arp |
 | 10 | choir | musicmatter | whole-chord file | Choir |
 
-Piano is in 2 of these 10 takes. An `instrument: "Piano"` hint on the same seed does not change the family. Words that say "choir" pick choir. Words that say "Piano." pick piano.
+Piano is in 2 of these 10 takes. An `instrument: "Piano"` hint on the same seed does not change the family. Words that say "choir" pick choir. The word "Piano." does not. It is one family in the draw, the same size as the others that can cover the piece.
 
 ### Previous layered engine (not what this release runs)
 
