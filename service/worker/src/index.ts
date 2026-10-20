@@ -37,7 +37,7 @@ import {
 } from "./keep";
 import { CANCELLED_MESSAGE, cancelToken, queueErrorIsCancel } from "./cancel";
 import { REQUIRED_OUTPUTS, containerPageUpdate, missingOutputs, readableBytes } from "./outputs";
-import { applyPerformHit, burstBlock, claimToken, forPage, isInternalFailure, jobStatusFields, newId, PER_10MIN, PER_DAY, proxyHosts, publicInternalError, rejectPlan, testerPass, wordsTooLong, type FoundSound, type RateBlock } from "./policy";
+import { applyPerformHit, burstBlock, claimToken, forPage, isInternalFailure, jobStatusFields, newId, PER_10MIN, PER_DAY, proxyHosts, publicInternalError, registryPublicStats, rejectPlan, testerPass, wordsTooLong, type FoundSound, type RateBlock, type RegistryStats } from "./policy";
 
 // @cloudflare/containers 0.3.7 looks up this exact export on ctx.exports when
 // allowedHosts is set. It is a WorkerEntrypoint, not a Durable Object, so it
@@ -69,6 +69,8 @@ const ALLOWED_HOSTS = [
 
 const FILES = [...REQUIRED_OUTPUTS];
 const NOTE_INDEX_KEY = "note-index/v1.json";
+const REGISTRY_KEY = "registry/v1.json";
+const REGISTRY_STATS_KEY = "registry/v1-stats.json";
 
 const FILE_TYPES: Record<string, string> = {
   "performance.flac": "audio/flac",
@@ -123,6 +125,7 @@ export interface Env {
   NC_PUBLIC_BASE_URL?: string;
   NC_IP_HASH_SALT?: string;
   NC_PROCESSED?: string;
+  NC_REGISTRY_RECHECK_DAYS?: string;
 }
 
 type Job = {
@@ -415,7 +418,7 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     return html(pageHtml);
   }
   if (request.method === "GET" && path === "/health") {
-    return json({ ok: true, service: "nc-perform", version: "0.2.0" });
+    return json({ ok: true, service: "nc-perform", version: "0.2.0", registry: await readRegistryStats(env) });
   }
   if (request.method === "GET" && path === "/api/warm") return warm(env, ctx);
   if (request.method === "GET" && path === "/api/config") return config(env);
@@ -474,7 +477,18 @@ async function config(env: Env): Promise<Response> {
       formula:
         "fresh prompt tokens times the input price, plus cached prompt tokens times the cached price, plus completion tokens times the output price",
     },
+    registry: await readRegistryStats(env),
   });
+}
+
+async function readRegistryStats(env: Env): Promise<RegistryStats> {
+  try {
+    const obj = await env.PERFORMANCES.get(REGISTRY_STATS_KEY);
+    if (!obj) return registryPublicStats(null);
+    return registryPublicStats(await obj.json());
+  } catch {
+    return registryPublicStats(null);
+  }
 }
 
 async function keys(env: Env): Promise<Response> {
@@ -751,6 +765,7 @@ async function runContainer(env: Env, id: string): Promise<void> {
   if (env.NC_INTERNAL_TOKEN) headers.authorization = `Bearer ${env.NC_INTERNAL_TOKEN}`;
   try {
     await seedNoteIndex(env, container, id, headers);
+    await seedRegistry(env, container, id, headers);
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     console.error(JSON.stringify({ event: "note_index", id, detail }));
@@ -923,6 +938,12 @@ async function runContainer(env: Env, id: string): Promise<void> {
       { httpMetadata: { contentType: "application/json" } },
     );
   }
+  try {
+    await pullRegistry(env, container, id, headers);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    console.error(JSON.stringify({ event: "registry", id, detail }));
+  }
 }
 
 function containerEnv(env: Env, base: string): Record<string, string> {
@@ -944,6 +965,7 @@ function containerEnv(env: Env, base: string): Record<string, string> {
   if (env.FREESOUND_API_KEY) out.FREESOUND_API_KEY = env.FREESOUND_API_KEY;
   if (env.NC_SIGNING_KEY) out.NC_SIGNING_KEY = env.NC_SIGNING_KEY;
   if (env.NC_INTERNAL_TOKEN) out.NC_INTERNAL_TOKEN = env.NC_INTERNAL_TOKEN;
+  if (env.NC_REGISTRY_RECHECK_DAYS) out.NC_REGISTRY_RECHECK_DAYS = env.NC_REGISTRY_RECHECK_DAYS;
   // Exact names only. Python suffix-matches these. Globs belong to ContainerProxy.
   out.NC_ALLOWED_HOSTS = allowedHosts(env).join(",");
   return out;
@@ -1042,6 +1064,48 @@ async function seedNoteIndex(env: Env, container: DurableObjectStub<RenderContai
   });
   if (!seeded.ok && seeded.status !== 204) {
     console.error(JSON.stringify({ event: "note_index", id, status: seeded.status }));
+  }
+}
+
+async function seedRegistry(env: Env, container: DurableObjectStub<RenderContainer>, id: string, headers: Record<string, string>): Promise<void> {
+  // The checked-sounds registry is metadata. A newer copy in R2 replaces the bundled file.
+  const obj = await env.PERFORMANCES.get(REGISTRY_KEY);
+  if (!obj || obj.size <= 0 || obj.size > 8 * 1024 * 1024) return;
+  const seeded = await containerFetch(container, id, "http://container/internal/registry", {
+    method: "POST",
+    headers,
+    body: await obj.arrayBuffer(),
+  });
+  if (!seeded.ok && seeded.status !== 204) {
+    console.error(JSON.stringify({ event: "registry", id, status: seeded.status }));
+  }
+}
+
+async function pullRegistry(env: Env, container: DurableObjectStub<RenderContainer>, id: string, headers: Record<string, string>): Promise<void> {
+  const res = await containerFetch(container, id, "http://container/internal/registry", { headers });
+  if (res.status === 204) return;
+  if (!res.ok) return;
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  if (!bytes.byteLength || bytes.byteLength > 8 * 1024 * 1024) return;
+  await putOnce(env, REGISTRY_KEY, bytes, "application/json", false);
+  try {
+    const doc = JSON.parse(new TextDecoder().decode(bytes)) as { stats?: unknown; checker_version?: unknown; recheck_days?: unknown };
+    const stats = registryPublicStats({
+      ...(doc.stats && typeof doc.stats === "object" ? doc.stats as Record<string, unknown> : {}),
+      checker_version: doc.checker_version,
+      recheck_days: doc.recheck_days,
+    });
+    await putOnce(env, REGISTRY_STATS_KEY, new TextEncoder().encode(JSON.stringify(stats)), "application/json", false);
+  } catch {
+    /* the catalog is stored; the stats line can wait for the next pull */
+  }
+  const checked = await containerFetch(container, id, "http://container/internal/registry/check", {
+    method: "POST",
+    headers,
+    body: "{}",
+  });
+  if (!checked.ok && checked.status !== 202) {
+    console.error(JSON.stringify({ event: "registry_check", id, status: checked.status }));
   }
 }
 

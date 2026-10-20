@@ -19,6 +19,7 @@ import {
   PER_DAY,
   testerPass,
   WINDOW_S,
+  registryPublicStats,
 } from "./policy.ts";
 
 const T0 = 1_700_000_000;
@@ -198,6 +199,24 @@ test("wrangler rate limit is a 10-or-60 second burst, not the 10-minute window",
     { name: "BUDGET", class_name: "BudgetDO" },
     { name: "RENDER", class_name: "RenderContainer" },
   ]);
+});
+
+test("registry stats are counts only", () => {
+  assert.deepEqual(registryPublicStats({ size: 12, ok: 9, rejected: 3, checker_version: 1, recheck_days: 90 }), {
+    size: 12,
+    ok: 9,
+    rejected: 3,
+    checker_version: 1,
+    recheck_days: 90,
+  });
+  assert.deepEqual(registryPublicStats(null), {
+    size: 0,
+    ok: 0,
+    rejected: 0,
+    checker_version: null,
+    recheck_days: null,
+  });
+  assert.equal(registryPublicStats({ size: 4, token: "secret" }).size, 4);
 });
 
 test("public job status always has trimmed, seed, found sounds, and a stage line", () => {

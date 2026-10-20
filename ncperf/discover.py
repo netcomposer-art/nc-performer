@@ -426,30 +426,43 @@ def _texture_ok(cand: dict) -> bool:
     return bool(_TEXTURE_OK.search(blob))
 
 
-def _manifest_credit(url: str) -> dict | None:
+def _manifest_credit(url: str, supplier: str = "musicmatter") -> dict | None:
     if not url:
+        return None
+    from . import registry
+    action, entry = registry.consult(supplier, url)
+    if action == registry.USE:
+        return registry.credit_of(entry)
+    if action in (registry.SKIP, registry.DEFER):
         return None
     cached = creditcache.get("manifest:" + url)
     if cached:
+        registry.remember_ok(supplier, url, cached)
         return cached
-    credit = _manifest_credit_fetch(url)
+    if registry.time_left() is not None and registry.time_left() < registry.MIN_CHECK_S:
+        registry.enqueue(supplier, url, "new")
+        return None
+    credit, _reason = _manifest_credit_fetch(url)
     if credit:
         creditcache.put("manifest:" + url, credit)
-    return credit
+        registry.remember_ok(supplier, url, credit)
+        return credit
+    registry.remember_rejected(supplier, url, _reason or "unreachable", page=url)
+    return None
 
 
-def _manifest_credit_fetch(url: str) -> dict | None:
+def _manifest_credit_fetch(url: str) -> tuple[dict | None, str]:
     try:
         manifest = _json(url)
     except Exception as exc:
         print(json.dumps({"event": "discover_manifest", "error": str(exc)[:160]}), flush=True)
-        return None
+        return None, "unreachable"
     lid = manifest.get("license")
     if isinstance(lid, dict):
         lid = lid.get("id") or lid.get("name")
     parsed = LIC.from_id(str(lid or ""))
     if not lid or not LIC.allowed(parsed[0]):
-        return None
+        return None, "bad_license"
     creator = manifest.get("creator") or {}
     if isinstance(creator, str):
         author = creator
@@ -457,7 +470,7 @@ def _manifest_credit_fetch(url: str) -> dict | None:
         author = creator.get("name") or ""
     title = manifest.get("title") or ""
     if not str(title).strip() or not str(author).strip():
-        return None
+        return None, "missing_credit"
     chord = manifest.get("chord")
     symbol = None
     bass_pc = None
@@ -479,36 +492,50 @@ def _manifest_credit_fetch(url: str) -> dict | None:
         credit["audio_url"] = manifest["audio"]
     if manifest.get("sha256"):
         credit["sha256"] = manifest["sha256"]
-    return credit
+    return credit, ""
 
 
 def _freesound_credit(sid: str) -> dict | None:
     if not sid:
         return None
+    page = f"https://freesound.org/s/{sid}/"
+    from . import registry
+    action, entry = registry.consult("freesound", page)
+    if action == registry.USE:
+        return registry.credit_of(entry)
+    if action in (registry.SKIP, registry.DEFER):
+        return None
     cached = creditcache.get("freesound:" + str(sid))
     if cached:
+        registry.remember_ok("freesound", page, cached)
         return cached
-    credit = _freesound_credit_fetch(sid)
+    if registry.time_left() is not None and registry.time_left() < registry.MIN_CHECK_S:
+        registry.enqueue("freesound", page, "new")
+        return None
+    credit, reason = _freesound_credit_fetch(sid)
     if credit:
         creditcache.put("freesound:" + str(sid), credit)
-    return credit
+        registry.remember_ok("freesound", page, credit)
+        return credit
+    registry.remember_rejected("freesound", page, reason or "unreachable", page=page)
+    return None
 
 
-def _freesound_credit_fetch(sid: str) -> dict | None:
+def _freesound_credit_fetch(sid: str) -> tuple[dict | None, str]:
     try:
         raw = _get(f"https://freesound.org/s/{sid}/")
     except Exception as exc:
         print(json.dumps({"event": "discover_license", "origin": "freesound", "error": str(exc)[:160]}), flush=True)
-        return None
+        return None, "unreachable"
     page = raw.decode("utf-8", "replace")
     found = LIC.page_licenses(page)
     if len(found) != 1 or not LIC.allowed(found[0]):
-        return None
+        return None, "bad_license"
     title = re.search(r'og:audio:title" content="([^"]*)"', page)
     artist = re.search(r'og:audio:artist" content="([^"]*)"', page)
     og_type = re.search(r'og:type" content="([^"]*)"', page)
     if not title or not artist:
-        return None
+        return None, "missing_credit"
     # The site-wide meta description mentions "ambience" for every sound. Use the sound's own blurb.
     desc = re.search(r'twitter:description" content="([^"]*)"', page, re.I)
     if not desc:
@@ -521,7 +548,7 @@ def _freesound_credit_fetch(sid: str) -> dict | None:
         parts.append(html_lib.unescape(tags))
     text = " ".join(parts)
     if not parts[0].strip() or not parts[1].strip():
-        return None
+        return None, "missing_credit"
     lq = re.search(r'https://cdn\.freesound\.org/previews/\d+/[\w-]+-lq\.ogg', page)
     credit = {
         "title": parts[0].strip(),
@@ -533,7 +560,7 @@ def _freesound_credit_fetch(sid: str) -> dict | None:
     }
     if lq:
         credit["audio_url"] = lq.group(0).replace("-lq.ogg", "-hq.ogg")
-    return credit
+    return credit, ""
 
 
 def _ensure_credit(cand: dict, verify_live: bool, bass=None) -> dict | None:
@@ -542,7 +569,7 @@ def _ensure_credit(cand: dict, verify_live: bool, bass=None) -> dict | None:
     src = dict(cand.get("source") or {})
     kind = src.get("kind")
     if verify_live and kind == "supplier":
-        credit = _manifest_credit(src.get("manifest") or "")
+        credit = _manifest_credit(src.get("manifest") or "", supplier=str(cand.get("origin") or "musicmatter"))
         if not credit:
             return None
         if cand.get("chord_symbol") and credit.get("chord_symbol") and credit["chord_symbol"] != cand["chord_symbol"]:

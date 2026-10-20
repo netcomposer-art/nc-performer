@@ -32,6 +32,11 @@ from .runner import Runner, claim_matches, store_kit_submission
 from .sign import Signer
 from .storage import Storage, open_storage
 
+def _registry_stats() -> dict:
+    from ncperf import registry
+    return registry.public_stats()
+
+
 def web_index() -> str:
     """The Perform page. Dev layout keeps it in service/web. The image copies
     it next to the installed package so ``python -m nc_perform`` still finds it.
@@ -210,7 +215,12 @@ def make_handler(app: App):
                 return
             if path == "/health":
                 from . import __version__
-                self._send(200, {"ok": True, "service": "nc-perform", "version": __version__})
+                self._send(200, {
+                    "ok": True,
+                    "service": "nc-perform",
+                    "version": __version__,
+                    "registry": _registry_stats(),
+                })
                 return
             if path == "/api/warm":
                 # This process is already up. The Worker starts the container.
@@ -228,6 +238,7 @@ def make_handler(app: App):
                     "llm": bool(s.llm_configured),
                     "llm_model": s.llm_model or None,
                     "llm_price": llm_price_card(s),
+                    "registry": _registry_stats(),
                 })
                 return
             if path == "/.well-known/nc-record-keys.json":
@@ -297,6 +308,10 @@ def make_handler(app: App):
                 return self._internal_cache()
             if path == "/internal/note-index":
                 return self._internal_note_index()
+            if path == "/internal/registry":
+                return self._internal_registry()
+            if path == "/internal/registry/check":
+                return self._internal_registry_check()
             m = re.fullmatch(r"/internal/jobs/([hkg]-[0-9a-z]+)/cancel", path)
             if m:
                 return self._internal_cancel(m.group(1))
@@ -859,6 +874,13 @@ def make_handler(app: App):
         def _internal_get(self, path):
             if not _internal_ok(app, self):
                 return self._send(401, {"error": "internal token required"})
+            if path == "/internal/registry":
+                from ncperf import registry
+                raw = registry.export_bytes()
+                if not raw:
+                    return self._send(204, b"")
+                registry.mark_clean()
+                return self._send(200, raw, "application/json")
             m = re.fullmatch(r"/internal/jobs/([hkg]-[0-9a-z]+)", path)
             if m:
                 job = app.store.get(m.group(1))
@@ -924,6 +946,26 @@ def make_handler(app: App):
             from ncperf import noteindex
             noteindex.install_bytes(raw)
             self._send(204, b"")
+
+        def _internal_registry(self):
+            if not _internal_ok(app, self):
+                return self._send(401, {"error": "internal token required"})
+            from ncperf import registry
+            raw = self._read(registry.MAX_BYTES)
+            if not raw:
+                raise Reject("The registry is empty.")
+            try:
+                registry.install_bytes(raw)
+            except ValueError as exc:
+                raise Reject(str(exc)) from exc
+            self._send(204, b"")
+
+        def _internal_registry_check(self):
+            if not _internal_ok(app, self):
+                return self._send(401, {"error": "internal token required"})
+            from ncperf import registry
+            registry.kick()
+            self._send(202, {"ok": True, "pending": registry.pending_count()})
 
     return Handler
 

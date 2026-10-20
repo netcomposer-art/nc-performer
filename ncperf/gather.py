@@ -91,6 +91,8 @@ def build(comp: dict, *, seed: int = 1, instrument: str | None = None, avoid_key
         settle_s=assemble.GATHER_SETTLE_S,
     )
     avoided = bool(avoid_keys or avoid_sample_ids)
+    from . import registry
+    registry.begin_session()
     wall = arm_wall(GATHER_S)
     try:
         try:
@@ -103,6 +105,7 @@ def build(comp: dict, *, seed: int = 1, instrument: str | None = None, avoid_key
             plan = assemble.plan_raw(comp, **kwargs)
     finally:
         reset_wall(wall)
+        registry.log_session()
     plan["from_gather"] = True
     picks = [str(item) for item in (plan.pop("gather_picks", None) or []) if item]
     files = source_rows(plan)
@@ -130,6 +133,8 @@ def _build_layered(comp: dict, *, seed: int = 1, instrument: str | None = None, 
     avoided = bool(avoid_keys or avoid_sample_ids)
     # One clock for the whole pick. A file-reach check cannot add its own 25 seconds
     # after the supplier searches have already used the deadline.
+    from . import registry
+    registry.begin_session()
     wall = arm_wall(ORIGIN_S)
     try:
         try:
@@ -140,6 +145,7 @@ def _build_layered(comp: dict, *, seed: int = 1, instrument: str | None = None, 
             plan = plan_for(comp, avoid_keys=None, avoid_sample_ids=None, **kwargs)
     finally:
         reset_wall(wall)
+        registry.log_session()
     plan["from_gather"] = True
     picks = [str(item) for item in (plan.pop("gather_picks", None) or []) if item]
     # The note index already names the files. Downloading them is Perform's job,

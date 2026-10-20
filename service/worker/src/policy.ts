@@ -299,3 +299,32 @@ export function jobStatusFields(input: {
   if (stage === "queued" && input.position) line = `Queued (position ${input.position})`;
   return { seed, trimmed, found_sounds: foundSounds(input.found_sounds), stage_line: line, tester: input.tester === true };
 }
+
+export type RegistryStats = {
+  size: number;
+  ok: number;
+  rejected: number;
+  checker_version: number | null;
+  recheck_days: number | null;
+};
+
+/** Counts from registry/v1-stats.json. Missing or junk fields become zeros, never a secret. */
+export function registryPublicStats(doc: unknown): RegistryStats {
+  const row = doc && typeof doc === "object" ? (doc as Record<string, unknown>) : {};
+  const num = (value: unknown): number => {
+    const n = typeof value === "number" ? value : Number(value);
+    return Number.isFinite(n) && n >= 0 ? Math.trunc(n) : 0;
+  };
+  const optional = (value: unknown): number | null => {
+    if (value == null || value === "") return null;
+    const n = typeof value === "number" ? value : Number(value);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  };
+  return {
+    size: num(row.size),
+    ok: num(row.ok),
+    rejected: num(row.rejected),
+    checker_version: optional(row.checker_version),
+    recheck_days: optional(row.recheck_days),
+  };
+}

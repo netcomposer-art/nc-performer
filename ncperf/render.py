@@ -75,7 +75,22 @@ class Renderer:
             if checked:
                 m = {'accepted': True, 'cents': s.get('cents'), 'note': pitch.NOTE(int(expect)), 'checked': 'index'}
             else:
-                m = pitch.measure_fft(r['y'], expect, hi=s.get('fft_hi_hz', 2000.0)) if s.get('pitch_method') == 'fft' else pitch.measure(r['y'], expect); m['accepted'] = pitch.accept(m, expect, self.P.get('pitch_tolerance_cents', 15.0))
+                from . import registry
+                supplier = s.get('origin') or ''
+                url = s.get('audio_url') or s.get('url') or s.get('page') or ''
+                known = registry.stored_pitch(supplier, url, int(expect)) if supplier and url else None
+                if known:
+                    m = {'accepted': True, 'cents': known.get('cents'), 'note': pitch.NOTE(int(expect)), 'checked': 'registry'}
+                else:
+                    m = pitch.measure_fft(r['y'], expect, hi=s.get('fft_hi_hz', 2000.0)) if s.get('pitch_method') == 'fft' else pitch.measure(r['y'], expect); m['accepted'] = pitch.accept(m, expect, self.P.get('pitch_tolerance_cents', 15.0))
+                    if m.get('accepted') and supplier and url and s.get('title') and s.get('author') and s.get('license'):
+                        registry.remember_ok(supplier, url, {
+                            'title': s.get('title'),
+                            'author': s.get('author'),
+                            'license': s.get('license'),
+                            'page': s.get('page') or url,
+                            'audio_url': url,
+                        }, pitch_midi=int(expect), cents=m.get('cents'), note=str(int(expect)))
             self.meas[(sid, expect)] = m
             if not m['accepted']: self.rejected.append(dict(source=sid, expected=pitch.NOTE(expect), measured=m))
         return self.meas[(sid, expect)]

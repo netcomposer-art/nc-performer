@@ -58,6 +58,24 @@ Recorded notes come from a precomputed index, `ncperf/data/note-index.json`. Eac
 
 The index ships with the kit. When R2 has `note-index/v1.json`, the Worker copies it into the container before the job, and that copy wins. `NC_NOTE_INDEX` (a file) or `NC_NOTE_INDEX_URL` also overrides the bundled file. Rebuild it with `python -m ncperf.noteindex`. The manual workflow "Refresh note index" runs that command and uploads the JSON as an artifact. It does not commit and it does not deploy. A weekly schedule can be added later; it is not turned on.
 
+### Checked sounds
+
+The note index and the musicmatter catalog are one registry: `ncperf/data/checked-sounds.json`. Each row is one sound that has already been checked. The key is the supplier id plus the canonical URL. A file that holds several notes adds the MIDI note to that key. Freesound credit lookups use the sound's page; that page is an alias of the audio row, not a second sound.
+
+A row holds `verdict` (`ok` or `rejected`), `reason` (`bad_license`, `missing_credit`, `wrong_pitch`, `wrong_chord`, `unreachable`, `silent`, `clipped`, `too_short`, or empty), `pitch_midi`, `cents`, `chord` or `note`, `duration_s`, `loudness_lufs`, `license`, `title`, `author`, `page`, `fingerprint` (`etag`, `last_modified`, `size`, `sha256`), `checked_at`, `license_checked_at`, and `checker_version`.
+
+The registry lives in R2 as one object, `registry/v1.json`, in the same bucket as the performances. The Worker copies it into the container before the job, the same way it copies `note-index/v1.json`, and copies a changed registry back when the job ends. A small `registry/v1-stats.json` is the public count. R2 fits this because Gather reads the catalog once and then looks up rows in memory. D1 would add a database binding the container does not have. KV bills per key and caps a value at 25 MiB, which is a poor fit for one multi-megabyte catalog read once per job. No new binding is required.
+
+On a hit, Gather does not download the file to check it, does not measure pitch, and does not open the credit page. A rejected row is skipped and is not tried again in that take. A sound the registry has never seen is checked once and written back. If the Gather deadline is too close (under 0.35 s), that newcomer is left out of this take and queued. A background check on the container runs it so the next take can use it. The queued work does not hold the take past the 8 second Gather stop.
+
+A row is checked again only when its fingerprint changes, `checker_version` changes, or the license row is older than `NC_REGISTRY_RECHECK_DAYS`. The default is 90. That variable is the interval. It is not a cap: set it to 400 and the background license check waits 400 days. A license that is due still counts as ok for this take. The recheck is the background queue, not a download during Gather. The manual workflow "Refresh checked-sounds registry" rebuilds the file and uploads it as an artifact. It does not commit, deploy, or run on a schedule.
+
+`loudness_lufs` is null in the seed. The backfill did not decode the audio, so it does not invent a loudness. Raw render still matches the level of the clip it plays. Duration and cents are filled for the note-index rows, which were already measured. They are empty for musicmatter until a check decodes the file.
+
+`GET /api/config` and `GET /health` include `registry`: `size`, `ok`, `rejected`, `checker_version`, and `recheck_days`. No URLs and no secrets. The Worker reads those counts from `registry/v1-stats.json`. Until that object exists they are zeros. The container reports the bundled file.
+
+The seed is the note index plus the musicmatter catalog already on disk (10,195 offerings). It did not download the audio. Counts: 10,334 rows, 8,977 ok, 1,357 rejected. By supplier: musicmatter 8,839 ok and 1,356 rejected (`wrong_chord`, a catalog file whose name is not a chord), University of Iowa 104 ok, Freesound 34 ok (piano, cello, and flute), Philharmonia 1 rejected (`bad_license`, the custom licence already recorded on the note index). No row was rejected for a missing credit, a wrong pitch, an unreachable file, silence, clipping, or length, because those checks need the audio and this seed did not fetch it. On this machine a 5-chord Gather with the disk index and an empty registry downloaded 5 manifests and finished in 0.232 s (hit rate 0). The same Gather with the registry loaded made no check download and finished in 0.042 s, hit rate 1.0 (5 of 5). Loading the 5.5 MB file took 0.035 s. A rejected lookup returned in under a millisecond and did not fetch. Queue wait and the R2 copy are not in these numbers.
+
 Gather, on this release, runs the supplier searches together and stops at 8 seconds (`GATHER_S`). Each supplier still has a 4 second budget. A chord with no live hit uses the musicmatter index already on disk, then indexed notes. If neither has that chord, Gather fails; it does not hang. It does not download the note libraries, does not measure pitch, and does not call the model. One-shot `POST /api/perform` is that Gather plus the raw assembly. Supplier indexes are cached on disk under `NC_CACHE/indexes`. Whole-chord files come first, including the inversion that matches a written bass. A slash bass that is not a tone of the chord still gets that chord. Indexed notes are stacked only for a chord that has no whole-chord file. A preview plays one clip the first time it is requested. The processed Gather (`processed` on the kit call, or `POST /api/perform-processed` when the flag is on) keeps the older 4 second origin and note budgets and can still search room tone.
 
 ### This release, BWV 846
@@ -82,6 +100,10 @@ Clocks on this machine. Queue wait and the R2 copy are not included, except the 
 
 | What | Seconds |
 |---|---|
+| Gather, 5 chords, disk index, no registry, 5 manifest downloads | 0.232 |
+| Same Gather after the registry is loaded, 0 downloads, hit rate 1.0 | 0.042 |
+| Loading the registry (10,334 rows, 5.5 MB) | 0.035 |
+| A rejected row, looked up and skipped | 0.001 |
 | First chord on the status list, 5 chords, warm musicmatter index | 0.85 |
 | That Gather, searches finished inside the 1 s settle | 0.85 |
 | MP3 encode for those 5 chords (files already local) | 1.36 |
@@ -170,8 +192,8 @@ Keep with a JSON `{claim_token}` body still keeps the original render. When the 
 | `GET /.well-known/nc-record-keys.json` | The public Ed25519 key, when a signing key is set. |
 | `POST /api/submit` | A kit record plus its audio. Checked, stored under a `k-` id, not re-rendered, not signed. |
 | `GET /api/feed` | Public Performances whose 24 hour wait has passed. |
-| `GET /api/config` | Site key, limits, whether a model key is configured. |
-| `GET /health` | Liveness. |
+| `GET /api/config` | Site key, limits, whether a model key is configured, and `registry` counts (`size`, `ok`, `rejected`). |
+| `GET /health` | Liveness, plus the same `registry` counts. |
 | `GET /` | The Perform page. |
 | `GET /admin` | Today's spend. Needs `Authorization: Bearer <NC_ADMIN_TOKEN>`. |
 | `POST /admin/enabled` | Body `{enabled: true\|false}`. |
