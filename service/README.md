@@ -38,6 +38,8 @@ A soft daily cap of $3 switches new jobs to the stub. A hard cap of $5 answers "
 
 Unlisted is the default. Unlisted audio is kept 90 days unless someone presses Keep. Public audio is kept, and it appears in the feed only after 24 hours. A takedown returns 410 and leaves a tombstone. The sealed copy of the record is under `sealed/<id>/`.
 
+Keep with a JSON `{claim_token}` body still keeps the original render. When the Live dials have moved, the create page sends multipart `claim_token`, `dials` (JSON), and `audio` (a WAV the browser rendered through the filter and delay). That file is stored as `kept.wav` next to the original. The signed record is not rewritten: `meta.json` carries `live_dials`, and the record page says the dials were applied after signing. The WAV must be PCM, 44.1 or 48 kHz, mono or stereo, 16- or 24-bit, no longer than the job length plus 30 seconds, and at most 40 MiB. The Worker stores the WAV only. This Python service also writes `kept.mp3` (192 kbps) when ffmpeg is available.
+
 ## API
 
 | Method and path | What it does |
@@ -45,8 +47,8 @@ Unlisted is the default. Unlisted audio is kept 90 days unless someone presses K
 | `POST /api/perform` | Start a Performance. Body: `title`, `composer`, `composition`, `performance`, optional `plan`, `visibility` (`unlisted` or `public`), `seed`, `perform_again`, `turnstile_token`, `keep`. Returns `202` with `id`, `claim_token` (once), and `record_url`. |
 | `GET /api/jobs/:id` | Status. `state` moves through queued, planning, fetching, measuring, rendering, reverb, mastering, verifying, storing, then done, failed, or rejected. |
 | `GET /api/jobs/:id/events` | The same status as a stream. |
-| `GET /api/jobs/:id/files/:name` | FLAC, MP3, record, plan, and the other stored files. Expired or taken-down audio is `410`. |
-| `POST /api/jobs/:id/keep` | Body `{claim_token}`. Keeps the audio. |
+| `GET /api/jobs/:id/files/:name` | FLAC, MP3, the dialed `kept.wav` (and `kept.mp3` when the mirror made one), record, plan, and the other stored files. Expired or taken-down audio is `410`. `flac` and `mp3` on the job stay the original render. |
+| `POST /api/jobs/:id/keep` | JSON `{claim_token}` keeps the original audio. Multipart `claim_token`, `dials`, and `audio` (WAV) stores the dialed file, sets `live_dials`, and answers `{ok, processed:true, dials, audio_url}`. The signed record is unchanged. |
 | `POST /api/jobs/:id/visibility` | Body `{claim_token, visibility}`. |
 | `GET /records/:id` | The HTML page. |
 | `GET /records/:id.json` | The record bytes. |
