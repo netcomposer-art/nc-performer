@@ -1,7 +1,9 @@
 """Fetch one planned sound and check its license on the live page or manifest.
 Which sounds to try is decided by ncperf.discover. This module does not rank suppliers.
-Downloads are cached by URL (and byte range)."""
-import hashlib, html as _html, json, os, re, socket, time, urllib.request
+Downloads are cached by URL (and byte range). Several note files may download at once;
+the cache write for one URL is single-threaded.
+"""
+import hashlib, html as _html, json, os, re, socket, threading, time, urllib.request
 from . import deadline
 from . import licenses as LIC
 from .util import sha256_file
@@ -46,35 +48,65 @@ def http(url, range_bytes=None, timeout=120, tries=3):
         time.sleep(2 * (k + 1))
 
 _text = {}
+_fetch_lock = threading.Lock()
+
 def text(url):
-    if url not in _text:
-        b, final = http(url); _text[url] = (b.decode('utf-8', 'replace'), final)
-    return _text[url]
+    with _fetch_lock:
+        hit = _text.get(url)
+    if hit is not None:
+        return hit
+    b, final = http(url)
+    row = (b.decode('utf-8', 'replace'), final)
+    with _fetch_lock:
+        return _text.setdefault(url, row)
 
 def download(url, range_bytes=None, ext=None):
     key = hashlib.sha1(f'{url}|{range_bytes}'.encode()).hexdigest()[:20]
     ext = ext or os.path.splitext(url.split('?')[0])[1] or '.bin'
     p = os.path.join(cache_dir(), key + ext.replace('%20', ''))
-    if not os.path.exists(p):
-        b, _ = http(url, range_bytes=range_bytes, timeout=600)
-        if range_bytes and len(b) > range_bytes: b = b[:range_bytes]
-        tmp = p + '.part'; open(tmp, 'wb').write(b); os.replace(tmp, p)
+    if os.path.exists(p):
+        return p
+    b, _ = http(url, range_bytes=range_bytes, timeout=600)
+    if range_bytes and len(b) > range_bytes: b = b[:range_bytes]
+    tmp = f'{p}.part.{threading.get_ident()}'
+    try:
+        with open(tmp, 'wb') as fh:
+            fh.write(b)
+        with _fetch_lock:
+            if not os.path.exists(p):
+                os.replace(tmp, p)
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
     return p
 
 # ---------------- registered Suppliers ----------------
 _reg = {}
 def registry():
-    if 'r' not in _reg: _reg['r'] = json.loads(text(REGISTRY)[0])
-    return _reg['r']
+    with _fetch_lock:
+        if 'r' in _reg:
+            return _reg['r']
+    doc = json.loads(text(REGISTRY)[0])
+    with _fetch_lock:
+        return _reg.setdefault('r', doc)
 
 _idx = {}
 def supplier_for_manifest(manifest_url):
     """Find the active registered Supplier whose index lists this manifest."""
     for s in registry().get('suppliers', []):
         if s.get('status') != 'active': continue
-        if s['index'] not in _idx: _idx[s['index']] = json.loads(text(s['index'])[0])
-        for o in _idx[s['index']].get('offerings', []):
-            if o.get('manifest') == manifest_url: return s, _idx[s['index']], o
+        index = s['index']
+        with _fetch_lock:
+            cached = _idx.get(index)
+        if cached is None:
+            cached = json.loads(text(index)[0])
+            with _fetch_lock:
+                cached = _idx.setdefault(index, cached)
+        for o in cached.get('offerings', []):
+            if o.get('manifest') == manifest_url: return s, cached, o
     return None, None, None
 
 def resolve(src):

@@ -371,9 +371,10 @@ class DiscoverTest(unittest.TestCase):
             spaced, seed=5, searchers=fns, verify_live=False, texture_budget_s=0.25,
         )
         elapsed = time.perf_counter() - started
-        self.assertLess(elapsed, 3)
+        # Five origins each stall for 0.25 s. Together that is one budget, not five.
+        self.assertLess(elapsed, 1.0)
         room = [terms for terms in calls if "room tone" in terms]
-        self.assertEqual(len(room), 1)
+        self.assertEqual(len(room), 5)
         self.assertEqual(validate(plan), [])
         self.assertIsNone(plan["source_mix"]["texture"])
 
@@ -392,6 +393,26 @@ class DiscoverTest(unittest.TestCase):
             COMP, seed=1, searchers=fns, verify_live=False, origin_budget_s=0.25,
         )
         self.assertLess(time.perf_counter() - started, 3)
+        self.assertEqual(validate(plan), [])
+        self.assertTrue(plan["layers"])
+
+    def test_stalled_origins_run_together(self):
+        from ncperf import deadline
+
+        def stall(*_args):
+            while True:
+                deadline.check()
+                time.sleep(0.01)
+
+        fns = _searchers({"musicmatter": _chords("musicmatter", "choir")})
+        for origin in ("freesound", "openverse", "internet_archive", "wikimedia", "ccmixter"):
+            fns[origin] = stall
+        started = time.perf_counter()
+        plan = discover.plan_for(
+            COMP, seed=1, searchers=fns, verify_live=False, origin_budget_s=0.4,
+        )
+        # Five stalled origins at 0.4 s would be 2 s one after another.
+        self.assertLess(time.perf_counter() - started, 1.2)
         self.assertEqual(validate(plan), [])
         self.assertTrue(plan["layers"])
 

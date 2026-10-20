@@ -4,8 +4,10 @@ Registered Suppliers (today, musicmatter.art) are one origin among the open
 commons: Freesound, Openverse, the Internet Archive, Wikimedia Commons,
 ccMixter, and the bundled UIowa MIS library. Each origin is queried with the
 same words. A failure in one origin is skipped. An origin that does not answer
-within 20 seconds is skipped too. A room-tone search runs only when the words
-ask for air or space, and that whole pass stops after 20 seconds.
+within 20 seconds is skipped too. The origins are asked together, so the
+wait is the slowest one of them, not the sum. A room-tone search runs only
+when the words ask for air or space. Each of those origins also has 20
+seconds, and a stall in one does not skip the rest.
 
 A chord strike has to be that chord. It is either a whole-chord file of that
 root and quality, or the chord built from single notes that were recorded at
@@ -19,21 +21,26 @@ license, and a page.
 """
 from __future__ import annotations
 
+import contextvars
 import html as html_lib
 import json
 import os
 import random
 import re
+import threading
 import urllib.parse
 import urllib.request
 import zlib
 from collections import Counter
 
+from . import cancel as job_cancel
 from . import chords as CH
 from . import deadline
+from . import fetch
 from . import interpret
 from . import licenses as LIC
 from . import notemap
+from .parallel import run_all, submit
 from . import pitch
 from . import progress
 from . import take
@@ -81,6 +88,7 @@ HINT_ALIASES = {
     "voice": ("choir", "chorus"),
 }
 _MM_CACHE: dict[str, dict] = {}
+_MM_LOCK = threading.Lock()
 # Words the notes tell us to leave out ("keep the piano out"). Set for one plan_for call.
 _EXCLUDE: set[str] = set()
 
@@ -206,8 +214,10 @@ def _instrument_label(blob: str, hint: str | None) -> str:
 
 def _mm_index(registry_url: str | None, host_ok_fn=None) -> list[dict]:
     url = registry_url or "https://netcomposer.art/suppliers.json"
-    if url in _MM_CACHE:
-        return _MM_CACHE[url]
+    with _MM_LOCK:
+        cached = _MM_CACHE.get(url)
+    if cached is not None:
+        return cached
     offerings = []
     try:
         reg = _json(url)
@@ -226,8 +236,8 @@ def _mm_index(registry_url: str | None, host_ok_fn=None) -> list[dict]:
     except Exception as exc:
         print(json.dumps({"event": "discover_origin", "origin": "musicmatter", "error": str(exc)[:200]}), flush=True)
         return []
-    _MM_CACHE[url] = offerings
-    return offerings
+    with _MM_LOCK:
+        return _MM_CACHE.setdefault(url, offerings)
 
 
 # A texture bed may be a pad or a field recording. A song, a cover, or a live
@@ -1045,6 +1055,25 @@ def assign_strikes(groups: list[list[dict]], seed: int, hint: str | None, mentio
     return chosen
 
 
+def _start_prefetch(src: dict):
+    """Download a chosen bed while planning continues. The renderer then finds it cached."""
+    ctx = contextvars.copy_context()
+    box: dict = {}
+
+    def run() -> None:
+        try:
+            ctx.run(fetch.resolve, dict(src))
+        except Exception as exc:
+            box["error"] = exc
+            print(json.dumps({"event": "prefetch", "error": str(exc)[:160]}), flush=True)
+        except BaseException as exc:
+            box["error"] = exc
+
+    thread = threading.Thread(target=run, name="nc-prefetch", daemon=True)
+    thread.start()
+    return thread, box
+
+
 def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_fn=None, searchers=None, registry_url=None, verify_live: bool = True, note_maps=None, progress_cb=None, origin_budget_s: float = 20, texture_budget_s: float = 20) -> dict:
     """Build a plan from an even-handed search. Raises ValueError if nothing usable came back."""
     comp_text = comp.get("composition") or ""
@@ -1096,57 +1125,80 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
             "license": hit.get("license"),
         })
 
+    def query_origin(fn, terms, hint_arg, origin_seed, budget_s):
+        try:
+            with deadline.limit(budget_s):
+                hits = fn(terms, hint_arg, syms, origin_seed, host_ok_fn, registry_url) or []
+        except deadline.SearchTimeout:
+            return [], "timed out"
+        except Exception as exc:
+            return [], str(exc)[:180]
+        return [h for h in hits if h], None
+
+    # Note files do not depend on which supplier answered. Start them before the
+    # searches so a cold library overlaps the supplier replies.
+    note_pool = None
+    note_future = None
+    if note_maps is None and verify_live:
+        note_pool, note_future = submit(notemap.ensure, syms)
+
     groups: dict[str, list] = {}
     errors = {}
-    for origin in order:
-        fn = fns.get(origin)
-        if not fn:
+    jobs = []
+    texture_terms = ["field recording", "room tone", "ambience"]
+    wants_bed = bool(take.phrase(words).get("bed"))
+    try:
+        for origin in order:
+            fn = fns.get(origin)
+            if not fn:
+                continue
+            tell(progress.finding_line(origin, query))
+            jobs.append((
+                "chord",
+                origin,
+                lambda fn=fn: query_origin(fn, query, hint, seed, origin_budget_s),
+            ))
+        # The bed is optional. Skip the room-tone pass unless the words asked for air or space.
+        # Each origin keeps its own budget. One stall does not skip the others.
+        if wants_bed:
+            for origin in order:
+                if origin in ("musicmatter", "uiowa"):
+                    continue
+                fn = fns.get(origin)
+                if not fn:
+                    continue
+                tell(progress.finding_line(origin, texture_terms, texture=True))
+                jobs.append((
+                    "texture",
+                    origin,
+                    lambda fn=fn: query_origin(fn, texture_terms, None, seed + 17, texture_budget_s),
+                ))
+        results = run_all([job for _kind, _origin, job in jobs], workers=max(1, len(jobs)))
+    except BaseException:
+        if note_pool is not None:
+            note_pool.shutdown(wait=True)
+        raise
+    for (kind, origin, _job), (hits, err) in zip(jobs, results):
+        if kind != "chord":
             continue
-        tell(progress.finding_line(origin, query))
-        try:
-            with deadline.limit(origin_budget_s):
-                hits = fn(query, hint, syms, seed, host_ok_fn, registry_url) or []
-        except deadline.SearchTimeout:
-            errors[origin] = "timed out"
-            hits = []
-        except Exception as exc:
-            errors[origin] = str(exc)[:180]
-            hits = []
-        hits = [h for h in hits if h]
+        if err:
+            errors[origin] = err
         hits.sort(key=lambda c: (-c["fit"], c["title"]))
         for hit in hits:
             groups.setdefault(hit.get("origin") or origin, []).append(hit)
             note_hit(hit, origin)
     seen = {hit["key"] for hits in groups.values() for hit in hits if hit.get("key")}
-    texture_terms = ["field recording", "room tone", "ambience"]
-    # The bed is optional. Skip the room-tone pass unless the words asked for air or space.
-    if take.phrase(words).get("bed"):
-        try:
-            with deadline.limit(texture_budget_s):
-                for origin in order:
-                    if origin in ("musicmatter", "uiowa"):
-                        continue
-                    fn = fns.get(origin)
-                    if not fn:
-                        continue
-                    tell(progress.finding_line(origin, texture_terms, texture=True))
-                    try:
-                        deadline.check()
-                        extra = fn(texture_terms, None, syms, seed + 17, host_ok_fn, registry_url) or []
-                    except deadline.SearchTimeout:
-                        errors[origin + ":texture"] = "timed out"
-                        break
-                    except Exception as exc:
-                        errors[origin + ":texture"] = str(exc)[:180]
-                        extra = []
-                    for hit in extra:
-                        if not hit or hit.get("key") in seen:
-                            continue
-                        seen.add(hit["key"])
-                        groups.setdefault(hit.get("origin") or origin, []).append(hit)
-                        note_hit(hit, origin)
-        except deadline.SearchTimeout:
-            errors["texture"] = "timed out"
+    for (kind, origin, _job), (hits, err) in zip(jobs, results):
+        if kind != "texture":
+            continue
+        if err:
+            errors[origin + ":texture"] = err
+        for hit in hits:
+            if not hit or hit.get("key") in seen:
+                continue
+            seen.add(hit["key"])
+            groups.setdefault(hit.get("origin") or origin, []).append(hit)
+            note_hit(hit, origin)
     for origin in ORIGINS:
         groups.setdefault(origin, [])
     print(json.dumps({
@@ -1199,6 +1251,36 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
         })
         return got
 
+    bed = None
+    prefetch_thread = None
+    prefetch_box: dict = {}
+    # The bed file is chosen from the search hits, before the note maps are
+    # joined, so its download overlaps the rest of planning.
+    if wants_bed:
+        textures = []
+        for cand in pool:
+            if cand.get("_blocked") or cand.get("_wrong_chord") or cand.get("chord_symbol"):
+                continue
+            if cand.get("origin") in ("musicmatter", "uiowa") or cand.get("pitched"):
+                continue
+            kind = (cand.get("source") or {}).get("kind")
+            if _texture_ok(cand) or (verify_live and kind == "freesound"):
+                textures.append(cand)
+        random.Random(seed + 29).shuffle(textures)
+        for cand in textures:
+            got = accept(cand, None, None)
+            if not got:
+                continue
+            got["instrument"] = _instrument_label(got.get("text") or got.get("title") or "", None)
+            if _declared_chord(got.get("title") or "", syms):
+                continue
+            if not _texture_ok(got):
+                continue
+            bed = got
+            break
+        if bed and verify_live and (bed.get("source") or {}).get("kind"):
+            prefetch_thread, prefetch_box = _start_prefetch(bed["source"])
+
     sources = {}
     events = []
     banks: dict = {}
@@ -1237,11 +1319,14 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
         return sid
 
     tell(progress.NOTE_LINE)
-    if note_maps is None and verify_live:
+    if note_future is not None:
         try:
-            note_maps, library_meta = notemap.ensure(syms)
+            note_maps, library_meta = note_future.result()
         except Exception as exc:
             note_maps, library_meta = [], {"skipped": [], "error": str(exc)[:180]}
+        finally:
+            if note_pool is not None:
+                note_pool.shutdown(wait=True)
     else:
         library_meta = {}
         if note_maps is None:
@@ -1819,29 +1904,6 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
                 "notes_by_chord": {str(surprise_i): [high_midi]},
             })
 
-    bed = None
-    if kn["bed"]:
-        textures = []
-        for cand in pool:
-            if cand.get("_blocked") or cand.get("_wrong_chord") or cand.get("chord_symbol"):
-                continue
-            if cand.get("origin") in ("musicmatter", "uiowa") or cand.get("pitched"):
-                continue
-            kind = (cand.get("source") or {}).get("kind")
-            if _texture_ok(cand) or (verify_live and kind == "freesound"):
-                textures.append(cand)
-        random.Random(seed + 29).shuffle(textures)
-        for cand in textures:
-            got = accept(cand, None, None)
-            if not got:
-                continue
-            got["instrument"] = _instrument_label(got.get("text") or got.get("title") or "", None)
-            if _declared_chord(got.get("title") or "", syms):
-                continue
-            if not _texture_ok(got):
-                continue
-            bed = got
-            break
     bed_note = "Texture: none. The words did not ask for air or space." if not kn["bed"] else "Texture: none. No unpitched field recording, room tone, or pad passed the rights check."
     if bed:
         sid = sid_for(bed, "bed")
@@ -2022,4 +2084,9 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
     if slice_note:
         plan["trimmed"] = slice_note
     fit_plan(plan)
+    if prefetch_thread is not None:
+        prefetch_thread.join()
+        err = prefetch_box.get("error")
+        if isinstance(err, job_cancel.Cancelled):
+            raise err
     return plan

@@ -47,7 +47,7 @@ AI planning runs only when the words ask for a line, triplets, or sections. Set 
 
 `POST /api/jobs/:id/cancel` with the job's `claim_token` (or the same secret as `keep_token`) stops a queued or running Perform. The container is destroyed, the queue slot is freed, and files under that id are removed. The status becomes `cancelled` with `error` and `stage_line` `Stopped.`. Calling it again is the same. A job that is already `done`, `failed`, or `rejected` is not changed and its files stay.
 
-A room-tone search runs only when the words ask for air or space, and that pass stops after 20 seconds. Each other source search stops after 20 seconds and is skipped. One recorded-note file is given 20 seconds; the rest of the library is still checked. While that check runs the line is `Checking recorded notes…`.
+A room-tone search runs only when the words ask for air or space. Each supplier search, including each room-tone search, stops after 20 seconds and is skipped. Those searches run together, so one slow supplier does not hold up the others, and a room-tone stall does not skip the remaining origins. Recorded-note files are fetched together. One file is given 20 seconds; the rest of the library is still checked. While that check runs the line is `Checking recorded notes…`.
 
 The signed record still carries `performance.timeline` and `sounds_used[].spans` as kit 0.2.0 writes them.
 
