@@ -1,6 +1,7 @@
-"""Assembly plan v1: Gather publishes clips, Keep renders the page's plan."""
+"""Assembly plan v1: Gather publishes clips, Save stores the page's audio."""
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import os
@@ -94,6 +95,29 @@ def _post(url, body, headers=None):
     if headers:
         head.update(headers)
     req = urllib.request.Request(url, json.dumps(body).encode(), head)
+    try:
+        with urllib.request.urlopen(req, timeout=60) as response:
+            return response.status, json.loads(response.read()), response.headers
+    except urllib.error.HTTPError as exc:
+        return exc.code, json.loads(exc.read()), exc.headers
+
+
+def _form(fields):
+    boundary = "----nc-take"
+    chunks = []
+    for name, value, filename in fields:
+        head = f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"'
+        if filename:
+            head += f'; filename="{filename}"'
+        blob = value if isinstance(value, bytes) else value.encode()
+        chunks.append(head.encode() + b"\r\n\r\n" + blob + b"\r\n")
+    chunks.append(f"--{boundary}--\r\n".encode())
+    return b"".join(chunks), f"multipart/form-data; boundary={boundary}"
+
+
+def _post_form(url, fields):
+    body, ctype = _form(fields)
+    req = urllib.request.Request(url, body, {"Content-Type": ctype})
     try:
         with urllib.request.urlopen(req, timeout=60) as response:
             return response.status, json.loads(response.read()), response.headers
@@ -230,11 +254,40 @@ class AssemblyPlanTest(unittest.TestCase):
         off["entries"][1]["len_s"] = 0.4
         self.assertTrue(any("written lengths" in item for item in assembly.validate(off, self.doc)))
 
-    def test_keep_renders_the_plan_and_signs_the_record(self):
+    def test_upload_must_match_the_plan_and_be_audible(self):
+        audio = _tone(seconds=1.6, amp=0.2)
+        info = assembly.inspect_upload(audio, 1.6)
+        self.assertEqual(info["format"], "wav")
+        self.assertEqual(info["upload_sha256"], hashlib.sha256(audio).hexdigest())
+        with self.assertRaises(ValueError) as silent:
+            assembly.inspect_upload(_tone(seconds=1.6, amp=0.0), 1.6)
+        self.assertIn("silent", str(silent.exception))
+        with self.assertRaises(ValueError) as foreign:
+            assembly.inspect_upload(b"not audio", 1.6)
+        self.assertIn("WAV or FLAC", str(foreign.exception))
+        buf = io.BytesIO()
+        n = int(1.6 * 48000)
+        y = (0.2 * np.sin(2 * np.pi * 220 * np.linspace(0, 1.6, n, endpoint=False))).astype(np.float32)
+        sf.write(buf, np.column_stack([y, y]), 48000, format="FLAC")
+        flac = buf.getvalue()
+        packed = assembly.inspect_upload(flac, 1.6)
+        self.assertEqual(packed["format"], "flac")
+        bad = assembly.parse_take_state({"plan": self._good()}, GATHER)
+        self.assertEqual(bad["processing"]["chain"], [])
+        with self.assertRaises(ValueError):
+            assembly.parse_take_state({"plan": self._good(), "processing": {"chain": [";;;"]}}, GATHER)
+
+    def test_save_stores_the_upload_and_signs_the_record(self):
         from nc_perform.storage import FileStorage
         storage = FileStorage(os.path.join(self.tmp, "files"))
         gather.save_collection(storage, GATHER, self.doc, self.files)
         kept = self._good(length=0.4)
+        take = {
+            "nc_take_version": "1",
+            "plan": kept,
+            "processing": {"chain": ["filter", "dials"], "params": {"cutoff_hz": 800, "wet": 0.2}},
+        }
+        audio = _tone(seconds=1.6, amp=0.2)
         settings = _settings(self.tmp, suppliers="http://127.0.0.1/suppliers.json", llm_base="", llm_model="")
         settings.public_base_url = "https://perform.example"
         app, httpd = _api(settings)
@@ -242,28 +295,48 @@ class AssemblyPlanTest(unittest.TestCase):
         app.storage = storage
         app.runner.storage = storage
         origin = f"http://127.0.0.1:{httpd.server_address[1]}"
-        code, denied, _headers = _post(origin + "/api/keep-take", {"gather_id": GATHER, "plan": kept})
+        code, denied, _headers = _post_form(origin + "/api/keep-take", [
+            ("gather_id", GATHER, None),
+            ("take_state", json.dumps(take), None),
+            ("audio", audio, "take.wav"),
+        ])
         self.assertEqual(code, 400, denied)
         self.assertEqual(denied["error"], "claim_token is required.")
-        code, body, _headers = _post(origin + "/api/keep-take", {
-            "gather_id": GATHER,
-            "claim_token": "gather-secret",
-            "plan": kept,
-            "title": "Kept two",
-            "listed": False,
-        })
+        short = _tone(seconds=0.2, amp=0.2)
+        code, mismatch, _headers = _post_form(origin + "/api/keep-take", [
+            ("gather_id", GATHER, None),
+            ("claim_token", "gather-secret", None),
+            ("take_state", json.dumps(take), None),
+            ("audio", short, "take.wav"),
+        ])
+        self.assertEqual(code, 400, mismatch)
+        self.assertIn("plan is", mismatch["error"])
+        code, body, _headers = _post_form(origin + "/api/keep-take", [
+            ("gather_id", GATHER, None),
+            ("claim_token", "gather-secret", None),
+            ("take_state", json.dumps(take), None),
+            ("title", "Kept two", None),
+            ("listed", "false", None),
+            ("audio", audio, "take.wav"),
+        ])
         self.assertEqual(code, 200, body)
         self.assertTrue(body["record_url"].endswith(f"/records/{body['id']}.json"))
         self.assertTrue(body["page_url"].endswith(f"/records/{body['id']}"))
         rec = json.loads(storage.get(f"performances/{body['id']}/record.json"))
         self.assertEqual(rec["assembly_plan"]["seed"], 9)
-        self.assertEqual(rec["assembly_plan"]["entries"][0]["clip_id"], "c0")
+        self.assertEqual(rec["take_state"]["processing"]["chain"], ["filter", "dials"])
+        self.assertEqual(rec["performance"]["take_audio"]["upload_sha256"], hashlib.sha256(audio).hexdigest())
+        self.assertEqual(rec["performance"]["take_audio"]["source"], "browser")
+        self.assertEqual(rec["hacks_chain"][1]["tool"], "browser-processing")
         self.assertTrue(rec["performance"]["timeline"])
         self.assertGreaterEqual(len(rec["sounds_used"]), 2)
         self.assertTrue(rec["sounds_used"][0]["credit_line"])
         self.assertIn("signature", rec)
         self.assertTrue(storage.get(f"performances/{body['id']}/preview.mp3"))
-        self.assertTrue(storage.get(f"performances/{body['id']}/performance.flac"))
+        flac = storage.get(f"performances/{body['id']}/performance.flac")
+        self.assertTrue(flac)
+        self.assertNotEqual(hashlib.sha256(flac).hexdigest(), hashlib.sha256(audio).hexdigest())
+        self.assertIsNone(storage.get(f"jobs/{body['id']}/take-audio"))
         code, plain, _headers = _post(origin + "/api/perform", {
             "title": "Still one shot",
             "composition": "1 min. Cm.",

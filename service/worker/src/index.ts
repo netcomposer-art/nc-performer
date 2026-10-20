@@ -24,6 +24,10 @@ import {
   KEPT_TAIL_S,
   KEPT_WAV,
   KEPT_WAV_MAX_BYTES,
+  TAKE_AUDIO_MAX_BYTES,
+  TAKE_REQUEST_MAX_BYTES,
+  takeAudioKind,
+  takeTooLargeMessage,
   KeepReject,
   dialsLine,
   inspectWav,
@@ -749,43 +753,102 @@ async function keepTake(request: Request, env: Env, base: string): Promise<Respo
   const spend = await b.spendToday();
   const on = await b.enabled(env.PERFORM_ENABLED !== "0");
   if (!on || spend >= 5) return json({ error: "Perform is resting until tomorrow.", code: "resting" }, 503);
-  const body = (await readJson(request)) as Record<string, unknown>;
+  const ctype = request.headers.get("content-type") || "";
+  if (!ctype.toLowerCase().includes("multipart/form-data")) {
+    return json({ error: "Save the take as multipart/form-data.", code: "rejected" }, 400);
+  }
+  const len = Number(request.headers.get("content-length") || 0);
+  if (len > TAKE_REQUEST_MAX_BYTES) return json({ error: `Request is too large (${len} bytes).`, code: "rejected" }, 400);
+  const raw = new Uint8Array(await request.arrayBuffer());
+  if (raw.byteLength > TAKE_REQUEST_MAX_BYTES) return json({ error: `Request is too large (${raw.byteLength} bytes).`, code: "rejected" }, 400);
+  let parts: Record<string, Uint8Array>;
+  try {
+    parts = parseMultipart(raw, ctype);
+  } catch (err) {
+    if (err instanceof KeepReject) return json({ error: err.message, code: "rejected" }, 400);
+    throw err;
+  }
+  const text = (name: string): string | null => {
+    const blob = parts[name];
+    if (!blob) return null;
+    try {
+      return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(blob);
+    } catch {
+      throw new KeepReject(`${name} must be text.`);
+    }
+  };
+  let fields: { gather_id: string; claim_token: string; turnstile_token: string; title: string | null; listed: string | null; takeState: unknown; audio: Uint8Array };
+  try {
+    const stateBytes = parts.take_state;
+    if (!stateBytes || stateBytes.byteLength < 2) return json({ error: "take_state is required.", code: "rejected" }, 400);
+    if (stateBytes.byteLength > 64 * 1024) return json({ error: "take_state is too large.", code: "rejected" }, 400);
+    let takeState: unknown;
+    try {
+      takeState = JSON.parse(text("take_state") || "");
+    } catch (err) {
+      if (err instanceof KeepReject) throw err;
+      return json({ error: "take_state must be JSON.", code: "rejected" }, 400);
+    }
+    const plan = (takeState as { plan?: unknown } | null)?.plan;
+    if (!takeState || typeof takeState !== "object" || Array.isArray(takeState) || !plan || typeof plan !== "object" || Array.isArray(plan)) {
+      return json({ error: "take_state.plan is the assembly plan.", code: "rejected" }, 400);
+    }
+    const audio = parts.audio;
+    if (!audio || audio.byteLength < 1) return json({ error: "Attach the take as the form field 'audio'.", code: "rejected" }, 400);
+    if (audio.byteLength > TAKE_AUDIO_MAX_BYTES) return json({ error: takeTooLargeMessage(audio.byteLength), code: "rejected" }, 400);
+    if (!takeAudioKind(audio)) return json({ error: "audio must be WAV or FLAC.", code: "rejected" }, 400);
+    fields = {
+      gather_id: (text("gather_id") || "").trim(),
+      claim_token: (text("claim_token") || "").trim(),
+      turnstile_token: text("turnstile_token") || "",
+      title: text("title"),
+      listed: text("listed"),
+      takeState,
+      audio,
+    };
+  } catch (err) {
+    if (err instanceof KeepReject) return json({ error: err.message, code: "rejected" }, 400);
+    throw err;
+  }
   const ip = clientIp(request);
-  if (env.TURNSTILE_SECRET_KEY && !(await turnstile(env, body.turnstile_token, ip))) {
+  if (env.TURNSTILE_SECRET_KEY && !(await turnstile(env, fields.turnstile_token, ip))) {
     return json({ error: "The bot check failed. Reload the page and try again.", code: "turnstile" }, 403);
   }
-  const kept = await keptGather(env, body);
+  const kept = await keptGather(env, fields);
   if (kept instanceof Response) return kept;
   if (!kept) return json({ error: "gather_id is required.", code: "rejected" }, 400);
-  if (!body.plan || typeof body.plan !== "object" || Array.isArray(body.plan)) {
-    return json({ error: "plan must be a JSON object.", code: "rejected" }, 400);
-  }
-  const planText = JSON.stringify(body.plan);
-  if (planText.length > 64 * 1024) return json({ error: "The assembly plan is too large.", code: "rejected" }, 400);
   let title: string | null = null;
-  if (typeof body.title === "string" && body.title.trim()) {
-    title = body.title.trim();
+  if (fields.title && fields.title.trim()) {
+    title = fields.title.trim();
     if (title.length > 200) return json({ error: "title must be a short name.", code: "rejected" }, 400);
   }
-  if ("listed" in body && typeof body.listed !== "boolean") {
-    return json({ error: "listed must be true or false.", code: "rejected" }, 400);
+  let listed = false;
+  if (fields.listed != null && fields.listed.trim()) {
+    const flag = fields.listed.trim().toLowerCase();
+    if (flag !== "true" && flag !== "false") return json({ error: "listed must be true or false.", code: "rejected" }, 400);
+    listed = flag === "true";
   }
   const ipHash = await sha256Text(`${env.NC_IP_HASH_SALT || "nc-perform"}:${ip}`);
   const tester = await testerPass(request.headers.get("X-NC-Tester"), env.NC_TESTER_TOKEN);
   const limited = await rateLimit(env, ipHash, tester);
   if (limited) return rateJson(limited);
   const randomSeed = () => crypto.getRandomValues(new Uint32Array(1))[0] % 2147483646 || 1;
-  const planSeed = Number((body.plan as { seed?: number }).seed);
+  const planSeed = Number((fields.takeState as { plan?: { seed?: number } }).plan?.seed);
   const seed = Number.isFinite(planSeed) && planSeed >= 1 ? Math.trunc(planSeed) : randomSeed();
   const token = claimToken();
   const id = newId("h");
   const created = isoNow();
+  const kind = takeAudioKind(fields.audio) || "wav";
+  await env.PERFORMANCES.put(`jobs/${id}/take-audio`, fields.audio, {
+    httpMetadata: { contentType: kind === "flac" ? "audio/flac" : "audio/wav" },
+  });
   const req = {
     kind: "keep-take",
     composition: kept.composition,
     gather_id: kept.gather_id,
-    assembly_plan: body.plan,
-    visibility: body.listed === true ? "public" : "unlisted",
+    take_state: fields.takeState,
+    upload_key: `jobs/${id}/take-audio`,
+    visibility: listed ? "public" : "unlisted",
     seed,
     keep: true,
     title,
@@ -871,6 +934,7 @@ async function runContainer(env: Env, id: string): Promise<void> {
   }
   if (requested.kind === "keep-take" && requested.gather_id) {
     await seedKeepGather(env, container, id, requested.gather_id, headers);
+    await seedTakeAudio(env, container, id, headers);
   } else if (requested.gather_id && requested.kind !== "gather") {
     await seedGatherCache(env, container, id, requested.gather_id, headers);
   }
@@ -988,6 +1052,7 @@ async function runContainer(env: Env, id: string): Promise<void> {
         return;
       }
       await confirmStored(env, id);
+      if (requested.kind === "keep-take") await env.PERFORMANCES.delete(`jobs/${id}/take-audio`);
     }
   } else if (last.state !== "failed" && last.state !== "rejected") {
     throw new Error("container did not finish within 10 minutes");
@@ -995,6 +1060,9 @@ async function runContainer(env: Env, id: string): Promise<void> {
   if (await abandonIfCancelled(env, id)) {
     await signalContainerCancel(env, id);
     return;
+  }
+  if (requested.kind === "keep-take" && last.state !== "done") {
+    await env.PERFORMANCES.delete(`jobs/${id}/take-audio`);
   }
   const cost = Number(last.cost_usd || 0);
   const shown = pageError(last.error);
@@ -1247,6 +1315,23 @@ async function copyGather(env: Env, container: DurableObjectStub<RenderContainer
     { httpMetadata: { contentType: "application/json" } },
   );
   return doc;
+}
+
+async function seedTakeAudio(env: Env, container: DurableObjectStub<RenderContainer>, id: string, headers: Record<string, string>): Promise<void> {
+  const obj = await env.PERFORMANCES.get(`jobs/${id}/take-audio`);
+  if (!obj) throw new Error("take audio was not stored");
+  const seeded = await containerFetch(container, id, "http://container/internal/take-audio", {
+    method: "POST",
+    headers: {
+      ...headers,
+      "content-type": obj.httpMetadata?.contentType || "application/octet-stream",
+      "x-take-job": id,
+    },
+    body: await obj.arrayBuffer(),
+  });
+  if (!seeded.ok && seeded.status !== 204) {
+    throw new Error(`could not copy the take (${seeded.status})`);
+  }
 }
 
 async function seedKeepGather(env: Env, container: DurableObjectStub<RenderContainer>, performId: string, gatherId: string, headers: Record<string, string>): Promise<void> {

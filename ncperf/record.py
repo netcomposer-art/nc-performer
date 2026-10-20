@@ -18,6 +18,8 @@ def rhash(r): return hashlib.sha256(canon({k: v for k, v in r.items() if k not i
 def interpreter_label(it):
     if not it: return 'human/agent-written plan'
     if it.get('kind') == 'llm': return it.get('model') or 'llm (model not named)'
+    if it.get('kind') == 'browser':
+        return 'browser assembly (the page placed the clips and processed them; the server stored that audio)'
     if it.get('kind') == 'discover' and str(it.get('note') or '').startswith('raw'):
         return 'raw assembly (one clip per chord, no processing)'
     if it.get('kind') == 'discover': return 'even-handed source discovery (no supplier preferred)'

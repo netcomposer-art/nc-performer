@@ -4,6 +4,10 @@ import {
   AFTER_SIGNING,
   KEPT_TAIL_S,
   KEPT_WAV_MAX_BYTES,
+  TAKE_AUDIO_MAX_BYTES,
+  TAKE_REQUEST_MAX_BYTES,
+  takeAudioKind,
+  takeTooLargeMessage,
   KeepReject,
   dialsLine,
   inspectWav,
@@ -126,6 +130,17 @@ test("dials match the create page, and the multipart WAV is not trimmed", () => 
   assert.equal(pub?.files.kept_mp3, undefined);
   assert.equal(pub?.kept_note, AFTER_SIGNING);
   assert.equal(keptFiles(null, "https://netcomposer.art", "h-1"), null);
+});
+
+test("a saved take is wav or flac and at most 40 MiB", () => {
+  assert.equal(TAKE_AUDIO_MAX_BYTES, 40 * 1024 * 1024);
+  assert.equal(TAKE_REQUEST_MAX_BYTES, TAKE_AUDIO_MAX_BYTES + 64 * 1024 + 16 * 1024);
+  assert.equal(takeAudioKind(new Uint8Array([0x66, 0x4c, 0x61, 0x43, 0, 0, 0, 0])), "flac");
+  const wav = new Uint8Array(12);
+  wav.set([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x41, 0x56, 0x45]);
+  assert.equal(takeAudioKind(wav), "wav");
+  assert.equal(takeAudioKind(new Uint8Array([0xff, 0xfb, 0x90, 0x00])), null);
+  assert.match(takeTooLargeMessage(50 * 1024 * 1024), /40 MiB/);
 });
 
 function ascii(text: string): Uint8Array {

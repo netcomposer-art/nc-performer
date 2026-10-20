@@ -14,6 +14,7 @@ import json
 import os
 import resource
 import shutil
+import subprocess
 import tempfile
 import threading
 import time
@@ -456,7 +457,7 @@ class Runner:
             self._settle_cancelled(job_id)
 
     def _keep_job(self, job: dict, stage_t: dict) -> None:
-        """Validate an assembly plan and render that plan. The page already played it."""
+        """Check the page's plan, store its audio, and sign that take."""
         settings = self.settings
         job_id = job["id"]
         req = job["request"]
@@ -466,30 +467,43 @@ class Runner:
         doc = load_collection(self.storage, gather_id)
         if not doc or not isinstance(doc.get("plan"), dict):
             raise Reject("That Gather is not ready.", "rejected")
-        kept = req.get("assembly_plan")
+        try:
+            take_state = assembly.parse_take_state(req.get("take_state"), gather_id)
+        except ValueError as exc:
+            raise Reject(str(exc), "rejected") from exc
+        kept = take_state["plan"]
         errors = assembly.validate(kept, doc, max_length_s=settings.max_length_s)
         if errors:
             raise Reject(errors[0], "rejected")
+        upload = self.storage.get(req.get("upload_key") or f"jobs/{job_id}/take-audio")
+        if not upload:
+            raise Reject("The take audio was not stored.", "rejected")
+        try:
+            info = assembly.inspect_upload(upload, float(kept.get("total_s") or 0))
+        except ValueError as exc:
+            raise Reject(str(exc), "rejected") from exc
         title = req.get("title")
         if isinstance(title, str):
             title = title.strip() or None
         plan = assembly.plan_for_record(doc["plan"], kept, title=title)
+        plan["interpreter"] = {"kind": "browser", "note": "browser assembly"}
         comp = dict(doc.get("composition") or {})
         if title:
             comp["title"] = title
         seed = int(plan.get("seed") or 1)
         self._progress(job_id, seed=seed, trimmed=None, sounds=doc.get("sounds") or [])
-        out = self._render_kept(job_id, plan, kept, gather_id, comp, stage_t, mark)
+        out = self._store_uploaded(job_id, plan, take_state, upload, info, gather_id, comp, stage_t, mark)
         self._stage(job_id, "storing", stage_t, mark)
         self._store_outputs(job_id, out, req, "raw", {})
         self._read_back(job_id)
+        self.storage.delete(f"jobs/{job_id}/take-audio")
         self._guard(job_id)
         self._stage(job_id, "done", stage_t, mark)
         done = self._snapshot(job_id)
         done.update({
             "record_url": f"{settings.public_base_url}/records/{job_id}.json",
             "page_url": f"{settings.public_base_url}/records/{job_id}",
-            "interpreter": "raw",
+            "interpreter": "browser",
             "seed": seed,
             "stage_line": STAGE_LINES["done"],
             "gather_id": gather_id,
@@ -498,7 +512,8 @@ class Runner:
         if not self.store.mark_done(job_id, result=done):
             self._settle_cancelled(job_id)
 
-    def _render_kept(self, job_id, plan, assembly_plan, gather_id, comp, stage_t, mark) -> dict:
+    def _store_uploaded(self, job_id, plan, take_state, upload, info, gather_id, comp, stage_t, mark) -> dict:
+        """Confirm the raw plan, then store the browser's file as the take."""
         settings = self.settings
         work = tempfile.mkdtemp(prefix="nc-keep-")
         try:
@@ -512,27 +527,40 @@ class Runner:
                 self._stage(job_id, "rendering", stage_t, mark)
 
             self._stage(job_id, "rendering", stage_t, mark)
-            flac, mp3, _rlog = assembly.render_take(
-                self.storage, gather_id, plan, assembly_plan, work, log=log,
-            )
-            preview = os.path.join(work, "preview.mp3")
-            os.replace(mp3, preview)
+            try:
+                assembly.render_take(
+                    self.storage, gather_id, plan, take_state["plan"], work, log=log, encode=False,
+                )
+            except RuntimeError as exc:
+                raise Reject(str(exc), "rejected") from exc
+            try:
+                master, preview = assembly.write_take_files(upload, work)
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError, RuntimeError) as exc:
+                raise Reject("The take could not be stored.", "rejected") from exc
             with open(preview, "rb") as fh:
                 self._publish_preview(job_id, fh.read())
-            master = os.path.join(work, "performance.flac")
-            if flac != master:
-                os.replace(flac, master)
             record_url = f"{settings.public_base_url}/records/{job_id}.json"
             _tag(master, preview, plan.get("title") or comp.get("title") or "Performance",
                  comp.get("composer") or "anonymous", record_url)
             self._stage(job_id, "verifying", stage_t, mark)
             rec_path = os.path.join(work, "record.json")
-            # uses.json is written by render_take. record.build reads that log.
             rlog = json.load(open(os.path.join(work, "uses.json"), encoding="utf-8"))
             record.build(plan, plan_path, rlog, master, preview, rec_path,
                          performer=settings.instance_name, composition_path=comp_path)
             rec = json.load(open(rec_path, encoding="utf-8"))
+            assembly.finish_browser_record(rec, take_state, info, master)
             apply_signature(rec, self.signer, settings.instance_name)
+            note = rec.get("signature") or {}
+            if note.get("status") == "SIGNED":
+                note["note"] = (
+                    "Signature covers record_hash (hex, UTF-8). The audio is the browser's take. "
+                    "This instance checked the plan and stored that file."
+                )
+            elif note.get("status") == "UNSIGNED":
+                note["note"] = (
+                    "This instance has no NC_SIGNING_KEY. The record_hash still identifies the bytes. "
+                    "The audio is the browser's take."
+                )
             json.dump(rec, open(rec_path, "w", encoding="utf-8"), indent=1, ensure_ascii=False)
             ok, lines = record.verify(rec_path, audio_dir=work)
             if not ok:

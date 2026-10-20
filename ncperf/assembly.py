@@ -1,9 +1,11 @@
-"""Assembly plan v1: the page places the clips, and Keep renders that plan.
+"""Assembly plan v1: the page places the clips, processes them, and uploads the take.
 
 Gather publishes one playable file per chord, the level-match gain, and the
-written clock when the Composition has one. The page builds an assembly plan.
-``POST /api/keep-take`` checks that plan and renders it. Nothing in the plan
-is time-stretched or pitch-shifted.
+written clock when the Composition has one. The page caches those bytes,
+builds an assembly plan, and runs filtering, modulation, and dials itself.
+``POST /api/keep-take`` checks that plan, checks the uploaded WAV or FLAC, and
+signs that file. It rebuilds the unprocessed plan only to confirm the clips.
+That mix is not the take. Nothing in the plan is time-stretched or pitch-shifted.
 
 The organic durations are ``ncperf.take.chord_slots``. This module does not
 keep a second clock. ``reference_vectors`` is the lock for a page that ports
@@ -37,6 +39,15 @@ WRITTEN_TOLERANCE_S = 0.02
 # len_s may exceed the published duration by this much, and no further.
 STRETCH_TOLERANCE_S = 0.001
 MAX_TOTAL_S = 180.0
+# Codec framing and a short browser tail. The page puts a longer tail into total_s.
+DURATION_TOLERANCE_S = 0.5
+# 0.001 is about -60 dBFS. 1.02 allows a full-scale file and rejects a hot float.
+PEAK_FLOOR = 1e-3
+PEAK_CEILING = 1.02
+LOUDNESS_MIN_LUFS = -45.0
+LOUDNESS_MAX_LUFS = -5.0
+# 40 MiB. Stereo 16-bit PCM at 48 kHz for 180 s is about 34.6 MB and fits.
+TAKE_AUDIO_MAX = 40 * 1024 * 1024
 CACHE_CONTROL = "public, max-age=31536000, immutable"
 _ORIGIN = re.compile(r"^https://([a-z0-9-]+\.)*netcomposer\.art$", re.I)
 _SUPPLIERS = ("musicmatter", "freesound", "uiowa", "uiowa_mis", "philharmonia")
@@ -337,8 +348,13 @@ def plan_for_record(raw: dict, assembly: dict, title: str | None = None) -> dict
     return plan
 
 
-def render_take(storage, gather_id: str, plan: dict, assembly: dict, out_dir: str, name: str = "performance", log=print):
-    """Render the assembly plan from the gathered clip bytes. No stretch, no pitch-shift."""
+def render_take(storage, gather_id: str, plan: dict, assembly: dict, out_dir: str, name: str = "performance", log=print, encode: bool = True):
+    """Render the assembly plan from the gathered clip bytes. No stretch, no pitch-shift.
+
+    ``encode=False`` rebuilds the mix only to confirm every clip is present and
+    no entry is longer than its source. The mix is not written. Save stores the
+    browser upload instead.
+    """
     from . import util
 
     os.makedirs(out_dir, exist_ok=True)
@@ -395,13 +411,6 @@ def render_take(storage, gather_id: str, plan: dict, assembly: dict, out_dir: st
             })
         log(f"  placed {cid} at {at_s}s for {entry.get('len_s')}s")
     guarded, before = assemble._peak_guard(mix, assemble.PEAK)
-    flac = os.path.join(out_dir, name + ".flac")
-    mp3 = os.path.join(out_dir, name + ".mp3")
-    sf.write(flac, guarded, SR, subtype="PCM_24")
-    subprocess.run(
-        ["ffmpeg", "-y", "-v", "error", "-i", flac, "-ar", "48000", "-c:a", "libmp3lame", "-b:a", "320k", mp3],
-        check=True,
-    )
     body = {
         "seed": assembly.get("seed"),
         "uses": uses,
@@ -426,7 +435,238 @@ def render_take(storage, gather_id: str, plan: dict, assembly: dict, out_dir: st
     }
     with open(os.path.join(out_dir, "uses.json"), "w", encoding="utf-8") as fh:
         json.dump(body, fh, indent=1, default=float)
+    if not encode:
+        return None, None, body
+    flac = os.path.join(out_dir, name + ".flac")
+    mp3 = os.path.join(out_dir, name + ".mp3")
+    sf.write(flac, guarded, SR, subtype="PCM_24")
+    subprocess.run(
+        ["ffmpeg", "-y", "-v", "error", "-i", flac, "-ar", "48000", "-c:a", "libmp3lame", "-b:a", "320k", mp3],
+        check=True,
+    )
     return flac, mp3, body
+
+
+def parse_take_state(raw, gather_id: str) -> dict:
+    """The page's plan plus the processing it applied. Raises ValueError when the shape is wrong.
+
+    ``plan`` is assembly plan v1. ``processing`` may be omitted. The chain is
+    the effect names in the order the page ran them. ``params`` is whatever
+    JSON the page used. This function does not re-run those effects.
+    """
+    if not isinstance(raw, dict):
+        raise ValueError("take_state must be a JSON object.")
+    version = raw.get("nc_take_version", VERSION)
+    if str(version) != VERSION:
+        raise ValueError("This server reads take_state v1.")
+    plan = raw.get("plan")
+    if not isinstance(plan, dict):
+        raise ValueError("take_state.plan is the assembly plan.")
+    if plan.get("gather_id") != gather_id:
+        raise ValueError("gather_id does not match this Gather.")
+    processing = raw.get("processing", {})
+    if processing is None:
+        processing = {}
+    if not isinstance(processing, dict):
+        raise ValueError("processing must be a JSON object.")
+    chain = processing.get("chain", [])
+    if chain is None:
+        chain = []
+    if not isinstance(chain, list) or len(chain) > 32:
+        raise ValueError("processing.chain must be a list of short names.")
+    names = []
+    for item in chain:
+        if not isinstance(item, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 _./:+-]{0,63}", item.strip()):
+            raise ValueError("processing.chain must be a list of short names.")
+        names.append(item.strip())
+    params = processing.get("params", {})
+    if params is None:
+        params = {}
+    if not isinstance(params, dict):
+        raise ValueError("processing.params must be a JSON object.")
+    try:
+        params = json.loads(json.dumps(params))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("processing.params must be a JSON object.") from exc
+    return {
+        "nc_take_version": VERSION,
+        "plan": plan,
+        "processing": {"chain": names, "params": params},
+    }
+
+
+def inspect_upload(data: bytes, total_s: float) -> dict:
+    """Decode a WAV or FLAC take and refuse a file that cannot be this plan.
+
+    Duration must match ``total_s`` within ``DURATION_TOLERANCE_S``. The peak
+    and the integrated loudness have to sit in the sane range. The bytes are
+    not compared to a server render.
+    """
+    if not isinstance(data, (bytes, bytearray)) or not data:
+        raise ValueError("Attach the take as the form field 'audio'.")
+    blob = bytes(data)
+    if len(blob) > TAKE_AUDIO_MAX:
+        raise ValueError(
+            f"The take is too large ({len(blob)} bytes). The limit is {TAKE_AUDIO_MAX} bytes (40 MiB)."
+        )
+    kind = _audio_kind(blob)
+    if kind is None:
+        raise ValueError("audio must be WAV or FLAC.")
+    handle = tempfile.NamedTemporaryFile(suffix="." + kind, delete=False)
+    try:
+        handle.write(blob)
+        handle.close()
+        try:
+            y, rate = sf.read(handle.name, always_2d=True, dtype="float64")
+        except Exception as exc:
+            raise ValueError("The take could not be decoded.") from exc
+    finally:
+        try:
+            os.remove(handle.name)
+        except OSError:
+            pass
+    rate = int(rate)
+    if rate not in (44100, 48000):
+        raise ValueError("WAV or FLAC sample rate must be 44100 or 48000 Hz.")
+    if y.ndim != 2 or y.shape[1] not in (1, 2):
+        raise ValueError("The take must be mono or stereo.")
+    if len(y) < 1 or not np.isfinite(y).all():
+        raise ValueError("The take could not be decoded.")
+    duration = len(y) / float(rate)
+    if abs(duration - float(total_s)) > DURATION_TOLERANCE_S:
+        raise ValueError(f"The take is {duration:.2f}s. The plan is {float(total_s):.2f}s.")
+    peak = float(np.max(np.abs(y)))
+    if peak < PEAK_FLOOR:
+        raise ValueError("The take is silent.")
+    if peak > PEAK_CEILING:
+        raise ValueError("The take peaks past full scale.")
+    loud = _integrated_lufs(y, rate)
+    if loud is not None and (loud < LOUDNESS_MIN_LUFS or loud > LOUDNESS_MAX_LUFS):
+        which = "too quiet" if loud < LOUDNESS_MIN_LUFS else "too loud"
+        raise ValueError(f"The take is {which} ({loud:.1f} LUFS).")
+    return {
+        "format": kind,
+        "sample_rate": rate,
+        "channels": int(y.shape[1]),
+        "duration_s": round(duration, 3),
+        "peak": round(peak, 4),
+        "loudness_lufs": None if loud is None else round(float(loud), 2),
+        "upload_sha256": hashlib.sha256(blob).hexdigest(),
+        "upload_size_bytes": len(blob),
+    }
+
+
+def write_take_files(data: bytes, out_dir: str) -> tuple[str, str]:
+    """Store the upload as performance.flac and encode preview.mp3 from it.
+
+    A FLAC upload is kept byte for byte. A WAV upload is packed into FLAC
+    without resampling. The preview is 320 kbps.
+    """
+    os.makedirs(out_dir, exist_ok=True)
+    blob = bytes(data)
+    flac = os.path.join(out_dir, "performance.flac")
+    if _audio_kind(blob) == "flac":
+        with open(flac, "wb") as fh:
+            fh.write(blob)
+    else:
+        wav = os.path.join(out_dir, "upload.wav")
+        with open(wav, "wb") as fh:
+            fh.write(blob)
+        subprocess.run(
+            ["ffmpeg", "-y", "-v", "error", "-i", wav, "-c:a", "flac", flac],
+            check=True, timeout=180,
+        )
+    if not os.path.isfile(flac) or os.path.getsize(flac) < 1:
+        raise RuntimeError("The take could not be stored.")
+    mp3 = os.path.join(out_dir, "preview.mp3")
+    subprocess.run(
+        ["ffmpeg", "-y", "-v", "error", "-i", flac, "-ar", "48000", "-c:a", "libmp3lame", "-b:a", "320k", mp3],
+        check=True, timeout=180,
+    )
+    if not os.path.isfile(mp3) or os.path.getsize(mp3) < 1:
+        raise RuntimeError("The preview could not be encoded.")
+    return flac, mp3
+
+
+def finish_browser_record(rec: dict, take_state: dict, info: dict, flac_path: str) -> dict:
+    """Record the upload, the plan, and the processing. Recompute the hash.
+
+    The signature is applied by the caller after this returns.
+    """
+    from . import record
+
+    processing = take_state.get("processing") or {"chain": [], "params": {}}
+    rec["take_state"] = {
+        "nc_take_version": VERSION,
+        "plan": take_state.get("plan"),
+        "processing": processing,
+    }
+    rec["assembly_plan"] = take_state.get("plan")
+    rec["hacks_chain"] = [
+        {
+            "n": 1,
+            "tool": "browser-assembly",
+            "type": "The page placed each gathered clip. The server rebuilt that plan only to confirm the clips and the lengths, and did not keep that mix.",
+        },
+        {
+            "n": 2,
+            "tool": "browser-processing",
+            "chain": list(processing.get("chain") or []),
+            "params": processing.get("params") or {},
+            "type": "Filtering, modulation, and dials ran in the browser. The server did not re-run them.",
+        },
+        {"n": 3, "tool": "preview", "type": "MP3 preview encoded from the uploaded take"},
+    ]
+    compromises = rec.get("performance", {}).setdefault("known_compromises", [])
+    compromises.append({
+        "what": "The stored audio is the browser upload. Web Audio processing is not reproduced by the server.",
+    })
+    rec["performance"]["take_audio"] = {
+        "source": "browser",
+        "upload_sha256": info.get("upload_sha256"),
+        "upload_size_bytes": info.get("upload_size_bytes"),
+        "upload_format": info.get("format"),
+        "sample_rate": info.get("sample_rate"),
+        "channels": info.get("channels"),
+        "duration_s": info.get("duration_s"),
+        "peak": info.get("peak"),
+        "loudness_lufs": info.get("loudness_lufs"),
+    }
+    try:
+        meta = sf.info(flac_path)
+        subtype = meta.subtype or "FLAC"
+        rec["performance"]["outputs"][0]["format"] = f"FLAC {subtype}, {meta.samplerate} Hz, {meta.channels} ch"
+    except Exception:
+        pass
+    rec["record_hash"] = {
+        "algorithm": "sha256",
+        "over": "canonical JSON (sorted keys, no whitespace) of the record without record_hash and signature",
+        "value": record.rhash(rec),
+    }
+    return rec
+
+
+def _audio_kind(data: bytes) -> str | None:
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WAVE":
+        return "wav"
+    if len(data) >= 4 and data[:4] == b"fLaC":
+        return "flac"
+    return None
+
+
+def _integrated_lufs(y: np.ndarray, rate: int) -> float | None:
+    if len(y) < int(0.4 * rate):
+        return None
+    try:
+        import pyloudnorm as pyln
+        meter = pyln.Meter(rate)
+        heard = np.nan_to_num(y if y.shape[1] == 2 else np.column_stack([y[:, 0], y[:, 0]]))
+        loud = float(meter.integrated_loudness(heard))
+    except Exception:
+        return None
+    if not np.isfinite(loud):
+        return None
+    return loud
 
 
 def _num(value):

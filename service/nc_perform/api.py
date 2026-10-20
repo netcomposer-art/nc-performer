@@ -314,6 +314,8 @@ def make_handler(app: App):
                 return self._internal_cache()
             if path == "/internal/gather-file":
                 return self._internal_gather_file()
+            if path == "/internal/take-audio":
+                return self._internal_take_audio()
             if path == "/internal/note-index":
                 return self._internal_note_index()
             if path == "/internal/registry":
@@ -469,11 +471,31 @@ def make_handler(app: App):
             })
 
         def _keep_take(self):
-            """Render the page's assembly plan and sign that recording."""
+            """Store the browser's WAV or FLAC and sign the record for that file."""
             s = app.settings
             if not app.perform_enabled() or app.store.spend_today() >= s.daily_hard_usd:
                 return self._send(503, {"error": "Perform is resting until tomorrow.", "code": "resting"})
-            body = json.loads(self._read(s.max_plan_bytes + 8000).decode() or "{}")
+            ctype = self.headers.get("Content-Type") or ""
+            if "multipart/form-data" not in ctype.lower():
+                return self._send(400, {"error": "Save the take as multipart/form-data.", "code": "rejected"})
+            from ncperf import assembly
+            raw = self._read(assembly.TAKE_AUDIO_MAX + s.max_plan_bytes + 16 * 1024)
+            parts = K.parse_multipart(raw, ctype)
+
+            def text(name):
+                blob = parts.get(name)
+                if blob is None:
+                    return None
+                try:
+                    return blob.decode("utf-8")
+                except UnicodeDecodeError:
+                    raise Reject(f"{name} must be text.")
+
+            body = {
+                "gather_id": (text("gather_id") or "").strip(),
+                "claim_token": (text("claim_token") or "").strip(),
+                "turnstile_token": text("turnstile_token") or "",
+            }
             if s.turnstile_required and not verify_turnstile(s, body.get("turnstile_token"), self._ip()):
                 return self._send(403, {"error": "The bot check failed. Reload the page and try again.", "code": "turnstile"})
             gathered = _perform_gather(app, body)
@@ -481,26 +503,45 @@ def make_handler(app: App):
                 return self._send(gathered[0], gathered[1])
             if not gathered:
                 return self._send(400, {"error": "gather_id is required.", "code": "rejected"})
-            plan = body.get("plan")
-            if not isinstance(plan, dict):
-                return self._send(400, {"error": "plan must be a JSON object.", "code": "rejected"})
-            if len(json.dumps(plan).encode()) > s.max_plan_bytes:
-                return self._send(400, {"error": "The assembly plan is too large.", "code": "rejected"})
+            state_bytes = parts.get("take_state")
+            if not state_bytes:
+                return self._send(400, {"error": "take_state is required.", "code": "rejected"})
+            if len(state_bytes) > s.max_plan_bytes:
+                return self._send(400, {"error": "take_state is too large.", "code": "rejected"})
+            try:
+                state_obj = json.loads(state_bytes)
+            except json.JSONDecodeError:
+                return self._send(400, {"error": "take_state must be JSON.", "code": "rejected"})
+            try:
+                take_state = assembly.parse_take_state(state_obj, gathered["gather_id"])
+            except ValueError as exc:
+                return self._send(400, {"error": str(exc), "code": "rejected"})
             doc = _gather_doc(app, gathered["gather_id"])
-            from ncperf import assembly
-            errors = assembly.validate(plan, doc or {}, max_length_s=s.max_length_s)
+            errors = assembly.validate(take_state["plan"], doc or {}, max_length_s=s.max_length_s)
             if errors:
                 return self._send(400, {"error": errors[0], "errors": errors, "code": "rejected"})
-            title = body.get("title")
+            audio = parts.get("audio")
+            if not audio:
+                return self._send(400, {"error": "Attach the take as the form field 'audio'.", "code": "rejected"})
+            try:
+                assembly.inspect_upload(audio, float(take_state["plan"].get("total_s") or 0))
+            except ValueError as exc:
+                return self._send(400, {"error": str(exc), "code": "rejected"})
+            title = text("title")
             if title not in (None, ""):
-                title = str(title).strip()
+                title = title.strip()
                 if not title or len(title) > 200:
                     return self._send(400, {"error": "title must be a short name.", "code": "rejected"})
             else:
                 title = None
-            if "listed" in body and body.get("listed") not in (True, False):
-                return self._send(400, {"error": "listed must be true or false.", "code": "rejected"})
-            listed = body.get("listed") is True
+            listed_raw = text("listed")
+            if listed_raw not in (None, ""):
+                listed_text = listed_raw.strip().lower()
+                if listed_text not in ("true", "false"):
+                    return self._send(400, {"error": "listed must be true or false.", "code": "rejected"})
+                listed = listed_text == "true"
+            else:
+                listed = False
             allowed, tester = self._rate_block_or_tester()
             if not allowed:
                 return
@@ -508,13 +549,17 @@ def make_handler(app: App):
                 return self._send(503, {"error": "Busy, try in a minute.", "code": "busy"})
             token = claim_token()
             job_id = new_id("h")
+            upload_key = f"jobs/{job_id}/take-audio"
+            kind = assembly._audio_kind(audio) or "wav"
+            app.storage.put(upload_key, audio, "audio/flac" if kind == "flac" else "audio/wav")
             req = {
                 "kind": "keep-take",
                 "composition": gathered["composition"],
                 "gather_id": gathered["gather_id"],
-                "assembly_plan": plan,
+                "take_state": take_state,
+                "upload_key": upload_key,
                 "visibility": "public" if listed else "unlisted",
-                "seed": int(plan.get("seed") or gathered["seed"]),
+                "seed": int(take_state["plan"].get("seed") or gathered["seed"]),
                 "keep": True,
                 "title": title,
                 "claim_hash": sha256_text(token),
@@ -1042,6 +1087,23 @@ def make_handler(app: App):
             if len(data) != n:
                 raise Reject("The gathered file is incomplete.")
             app.storage.put(key, data, self.headers.get("Content-Type") or "application/octet-stream")
+            self._send(204, b"")
+
+        def _internal_take_audio(self):
+            """Copy the browser's take from R2 into this container before Save signs it."""
+            if not _internal_ok(app, self):
+                return self._send(401, {"error": "internal token required"})
+            job_id = self.headers.get("X-Take-Job") or ""
+            if not re.fullmatch(r"h-[0-9a-z]+", job_id):
+                raise Reject("X-Take-Job is not a Performance id.")
+            from ncperf.assembly import TAKE_AUDIO_MAX
+            n = int(self.headers.get("Content-Length") or 0)
+            if n <= 0 or n > TAKE_AUDIO_MAX:
+                raise Reject("The take is missing or too large.")
+            data = self.rfile.read(n)
+            if len(data) != n:
+                raise Reject("The take is incomplete.")
+            app.storage.put(f"jobs/{job_id}/take-audio", data, self.headers.get("Content-Type") or "application/octet-stream")
             self._send(204, b"")
 
         def _internal_note_index(self):
