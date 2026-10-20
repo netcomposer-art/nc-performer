@@ -1,7 +1,7 @@
 # Glass garden
 
 **Composer of this Composition:** anonymous · **License out:** CC BY-SA 4.0
-**Allowed transforms:** trim, gain, fade, filter, reverb, delay, time_stretch (no pitch-shift)
+**Allowed transforms:** trim, gain, fade, filter, reverb, delay (no pitch-shift, no time-stretch)
 
 ## Composition
 
@@ -14,7 +14,7 @@ Clear and open, like light through glass. Gentle strikes, a little space between
 ## Material rules
 
 - Inputs: CC0, CC BY, CC BY-SA or public domain only.
-- No pitch-shifting. Time-stretch is fine.
+- No pitch-shifting and no time-stretching.
 - Output license: CC BY-SA 4.0.
 
 ## Credits

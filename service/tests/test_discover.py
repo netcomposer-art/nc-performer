@@ -1,4 +1,4 @@
-"""Even-handed source discovery, with fake searchers and no network."""
+"""Chord-matched source discovery, with fake searchers and no network."""
 from __future__ import annotations
 
 import json
@@ -10,7 +10,8 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
 
-from ncperf import discover
+from ncperf import discover, licenses as LIC
+from ncperf.fetch import IOWA_TERMS
 from ncperf.interpret import from_plan
 from ncperf.schema import validate
 
@@ -21,34 +22,63 @@ COMP = {
     "composition": "1 min. Cm, F, G, Am, Dm.",
     "performance": "Clear and open, like light through glass.",
 }
+CHORDS = ("Cm", "F", "G", "Am", "Dm")
 
 
-def _clip(origin, title, instrument, key, fit=0, kind="commons"):
+def _clip(origin, title, instrument, key, fit=0, kind="commons", chord=None, voicing="exact",
+          pitched=None, text=None, license_id="CC0-1.0", author="Ada"):
     if kind == "supplier":
-        source = {"kind": "supplier", "manifest": f"https://musicmatter.art/{key}.nc.json", "pitched": False}
+        page = f"https://musicmatter.art/{key}.nc.json"
+        source = {
+            "kind": "supplier", "manifest": page, "pitched": chord is not None,
+            "title": title, "author": author, "license": "CC-BY-SA-4.0", "page": page,
+        }
+        license_id = "CC-BY-SA-4.0"
     elif kind == "freesound":
-        source = {"kind": "freesound", "id": "".join(ch for ch in key if ch.isdigit()) or "325647", "pitched": False}
+        sid = "".join(ch for ch in key if ch.isdigit()) or "325647"
+        page = f"https://freesound.org/s/{sid}/"
+        source = {
+            "kind": "freesound", "id": sid, "pitched": False,
+            "title": title, "author": author, "license": license_id, "page": page,
+        }
     else:
+        page = f"https://commons.wikimedia.org/wiki/{key}"
         source = {
             "kind": "commons",
             "url": f"https://upload.wikimedia.org/{key}.ogg",
-            "page": f"https://commons.wikimedia.org/wiki/{key}",
-            "license": "CC0-1.0",
+            "page": page,
+            "license": license_id,
             "title": title,
-            "author": "Ada",
+            "author": author,
             "source": origin,
             "pitched": False,
         }
-    return {
+    cand = {
         "origin": origin,
         "title": title,
-        "author": "Ada",
-        "license": "CC0-1.0",
+        "author": author,
+        "license": license_id,
         "instrument": instrument,
         "fit": fit,
         "source": source,
         "key": key,
+        "text": text if text is not None else title,
+        "page": page,
     }
+    if chord:
+        cand["chord_symbol"] = chord
+        cand["voicing_kind"] = voicing
+        cand["pitched"] = True
+    if pitched is not None:
+        cand["pitched"] = pitched
+    return cand
+
+
+def _chords(origin, instrument, kind="supplier", voicing="exact", prefix="mm"):
+    return [
+        _clip(origin, f"{instrument} {sym}", instrument, f"{prefix}-{sym}", kind=kind, chord=sym, voicing=voicing)
+        for sym in CHORDS
+    ]
 
 
 def _searchers(pools):
@@ -64,66 +94,114 @@ def _searchers(pools):
 
 
 class DiscoverTest(unittest.TestCase):
-    def test_several_origins_and_a_musicmatter_cap(self):
+    def test_strikes_match_the_composition_chord(self):
+        wrong = _clip("musicmatter", "Choir A7", "choir", "a7", kind="supplier", chord="A7", voicing="exact")
         pools = {
-            "musicmatter": [_clip("musicmatter", f"Piano {i}", "piano", f"mm{i}", kind="supplier") for i in range(8)],
-            "freesound": [_clip("freesound", f"Air {i}", "texture", f"fs{i}", kind="freesound") for i in range(2)],
-            "wikimedia": [_clip("wikimedia", "Organ", "organ", "wm0")],
-            "ccmixter": [_clip("ccmixter", "Harp", "harp", "cc0")],
+            "musicmatter": _chords("musicmatter", "choir", prefix="choir") + _chords("musicmatter", "fat synth", prefix="fat") + [wrong],
+            "freesound": [_clip("freesound", "Rain room tone", "texture", "fs9", kind="freesound", text="field recording of rain, room tone")],
         }
-        plan = discover.plan_for(COMP, seed=1, searchers=_searchers(pools), verify_live=False)
+        plan = discover.plan_for(COMP, seed=11, searchers=_searchers(pools), verify_live=False)
         self.assertEqual(validate(plan), [])
-        self.assertEqual(plan["interpreter"]["kind"], "discover")
         self.assertNotIn("stretch_to_s", json.dumps(plan))
-        mix = plan["source_mix"]
-        self.assertGreaterEqual(len(mix["by_origin"]), 2)
-        self.assertEqual(mix["queried"], list(discover.ORIGINS[1:]) + [discover.ORIGINS[0]])
-        total = sum(mix["by_origin"].values())
-        self.assertLessEqual(mix["by_origin"].get("musicmatter", 0) * 2, total)
-        self.assertIn("source_mix", plan)
-        self.assertTrue(plan["notes"][0].startswith("Source mix:"))
+        rows = plan["source_mix"]["per_chord"]
+        self.assertEqual([row["symbol"] for row in rows], list(CHORDS))
+        for row in rows:
+            self.assertEqual(row["match"], "exact")
+            self.assertIn(row["symbol"], row["title"])
+            self.assertNotIn("A7", row["title"])
+        blob = json.dumps(plan["sources"])
+        self.assertNotIn("a7", blob)
+        self.assertNotIn("A7", blob)
+        for src in plan["sources"].values():
+            for key in ("title", "author", "license", "page"):
+                self.assertTrue(src.get(key), src)
+            self.assertTrue(LIC.allowed(src["license"]))
 
-    def test_a_musicmatter_heavy_pool_does_not_take_the_plan(self):
+    def test_alt_voicing_then_piano(self):
         pools = {
-            "musicmatter": [_clip("musicmatter", f"Piano {i}", "piano", f"mm{i}", kind="supplier") for i in range(8)],
-            "freesound": [_clip("freesound", f"Air {i}", "texture", f"fs{i}", kind="freesound") for i in range(2)],
+            "musicmatter": [
+                _clip("musicmatter", "Choir Cm inversion", "choir", "cm-alt", kind="supplier", chord="Cm", voicing="alt"),
+                *[_clip("musicmatter", f"Piano {sym}", "piano", f"p-{sym}", kind="supplier", chord=sym, voicing="exact") for sym in CHORDS],
+            ],
         }
         plan = discover.plan_for(COMP, seed=1, searchers=_searchers(pools), verify_live=False)
-        mix = plan["source_mix"]["by_origin"]
-        total = sum(mix.values())
-        self.assertIn("freesound", mix)
-        self.assertLessEqual(mix.get("musicmatter", 0) * 2, total)
+        rows = {row["symbol"]: row for row in plan["source_mix"]["per_chord"]}
+        self.assertEqual(rows["Cm"]["match"], "alt voicing")
+        self.assertEqual(rows["Cm"]["instrument"], "choir")
+        for sym in ("F", "G", "Am", "Dm"):
+            self.assertEqual(rows[sym]["match"], "piano fallback")
+            self.assertEqual(rows[sym]["instrument"], "piano")
 
-    def test_only_one_origin_may_fill_the_plan(self):
-        pools = {"musicmatter": [_clip("musicmatter", f"Piano {i}", "piano", f"mm{i}", kind="supplier") for i in range(8)]}
+    def test_a_wrong_chord_does_not_fill_a_gap(self):
+        pools = {"musicmatter": [_clip("musicmatter", "Choir A7", "choir", "a7", kind="supplier", chord="A7")]}
+        with self.assertRaises(ValueError) as caught:
+            discover.plan_for(COMP, seed=1, searchers=_searchers(pools), verify_live=False)
+        self.assertIn("Cm", str(caught.exception))
+
+    def test_only_the_origin_that_has_the_chord_is_used(self):
+        pools = {"musicmatter": _chords("musicmatter", "choir")}
         plan = discover.plan_for(COMP, seed=3, searchers=_searchers(pools), verify_live=False)
         self.assertEqual(set(plan["source_mix"]["by_origin"]), {"musicmatter"})
         self.assertGreaterEqual(plan["source_mix"]["by_origin"]["musicmatter"], 5)
 
-    def test_named_origin_relaxes_the_cap(self):
+    def test_named_origin_is_used_only_when_it_has_the_chord(self):
         comp = dict(COMP, performance="Use only freesound, nothing else.")
         pools = {
-            "musicmatter": [_clip("musicmatter", f"Piano {i}", "piano", f"mm{i}", kind="supplier") for i in range(8)],
-            "freesound": [_clip("freesound", f"Air {i}", "texture", f"fs{i}", kind="freesound") for i in range(6)],
+            "musicmatter": _chords("musicmatter", "choir"),
+            "freesound": _chords("freesound", "choir", kind="freesound", prefix="fs"),
         }
         plan = discover.plan_for(comp, seed=2, searchers=_searchers(pools), verify_live=False)
         self.assertEqual(set(plan["source_mix"]["by_origin"]), {"freesound"})
 
-    def test_instrument_hint_is_a_timbre_not_a_supplier(self):
+        pools["freesound"] = [_clip("freesound", "Rain room tone", "texture", "fs1", kind="freesound", text="field recording of rain, room tone")]
+        plan = discover.plan_for(comp, seed=2, searchers=_searchers(pools), verify_live=False)
+        strikes = [row["origin"] for row in plan["source_mix"]["per_chord"]]
+        self.assertEqual(set(strikes), {"musicmatter"})
+
+    def test_instrument_hint_prefers_that_timbre(self):
         pools = {
-            "musicmatter": [
-                _clip("musicmatter", "Piano", "piano", "p", fit=0, kind="supplier"),
-                _clip("musicmatter", "Choir", "choir", "mc", fit=1, kind="supplier"),
-            ],
-            "wikimedia": [_clip("wikimedia", "Distant choir", "choir", "wc", fit=9)],
-            "freesound": [_clip("freesound", "Noise", "texture", "fs0", kind="freesound")],
+            "musicmatter": _chords("musicmatter", "piano", prefix="p") + _chords("musicmatter", "choir", prefix="c"),
+            "wikimedia": _chords("wikimedia", "choir", kind="commons", prefix="w"),
         }
         plan = discover.plan_for(COMP, seed=4, instrument="choir", searchers=_searchers(pools), verify_live=False)
-        lead = plan["layers"][0]["events"][0]["role"]
-        self.assertTrue(lead.startswith("choir (wikimedia)"))
+        for row in plan["source_mix"]["per_chord"]:
+            self.assertEqual(row["instrument"], "choir")
+            self.assertNotEqual(row["match"], "piano fallback")
         self.assertEqual(plan["source_mix"]["instrument_hint"], "choir")
-        self.assertIn("wikimedia", plan["source_mix"]["by_origin"])
         self.assertIn("musicmatter", plan["source_mix"]["queried"])
+
+    def test_a_live_cover_is_not_texture(self):
+        cover = _clip(
+            "internet_archive",
+            "Ramblin' Band LIVE @ BurnDown Denver - Mama Tried",
+            "texture",
+            "mama",
+            text="live concert cover of Mama Tried",
+        )
+        rain = _clip(
+            "freesound", "Rain room tone", "texture", "fs3", kind="freesound",
+            text="field recording of rain, room tone",
+        )
+        pools = {"musicmatter": _chords("musicmatter", "choir"), "internet_archive": [cover], "freesound": [rain]}
+        plan = discover.plan_for(COMP, seed=5, searchers=_searchers(pools), verify_live=False)
+        blob = json.dumps(plan)
+        self.assertNotIn("Mama Tried", blob)
+        self.assertNotIn("Ramblin", blob)
+        self.assertEqual(plan["source_mix"]["texture"]["title"], "Rain room tone")
+        self.assertEqual(plan["layers"][1]["id"], "bed")
+        self.assertIn("texture", plan["layers"][1]["role"])
+
+    def test_a_source_without_a_license_is_not_used(self):
+        bare = _clip("wikimedia", "Choir Cm", "choir", "bare", chord="Cm")
+        bare["license"] = ""
+        bare["source"].pop("license")
+        pools = {
+            "wikimedia": [bare],
+            "musicmatter": [c for c in _chords("musicmatter", "choir") if c["chord_symbol"] != "Cm"],
+        }
+        with self.assertRaises(ValueError) as caught:
+            discover.plan_for(COMP, seed=1, searchers=_searchers(pools), verify_live=False)
+        self.assertIn("Cm", str(caught.exception))
 
     def test_no_sounds_raises(self):
         with self.assertRaises(ValueError):
@@ -147,19 +225,38 @@ class DiscoverTest(unittest.TestCase):
         self.assertEqual(discover._instrument_label("Fat Synth fatsynth full-chord-set-v4-fatsynth", None), "synth")
         self.assertEqual(discover._instrument_label("full-chord-set-v4 piano", None), "piano")
         self.assertIn("piano", discover.excluded_terms("Keep the piano out of the lead."))
-        terms = discover.terms_for(
-            {"composition": "Cm", "performance": "A choir and a synth. Keep the piano out of the lead."},
-            None, 1,
-        )
-        self.assertNotIn("piano", terms)
-        self.assertIn("choir", terms)
-        self.assertIn("synth", terms)
-        self.assertFalse(discover._mentions("harp arpeggio", "synth"))
+
+    def test_offering_labels_use_root_and_quality(self):
+        choir = {
+            "audio": "https://audio.musicmatter.art/fullchords/jacobschoir/Eb/05_suspended_Ebsus2_root.flac",
+            "manifest": "https://audio.musicmatter.art/fullchords/jacobschoir/Eb/05_suspended_Ebsus2_root.nc.json",
+            "chord": "Ebsus2", "root": "Eb", "quality": "sus2", "gesture": "bounce", "voicing": "root",
+            "instrument_name": "Choir", "default_voicing": True,
+        }
+        alt = dict(choir, gesture="alt", voicing="inv1", default_voicing=False)
+        piano = {
+            "audio": "https://audio.musicmatter.art/fullchords/Eb/05_suspended_Ebsus2_root.flac",
+            "manifest": "https://musicmatter.art/sounds/fullchords-v4/Eb/05_suspended_Ebsus2_root.nc.json",
+            "collection": "full-chord-set-v4",
+        }
+        self.assertEqual(discover._offering_symbol(choir), "Ebsus2")
+        self.assertEqual(discover._offering_symbol(piano), "Ebsus2")
+        self.assertEqual(discover._offering_instrument(choir), "choir")
+        self.assertEqual(discover._offering_instrument(piano), "piano")
+        self.assertEqual(discover._voicing_kind(choir), "exact")
+        self.assertEqual(discover._voicing_kind(alt), "alt")
+        six = {"audio": "https://audio.musicmatter.art/fullchords/Ab/x_Ab6-9_root.flac", "manifest": "m.nc.json"}
+        self.assertEqual(discover._offering_symbol(six), "Ab6-9")
+
+    def test_uiowa_terms_are_public_domain_equivalent_and_unused(self):
+        self.assertIn("without restrictions", IOWA_TERMS)
+        self.assertTrue(LIC.allowed("PD-equivalent"))
+        self.assertEqual(discover.search_uiowa(["violin"], None, ["Ebsus2"], 1), [])
 
     def test_discover_kind_survives_loading_a_plan(self):
         plan = discover.plan_for(
             COMP, seed=1,
-            searchers=_searchers({"uiowa": [_clip("uiowa", "UIowa harp", "harp", "u0")]}),
+            searchers=_searchers({"wikimedia": _chords("wikimedia", "choir", kind="commons", prefix="w")}),
             verify_live=False,
         )
         with tempfile.TemporaryDirectory() as tmp:

@@ -15,7 +15,7 @@ local agents). It follows https://netcomposer.art/agents/. Published at https://
 
 1. Inputs only **CC0, CC BY, CC BY-SA or public domain**. Never NC, ND, Sampling+ or custom licenses.
    Check each license on the sound's **live page or manifest**, not from a search result or memory.
-2. **No pitch-shifting.** Time-stretch is fine (duration changes, pitch does not).
+2. **No pitch-shifting and no time-stretching.** Duration and pitch stay as published. Layer unaltered copies to hold a pad.
 3. **Measure pitch**; do not trust file names or tags. Use a sound for a note only if it measures as
    that note (within about 15 cents).
 4. Output license **CC BY-SA 4.0**. Credit every CC BY and CC BY-SA author by name.
@@ -47,8 +47,8 @@ and `perf03.plan.json`. The parts:
   `{"kind":"uiowa_mis","url":URL}` or `{"kind":"url","url":URL,"license":"CC-BY-4.0","page":URL}`.
 - `banks`: instrument -> MIDI note -> candidate ids in order. List two when you can; the renderer keeps
   the first that measures right.
-- `layers`: `chord_notes` (strike/roll the voicing), `chord_pad` (time-stretched sustain), `chord_under`,
-  `drone`, `clips` (beds, fixed clips; `stretch_to_s` time-stretches a clip), `notes` (the line;
+- `layers`: `chord_notes` (strike/roll the voicing), `chord_pad` (unaltered copies, overlapped), `chord_under`,
+  `drone`, `clips` (beds, fixed clips; do not set `stretch_to_s`), `notes` (the line;
   `kind:"triplet"` for triplets).
 - `master`: per-bus hacks (filters, brighten automation, delay, LUFS match, pan), reverb, tone, loudness -17.
   Reverb: `{"engine":"dragonfly","send_lu":5.3}` (Dragonfly Hall; `send_lu` = wet loudness above the dry mix in LU,
@@ -65,7 +65,7 @@ Validate: `nc interpret --plan plan.json -o checked.json`.
 Install: `pip install git+https://github.com/netcomposer-art/nc-performer` (and ffmpeg with the rubberband filter).
 For the default reverb also install pedalboard (`pip install pedalboard`) and Dragonfly Reverb (VST3; `apt install dragonfly-reverb`
 on Debian/Ubuntu, or the release VST3 in the standard VST3 folder, or point `NC_DRAGONFLY_VST3` at it). Both are GPL-3 and optional:
-without them the kit warns, uses its synthetic hall, and the record says which reverb ran. `rubberband-cli` 3.x adds the R3 time-stretch.
+without them the kit warns, uses its synthetic hall, and the record says which reverb ran.
 
 **With the kit** (Python 3.10+, ffmpeg with rubberband, numpy scipy soundfile librosa pyloudnorm):
 
@@ -84,8 +84,8 @@ nc perform composition.md -o out/           # or any OpenAI-compatible LLM via N
    check a Supplier sha256. Freesound originals need OAuth2; the public HQ previews are fine, say so
    in the record. Hosted Perform queries these origins together and does not start with a Supplier.
 2. Measure every pitched sound (pYIN or similar; FFT for bells). Drop any that is not the note.
-3. Place, fade, filter, add delay and reverb. Never pitch-shift. A hand-written plan may time-stretch
-   (`stretch_to_s`, pitch unchanged). Hosted Perform's search does not: it trims and fades. Name the reverb tool and its
+3. Place, fade, filter, add delay and reverb. Never pitch-shift and never time-stretch. Hold a pad by
+   layering and crossfading unaltered copies. Name the reverb tool and its
    version in the record; a convolution impulse response is an input like any other (license, author, sha256).
 4. Master to -17 LUFS integrated, true peak <= -1 dBTP: linear gain, then a true-peak limiter (4x oversampled)
    only where a peak would pass the ceiling. Avoid ffmpeg `loudnorm`: it can switch to dynamic mode on its own. Write FLAC

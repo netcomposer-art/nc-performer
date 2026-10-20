@@ -28,7 +28,7 @@ There are no user accounts in v1. Each Performance comes with a `claim_token`, s
 
 - Inputs: CC0, CC BY, CC BY-SA, or public domain.
 - Output: CC BY-SA 4.0.
-- No pitch-shifting. The hosted search trims and fades clips. It does not time-stretch them. A hand-written plan can still set `stretch_to_s`.
+- No pitch-shifting and no time-stretching. Clips are trimmed, layered, and crossfaded. A plan that sets `stretch_to_s` is refused.
 - No `kind=url` sources. The service will not fetch an arbitrary URL.
 - The transforms are called hacks.
 

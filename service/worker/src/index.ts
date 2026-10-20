@@ -690,7 +690,7 @@ function publicJob(id: string, state: string, stage: string, percent: number, er
     planning: "Planning the Performance…",
     fetching: "Fetching sounds, licenses checked…",
     measuring: "Measuring pitch…",
-    rendering: "Rendering layers, time-stretch (pitch unchanged)…",
+    rendering: "Rendering layers…",
     reverb: "Reverb hack…",
     mastering: "Mastering to -17 LUFS…",
     verifying: "Checking the record…",

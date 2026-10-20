@@ -99,6 +99,12 @@ def _check_sources(plan: dict, settings: Settings, suppliers: dict | None) -> No
                 raise Reject(f"Manifest is not listed by an active Supplier: {manifest}")
         else:
             raise Reject(f"Source {sid} has an unknown kind {kind!r}.")
+        if (plan.get("interpreter") or {}).get("kind") == "discover":
+            missing = [k for k in ("title", "author", "license", "page") if not src.get(k)]
+            if missing:
+                raise Reject(f"Source {sid} is missing {', '.join(missing)}.")
+            if not LIC.allowed(LIC.from_id(str(src.get("license")))[0]):
+                raise Reject(f"Source {sid} license is not allowed.")
 
 
 def _need_host(url: str, settings: Settings) -> None:

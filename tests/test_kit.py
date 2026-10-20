@@ -1,5 +1,5 @@
 """Offline tests: schema, chord parsing, stub, the LLM path against a mock server, verify-record on the published records,
-the reverb engines (Dragonfly checks are skipped if it is not installed), the send rule, the true-peak limiter, the tone shelf, time-stretch and resampling.
+the reverb engines (Dragonfly checks are skipped if it is not installed), the send rule, the true-peak limiter, the tone shelf, the time-stretch refusal and resampling.
 Run: python3 tests/test_kit.py"""
 import json, os, subprocess, sys, time, urllib.request, glob
 K = os.path.dirname(os.path.dirname(os.path.abspath(__file__))); sys.path.insert(0, K)
@@ -62,9 +62,25 @@ g['master']['reverb'] = dict(engine='plate-o-matic'); t(validate(g) != [], 'sche
 REG = RV.ir_registry()
 t(len(REG) >= 1 and all(e['license']['id'].startswith('CC-BY') and e.get('attribution') and e.get('page') and e.get('verified') and all(len(p['sha256']) == 64 for p in e['positions']) for e in REG.values()),
   f'impulse responses: {len(REG)} listed, all CC BY with attribution, verified page and pinned sha256 (no audio shipped)')
-tone = np.sin(2 * np.pi * 440 * np.arange(SR // 2) / SR)[:, None] * np.ones((1, 2)) * 0.3; st = U.stretch(tone, 2.0)
-pk = np.fft.rfftfreq(len(st), 1 / SR)[np.argmax(np.abs(np.fft.rfft(st[:, 0] * np.hanning(len(st)))))]
-t(abs(len(st) / len(tone) - 2.0) < 0.02 and abs(pk - 440) < 2, f"time-stretch x2 via {U.stretch_engine()}: pitch {pk:.1f} Hz (440 in), length x{len(st) / len(tone):.3f}")
+tone = np.sin(2 * np.pi * 440 * np.arange(SR // 2) / SR)[:, None] * np.ones((1, 2)) * 0.3
+try:
+    U.stretch(tone, 2.0); stretched = False
+except RuntimeError as exc:
+    stretched = "time-stretch is not allowed" in str(exc)
+t(stretched, "time-stretch is refused")
+render_src = open(os.path.join(K, "ncperf/render.py"), encoding="utf-8").read()
+t("stretch(" not in render_src and "loop_unaltered(" in render_src, "renderer does not call a stretch or pitch op")
+looped = U.loop_unaltered(tone, 1.0)
+t(abs(len(looped) / SR - 1.0) < 0.01, "a pad is made by repeating the unaltered clip")
+try:
+    from ncperf.render import Renderer
+    Renderer({"seed": 1, "length_s": 1, "layers": [{"events": [{"stretch_to_s": 2.0}]}]}, "/tmp")
+    refused = False
+except RuntimeError as exc:
+    refused = "time-stretch is not allowed" in str(exc)
+t(refused, "a plan that asks for stretch_to_s is refused")
+st = I.stub(comp, seed=3)
+t("stretch_to_s" not in json.dumps(st), "stub plan does not time-stretch")
 with tempfile.TemporaryDirectory() as d:
     sf.write(f'{d}/a.wav', tone[:22050] if False else np.zeros((44100, 2)), 44100); U.USED['resampler'].clear(); dd = U.decode(f'{d}/a.wav')
     t(abs(len(dd) - SR) <= 2 and U.USED['resampler'] == ({'soxr precision 28'} if U.has_soxr() else {'ffmpeg swr (default)'}), f"decode: 44.1 kHz -> 48 kHz with {sorted(U.USED['resampler'])[0]}")

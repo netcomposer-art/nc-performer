@@ -1,5 +1,5 @@
-"""Audio helpers. Every transform here is a hack in NetComposer's sense: trim, gain, fade, filter, time-stretch.
-Decoding resamples to 48 kHz (sample-rate conversion only). Nothing here changes pitch."""
+"""Audio helpers. Every transform here is a hack in NetComposer's sense: trim, gain, fade, filter.
+Decoding resamples to 48 kHz (sample-rate conversion only). Nothing here changes pitch or duration."""
 import hashlib, json, os, subprocess, tempfile
 import numpy as np, soundfile as sf
 from scipy.signal import butter, sosfilt
@@ -55,23 +55,40 @@ def stretch_engine():
     return 'ffmpeg-rubberband'
 
 def stretch(y, ratio, tag=None):
-    """Time-stretch hack, duration changes, pitch does not. Engine: rubberband CLI R3 ('finer', --fine) when installed, else ffmpeg's
-    rubberband filter (R2: transients=smooth, window=long, phase=independent, pitch=1)."""
-    eng = stretch_engine(); k = (tag, round(ratio, 5), eng)
-    if tag and k in _st: return _st[k]
-    with tempfile.TemporaryDirectory() as d:
-        sf.write(f'{d}/i.wav', y, SR, subtype='FLOAT')
-        if eng == 'rubberband-r3':
-            subprocess.run([rubberband_cli()[0], '-q', '--fine', '--time', f'{ratio:.6f}', f'{d}/i.wav', f'{d}/o.wav'], check=True, capture_output=True)
-            USED['stretch'].add(f'rubberband CLI {rubberband_cli()[1]} R3 (--fine), pitch unchanged')
-        else:
-            subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', f'{d}/i.wav', '-af',
-                            f'rubberband=tempo={1/ratio:.6f}:pitch=1:transients=smooth:window=long:phase=independent',
-                            '-c:a', 'pcm_f32le', f'{d}/o.wav'], check=True)
-            USED['stretch'].add('ffmpeg rubberband filter (librubberband R2): transients=smooth, window=long, phase=independent, pitch=1')
-        z = sf.read(f'{d}/o.wav', always_2d=True)[0]
-    if tag: _st[k] = z
-    return z
+    """Time-stretch is not allowed. Duration and pitch of a recording stay as published."""
+    raise RuntimeError("time-stretch is not allowed")
+
+
+def loop_unaltered(y, seconds, crossfade_s=0.12):
+    """Repeat a clip unchanged until it covers `seconds`, with an equal-power crossfade at each join.
+
+    Each copy keeps the recording's duration and pitch. This is how a pad is held out.
+    """
+    y = np.atleast_2d(np.asarray(y))
+    if y.shape[1] != 2 and y.shape[0] == 2:
+        y = y.T
+    need = int(round(max(0.0, seconds) * SR))
+    if need <= 0 or len(y) == 0:
+        return np.zeros((need, 2))
+    if len(y) >= need:
+        return np.array(y[:need], copy=True)
+    fade_n = min(int(crossfade_s * SR), max(0, len(y) // 4))
+    out = np.zeros((need, y.shape[1]))
+    pos = 0
+    while pos < need:
+        n = min(len(y), need - pos)
+        chunk = np.array(y[:n], copy=True)
+        if pos > 0 and fade_n:
+            f = min(fade_n, n)
+            w = np.sin(np.linspace(0, np.pi / 2, f)) ** 2
+            out[pos:pos + f] *= (1.0 - w)[:, None]
+            chunk[:f] *= w[:, None]
+        out[pos:pos + n] += chunk
+        if n < len(y):
+            break
+        step = n - fade_n if fade_n and n > fade_n else n
+        pos += max(1, step)
+    return out
 
 def fade(z, fi, fo):
     """Equal-power fade hack."""

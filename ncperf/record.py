@@ -23,13 +23,19 @@ def interpreter_label(it):
     return 'human/agent-written plan'
 
 def hacks_chain(plan, log=None):
-    """The hacks in the order they ran. With a render log, the reverb, tone, stretch and loudness entries say what actually ran."""
+    """The hacks in the order they ran. With a render log, the reverb, tone and loudness entries say what actually ran.
+
+    Time-stretch is not a hack this kit runs. A log that still lists a stretch engine records that fact;
+    a new render leaves that list empty.
+    """
     log = log or {}; M = plan['master']; Q = log.get('quality') or {}
-    st = Q.get('stretch') or ['ffmpeg rubberband filter (librubberband R2): transients=smooth, window=long, phase=independent, pitch=1']
-    H = [dict(n=1, tool='time_stretch', engine='; '.join(st), engine_requested=(plan.get('quality') or {}).get('stretch_engine', 'auto'), pitch_shift=False,
-              options='duration changes, pitch does not')]
-    if Q.get('resampler'): H.append(dict(n=len(H) + 1, tool='sample-rate conversion (decode to 48 kHz)', engine='; '.join(Q['resampler'])))
-    H.append(dict(n=len(H) + 1, tool='gain', type='decay flatten (300 ms RMS follower, max +20 dB) on stretched notes where the plan asks for it'))
+    H = []
+    st = Q.get('stretch') or []
+    if st:
+        H.append(dict(n=len(H) + 1, tool='time_stretch', engine='; '.join(st), engine_requested=(plan.get('quality') or {}).get('stretch_engine', 'auto'), pitch_shift=False,
+                      options='recorded from an older log; the current renderer refuses time-stretch'))
+    if Q.get('resampler'): H.append(dict(n=len(H) + 1, tool='sample-rate conversion (decode to 48 kHz)', engine='; '.join(Q['resampler']), pitch_shift=False))
+    H.append(dict(n=len(H) + 1, tool='gain', type='decay flatten (300 ms RMS follower, max +20 dB) where the plan asks for it'))
     if any(ly.get('level_match_rms') for ly in plan['layers']): H.append(dict(n=len(H) + 1, tool='gain', type='level match: every line source to the same 1.5 s RMS'))
     H.append(dict(n=len(H) + 1, tool='fade', type='equal-power fades; seeded rolls/strikes', seed=plan['seed']))
     H.append(dict(n=len(H) + 1, tool='filters/automation/lufs_match/pan/delay', buses=M['buses']))
@@ -98,7 +104,7 @@ def build(plan, plan_path, log, flac, mp3, out_path, performer='nc-performer kit
         interpreter=it, plan_ref=dict(path=os.path.basename(plan_path), sha256=sha256_file(plan_path)),
         composition_ref=dict(title=C['title'], composer=dict(display_name=C.get('composer')), words_verbatim=C.get('words_verbatim'), **({'sha256': sha256_file(composition_path)} if composition_path and os.path.exists(composition_path) else {})),
         rule_set=dict(seed=plan['seed'], pulse_bpm=plan.get('pulse_bpm'), sections=plan.get('sections'), layers=[dict(id=l['id'], type=l['type'], bus=l.get('bus'), role=l.get('role')) for l in plan['layers']],
-                      pitch_shift=False, transforms_enabled=['trim', 'gain', 'fade', 'filter', 'reverb', 'delay', 'time_stretch'],
+                      pitch_shift=False, transforms_enabled=['trim', 'gain', 'fade', 'filter', 'reverb', 'delay'],
                       pitch_policy=f"Every pitched sound chosen by NC measurement (pYIN / FFT), not by label; accepted within {plan.get('pitch_tolerance_cents', 15)} cents.", selections=log['selections']),
         timeline=[dict(chord_index=i, start_s=c['t'], end_s=c['t'] + c['dur'], section=c.get('section'), chord=c['symbol'], voicing_midi=c['voicing']) for i, c in enumerate(plan['chords'])],
         line_events=[e for ly in plan['layers'] if ly['type'] == 'notes' for e in ly['events']],

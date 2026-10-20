@@ -3,13 +3,20 @@
 Registered Suppliers (today, musicmatter.art) are one origin among the open
 commons: Freesound, Openverse, the Internet Archive, Wikimedia Commons,
 ccMixter, and the bundled UIowa MIS library. Each origin is queried with the
-same words. A failure in one origin is skipped. Selection rotates by seed and
-will not spend most of the plan on a single origin unless the notes name it.
+same words. A failure in one origin is skipped.
 
-Clips are trimmed and faded. Nothing here asks for pitch-shift or time-stretch.
+A chord strike has to be that chord. musicmatter files are chosen by the
+root and quality on the offering (exact voicing, then an alternate voicing of
+the same chord, then the piano recording of that chord). A pitched clip from
+anywhere else is used only when its title declares that same chord. Texture is
+unpitched: a field recording, room tone, or pad, never a song. Every source
+kept in the plan has a title, an author, a license, and a page. Clips are
+trimmed, layered, and crossfaded. Nothing here asks for pitch-shift or
+time-stretch.
 """
 from __future__ import annotations
 
+import html as html_lib
 import json
 import random
 import re
@@ -155,13 +162,14 @@ def _cand(origin: str, title: str, author: str, license_id: str, blob: str, sour
     source = {k: v for k, v in source.items() if k != "_host_ok"}
     return {
         "origin": origin,
-        "title": title or origin,
-        "author": author or "unknown",
+        "title": title or "",
+        "author": author or "",
         "license": LIC.from_id(license_id)[0],
         "instrument": _instrument_label(blob, hint),
         "fit": _fit(blob, terms, hint, chords),
         "source": source,
         "key": url or title,
+        "text": blob,
     }
 
 
@@ -205,27 +213,373 @@ def _mm_index(registry_url: str | None, host_ok_fn=None) -> list[dict]:
     return offerings
 
 
+# A texture bed may be a pad or a field recording. A song, a cover, or a live
+# concert is never a bed, even when the uploader marked the file CC0.
+_RIGHTS_BAD = re.compile(
+    r"\b(live|concert|cover|karaoke|tribute|bootleg|lyrics|album|song|remix|band|singer|beat|bpm|loop|mix)\b"
+    r"|live\s*@|mama tried|full mix",
+    re.I,
+)
+# A bed has to be a field recording, room tone, or a pad. "Ambient" and "noise" alone
+# are too broad: they also describe songs and processed collages.
+_TEXTURE_OK = re.compile(
+    r"\b(field recording|room\s*tone|foley|sound effect|sfx|rain|wind|waves|ocean|"
+    r"forest|hiss|hum|whoosh|rustle|crickets|stream|thunder|pad)\b",
+    re.I,
+)
+_TEXTURE_BAD = re.compile(r"\b(pitched|stretch(?:ed|ing)?|time-?stretch|looped|song|melody|chord)\b", re.I)
+_NOTE_NAME = re.compile(r"(?<![A-Za-z])[A-G](?:#|b)?\d(?!\d)")
+_CREDIT_KEYS = ("title", "author", "license", "page")
+
+
+def _rights_ok(blob: str) -> bool:
+    return not _RIGHTS_BAD.search(blob or "")
+
+
+def _declared_chord(text: str, wanted: list[str] | None) -> str | None:
+    """The one composition chord named in a title, if the title names exactly one."""
+    found = []
+    for sym, _bass in CH.find_full(text or ""):
+        if wanted is None or sym in wanted:
+            found.append(sym)
+    found = list(dict.fromkeys(found))
+    if len(found) == 1:
+        return found[0]
+    return None
+
+
+def _offering_symbol(off: dict) -> str | None:
+    """Root and quality from the offering. The filename is the fallback for piano files, which have no chord field."""
+    raw = off.get("chord")
+    if isinstance(raw, str) and raw.strip():
+        spelled = CH.spell(raw.strip())
+        if spelled:
+            return spelled
+    root = off.get("root")
+    if root is not None and str(root).strip():
+        spelled = CH.spell(str(root).strip() + str(off.get("quality") or ""))
+        if spelled:
+            return spelled
+    name = (off.get("audio") or off.get("manifest") or "").rsplit("/", 1)[-1]
+    name = re.sub(r"\.(flac|nc\.json|wav|mp3|ogg)$", " ", name, flags=re.I).replace("_", " ")
+    found = [sym for sym, _bass in CH.find_full(name)]
+    if not found:
+        return None
+    return max(found, key=len)
+
+
+def _offering_instrument(off: dict) -> str:
+    name = str(off.get("instrument_name") or "").strip().lower()
+    if name:
+        if "choir" in name or "chorus" in name:
+            return "choir"
+        if "fat" in name and "synth" in name:
+            return "fat synth"
+        if "arp" in name:
+            return "synth arp"
+        if "synth" in name:
+            return "synth"
+        if "piano" in name:
+            return "piano"
+        return _instrument_label(name, None)
+    blob = " ".join(str(off.get(k) or "") for k in ("instrument", "collection", "audio", "manifest")).lower()
+    if "jacobschoir" in blob:
+        return "choir"
+    if "fatsynth" in blob:
+        return "fat synth"
+    if "syntharp" in blob:
+        return "synth arp"
+    return "piano"
+
+
+def _voicing_kind(off: dict) -> str:
+    gesture = str(off.get("gesture") or "").lower()
+    voicing = str(off.get("voicing") or "").lower()
+    path = f"{off.get('audio') or ''} {off.get('manifest') or ''}".lower()
+    if gesture == "alt" or "inv" in voicing or re.search(r"inv\d", path):
+        return "alt"
+    return "exact"
+
+
+def _hint_ok(instrument: str, hint: str | None) -> bool:
+    if not hint:
+        return True
+    inst = (instrument or "").lower()
+    if hint == "piano":
+        return inst == "piano"
+    if hint in ("synth", "arp"):
+        return "synth" in inst or inst == "arp"
+    if hint in ("choir", "voice"):
+        return inst == "choir"
+    return hint == inst or hint in inst
+
+
+def _blob(cand: dict) -> str:
+    src = cand.get("source") or {}
+    return " ".join(str(x or "") for x in (
+        cand.get("title"), cand.get("text"), cand.get("author"), cand.get("instrument"), src.get("title"),
+    ))
+
+
+def _texture_ok(cand: dict) -> bool:
+    """Unpitched bed only. A chord file, a note, or a song excerpt is not texture."""
+    if cand.get("origin") in ("musicmatter", "uiowa"):
+        return False
+    if cand.get("chord_symbol") or cand.get("pitched") or cand.get("_wrong_chord"):
+        return False
+    inst = cand.get("instrument") or ""
+    if any(word in inst for word in (
+        "piano", "rhodes", "synth", "choir", "voice", "organ", "flute", "guitar", "harp",
+        "cello", "violin", "string", "brass", "pluck", "bell", "arp",
+    )):
+        return False
+    blob = _blob(cand)
+    if not _rights_ok(blob) or _TEXTURE_BAD.search(blob):
+        return False
+    if str(cand.get("og_type") or "").lower() == "song":
+        return False
+    if _NOTE_NAME.search(blob) or CH.find_full(blob):
+        return False
+    return bool(_TEXTURE_OK.search(blob))
+
+
+def _manifest_credit(url: str) -> dict | None:
+    if not url:
+        return None
+    try:
+        manifest = _json(url)
+    except Exception as exc:
+        print(json.dumps({"event": "discover_manifest", "error": str(exc)[:160]}), flush=True)
+        return None
+    lid = manifest.get("license")
+    if isinstance(lid, dict):
+        lid = lid.get("id") or lid.get("name")
+    parsed = LIC.from_id(str(lid or ""))
+    if not lid or not LIC.allowed(parsed[0]):
+        return None
+    creator = manifest.get("creator") or {}
+    if isinstance(creator, str):
+        author = creator
+    else:
+        author = creator.get("name") or ""
+    title = manifest.get("title") or ""
+    if not str(title).strip() or not str(author).strip():
+        return None
+    chord = manifest.get("chord")
+    symbol = None
+    bass_pc = None
+    if isinstance(chord, dict):
+        symbol = CH.spell(str(chord.get("symbol") or ""))
+        if chord.get("bass_midi") is not None:
+            bass_pc = int(chord["bass_midi"]) % 12
+    elif isinstance(chord, str):
+        symbol = CH.spell(chord)
+    return {
+        "title": str(title).strip(),
+        "author": str(author).strip(),
+        "license": parsed[0],
+        "page": url,
+        "chord_symbol": symbol,
+        "bass_pc": bass_pc,
+    }
+
+
+def _freesound_credit(sid: str) -> dict | None:
+    if not sid:
+        return None
+    try:
+        raw = _get(f"https://freesound.org/s/{sid}/")
+    except Exception as exc:
+        print(json.dumps({"event": "discover_license", "origin": "freesound", "error": str(exc)[:160]}), flush=True)
+        return None
+    page = raw.decode("utf-8", "replace")
+    found = LIC.page_licenses(page)
+    if len(found) != 1 or not LIC.allowed(found[0]):
+        return None
+    title = re.search(r'og:audio:title" content="([^"]*)"', page)
+    artist = re.search(r'og:audio:artist" content="([^"]*)"', page)
+    og_type = re.search(r'og:type" content="([^"]*)"', page)
+    if not title or not artist:
+        return None
+    # The site-wide meta description mentions "ambience" for every sound. Use the sound's own blurb.
+    desc = re.search(r'twitter:description" content="([^"]*)"', page, re.I)
+    if not desc:
+        desc = re.search(r'property="og:description" content="([^"]*)"', page, re.I)
+    tags = " ".join(urllib.parse.unquote(t).replace("-", " ") for t in re.findall(r"/browse/tags/([^\"/?#]+)", page))
+    parts = [html_lib.unescape(title.group(1)), html_lib.unescape(artist.group(1))]
+    if desc:
+        parts.append(html_lib.unescape(desc.group(1)))
+    if tags:
+        parts.append(html_lib.unescape(tags))
+    text = " ".join(parts)
+    if not parts[0].strip() or not parts[1].strip():
+        return None
+    return {
+        "title": parts[0].strip(),
+        "author": parts[1].strip(),
+        "license": found[0],
+        "page": f"https://freesound.org/s/{sid}/",
+        "text": text,
+        "og_type": (og_type.group(1).strip().lower() if og_type else ""),
+    }
+
+
+def _ensure_credit(cand: dict, verify_live: bool, bass=None) -> dict | None:
+    """Copy title, author, license, and page onto the source. Drop the clip when any of them is missing."""
+    cand = dict(cand)
+    src = dict(cand.get("source") or {})
+    kind = src.get("kind")
+    if verify_live and kind == "supplier":
+        credit = _manifest_credit(src.get("manifest") or "")
+        if not credit:
+            return None
+        if cand.get("chord_symbol") and credit.get("chord_symbol") and credit["chord_symbol"] != cand["chord_symbol"]:
+            return None
+        if credit.get("chord_symbol"):
+            cand["chord_symbol"] = credit["chord_symbol"]
+        if credit.get("bass_pc") is not None:
+            cand["bass_pc"] = credit["bass_pc"]
+        src.update({k: credit[k] for k in _CREDIT_KEYS})
+    elif verify_live and kind == "freesound":
+        credit = _freesound_credit(str(src.get("id") or ""))
+        if not credit:
+            return None
+        src.update({k: credit[k] for k in _CREDIT_KEYS})
+        cand["text"] = credit["text"]
+        cand["og_type"] = credit.get("og_type") or ""
+    else:
+        for key in _CREDIT_KEYS:
+            if not src.get(key):
+                src[key] = cand.get(key)
+        if kind == "supplier" and not src.get("page"):
+            src["page"] = src.get("manifest")
+        if kind == "freesound" and not src.get("page") and src.get("id"):
+            src["page"] = f"https://freesound.org/s/{src['id']}/"
+    if bass is not None and cand.get("bass_pc") != bass:
+        return None
+    missing = [key for key in _CREDIT_KEYS if not str(src.get(key) or "").strip()]
+    if missing:
+        return None
+    if str(src.get("author") or "").strip().lower() in ("unknown", "?", "none"):
+        return None
+    lid = LIC.from_id(str(src.get("license") or ""))[0]
+    if not LIC.allowed(lid):
+        return None
+    src["license"] = lid
+    cand["source"] = src
+    cand["title"] = str(src["title"]).strip()
+    cand["author"] = str(src["author"]).strip()
+    cand["license"] = lid
+    cand["page"] = src["page"]
+    return cand
+
+
+def _match_label(cand: dict) -> str:
+    if cand.get("instrument") == "piano":
+        return "piano fallback"
+    if cand.get("voicing_kind") == "alt":
+        return "alt voicing"
+    return "exact"
+
+
+def _tier(cand: dict) -> int:
+    piano = cand.get("instrument") == "piano"
+    alt = cand.get("voicing_kind") == "alt"
+    if not piano and not alt:
+        return 0
+    if not piano and alt:
+        return 1
+    if piano and not alt:
+        return 2
+    return 3
+
+
+def _strike_order(cands: list[dict], hint: str | None, seed: int, index: int, named: str | None) -> list[dict]:
+    pool = [c for c in cands if c.get("origin") != "uiowa" and _rights_ok(_blob(c))]
+    for word in _EXCLUDE:
+        pool = [c for c in pool if not _hint_ok(c.get("instrument") or "", word)]
+    if named:
+        named_pool = [c for c in pool if c.get("origin") == named]
+        if named_pool:
+            pool = named_pool
+    if hint == "piano":
+        pianos = [c for c in pool if c.get("instrument") == "piano"]
+        if pianos:
+            pool = pianos
+    ordered: list[dict] = []
+    for tier_n in range(4):
+        tier = [c for c in pool if _tier(c) == tier_n]
+        def rotate(names: list[str]) -> list[str]:
+            if not names:
+                return []
+            start = (seed + index) % len(names)
+            return names[start:] + names[:start]
+
+        if hint and hint != "piano":
+            hinted_inst = sorted({c.get("instrument") or "" for c in tier if _hint_ok(c.get("instrument") or "", hint)})
+            other_inst = sorted({c.get("instrument") or "" for c in tier if (c.get("instrument") or "") not in hinted_inst})
+            instruments = rotate(hinted_inst) + rotate(other_inst)
+        else:
+            instruments = rotate(sorted({c.get("instrument") or "" for c in tier}))
+        if not instruments:
+            continue
+        buckets = {inst: [c for c in tier if (c.get("instrument") or "") == inst] for inst in instruments}
+        for inst in instruments:
+            rows = sorted(buckets[inst], key=lambda c: (c.get("title") or "", str(c.get("key") or "")))
+            if rows:
+                shift = (seed + index) % len(rows)
+                rows = rows[shift:] + rows[:shift]
+            buckets[inst] = rows
+        while any(buckets.values()):
+            for inst in instruments:
+                if buckets[inst]:
+                    ordered.append(buckets[inst].pop(0))
+    return ordered
+
+
 def search_musicmatter(terms, hint, chords, seed, host_ok_fn=None, registry_url=None) -> list[dict]:
+    """Offerings whose root and quality are one of the composition's chords."""
     offerings = _mm_index(registry_url, host_ok_fn)
-    by: dict[str, list] = {}
-    for off in offerings:
-        label = str(off.get("instrument_name") or off.get("instrument") or off.get("collection") or "unspecified")
-        by.setdefault(label, []).append(off)
+    wanted = {CH.spell(s) or s for s in chords}
     rng = random.Random(seed + 3)
-    scored = []
-    for label, group in by.items():
-        off = group[seed % len(group)]
-        blob = " ".join(str(off.get(k) or "") for k in ("instrument_name", "instrument", "collection", "chord", "quality", "audio"))
-        # The piano full-chord set has no instrument_name. The other collections do.
-        if not off.get("instrument_name") and not re.search(r"synth|choir|arp", blob, re.I):
-            blob += " piano"
-        src = {"kind": "supplier", "manifest": off.get("manifest"), "pitched": False, "_host_ok": host_ok_fn}
-        cand = _cand("musicmatter", label, off.get("_supplier") or "musicmatter", "CC-BY-SA-4.0", f"{label} {blob}", src, terms, hint, chords)
-        if cand:
-            scored.append(cand)
-    ranked = [(-c["fit"], rng.random(), c) for c in scored]
-    ranked.sort(key=lambda row: (row[0], row[1]))
-    return [row[2] for row in ranked[:8]]
+    buckets: dict[tuple, list] = {}
+    for off in offerings:
+        if not off.get("manifest"):
+            continue
+        sym = _offering_symbol(off)
+        if not sym or sym not in wanted:
+            continue
+        inst = _offering_instrument(off)
+        kind = _voicing_kind(off)
+        buckets.setdefault((sym, inst, kind), []).append(off)
+    out = []
+    for (sym, inst, kind), group in buckets.items():
+        group = sorted(group, key=lambda o: (0 if o.get("default_voicing") else 1, rng.random()))
+        for off in group[:2]:
+            blob = " ".join(str(off.get(k) or "") for k in (
+                "instrument_name", "instrument", "collection", "chord", "root", "quality", "audio",
+            ))
+            title = f"{off.get('instrument_name') or inst} {sym}"
+            author = off.get("_supplier") or "musicmatter"
+            src = {
+                "kind": "supplier",
+                "manifest": off.get("manifest"),
+                "pitched": True,
+                "page": off.get("manifest"),
+                "title": title,
+                "author": author,
+                "license": "CC-BY-SA-4.0",
+                "_host_ok": host_ok_fn,
+            }
+            cand = _cand("musicmatter", title, author, "CC-BY-SA-4.0", f"{title} {blob}", src, terms, hint, chords)
+            if not cand:
+                continue
+            cand["chord_symbol"] = sym
+            cand["voicing_kind"] = kind
+            cand["pitched"] = True
+            cand["instrument"] = inst
+            out.append(cand)
+    return out
 
 
 def search_freesound(terms, hint, chords, seed, host_ok_fn=None, registry_url=None) -> list[dict]:
@@ -277,8 +631,15 @@ def search_openverse(terms, hint, chords, seed, host_ok_fn=None, registry_url=No
         dur = row.get("duration")
         if isinstance(dur, (int, float)) and dur > 20000:
             src["range_bytes"] = 1_200_000
+        if not _rights_ok(blob):
+            continue
         cand = _cand("openverse", title, creator, lid, blob, src, terms, hint, chords)
         if cand:
+            declared = _declared_chord(str(title), chords)
+            if declared:
+                cand["chord_symbol"] = declared
+                cand["voicing_kind"] = "exact"
+                cand["pitched"] = True
             out.append(cand)
     return out[:6]
 
@@ -314,8 +675,15 @@ def search_internet_archive(terms, hint, chords, seed, host_ok_fn=None, registry
             "range_bytes": 1_200_000, "pitched": False, "_host_ok": host_ok_fn,
         }
         blob = f"{title} {creator}"
+        if not _rights_ok(blob):
+            continue
         cand = _cand("internet_archive", str(title), str(creator), lid, blob, src, terms, hint, chords)
         if cand:
+            declared = _declared_chord(str(title), chords)
+            if declared:
+                cand["chord_symbol"] = declared
+                cand["voicing_kind"] = "exact"
+                cand["pitched"] = True
             out.append(cand)
         if len(out) >= 4:
             break
@@ -388,8 +756,16 @@ def search_wikimedia(terms, hint, chords, seed, host_ok_fn=None, registry_url=No
             "title": title, "author": artist, "source": "Wikimedia Commons",
             "pitched": False, "_host_ok": host_ok_fn,
         }
-        cand = _cand("wikimedia", title, artist, lid, f"{title} {artist}", src, terms, hint, chords)
+        blob = f"{title} {artist}"
+        if not _rights_ok(blob):
+            continue
+        cand = _cand("wikimedia", title, artist, lid, blob, src, terms, hint, chords)
         if cand:
+            declared = _declared_chord(str(title), chords)
+            if declared:
+                cand["chord_symbol"] = declared
+                cand["voicing_kind"] = "exact"
+                cand["pitched"] = True
             out.append(cand)
     return out
 
@@ -421,54 +797,28 @@ def search_ccmixter(terms, hint, chords, seed, host_ok_fn=None, registry_url=Non
             "range_bytes": 1_200_000, "pitched": False, "_host_ok": host_ok_fn,
         }
         tags = row.get("upload_tags") or ""
-        cand = _cand("ccmixter", title, author, lid, f"{title} {tags}", src, terms, hint, chords)
+        blob = f"{title} {tags}"
+        if not _rights_ok(blob):
+            continue
+        cand = _cand("ccmixter", title, author, lid, blob, src, terms, hint, chords)
         if cand:
+            declared = _declared_chord(str(title), chords)
+            if declared:
+                cand["chord_symbol"] = declared
+                cand["voicing_kind"] = "exact"
+                cand["pitched"] = True
             out.append(cand)
     return out[:4]
 
 
 def search_uiowa(terms, hint, chords, seed, host_ok_fn=None, registry_url=None) -> list[dict]:
-    lib = interpret._data("library.json")
-    banks = lib.get("banks") or {}
-    names = sorted(banks)
-    if not names:
-        return []
-    wanted = [n for n in names if any(t in n or n in t for t in terms)]
-    rng = random.Random(seed + 11)
-    if not wanted:
-        rng.shuffle(names)
-        wanted = names[:1]
-    out = []
-    for name in wanted:
-        notes = (banks.get(name) or {}).get("notes") or {}
-        ids = [sid for group in notes.values() for sid in group]
-        if not ids:
-            continue
-        sid = ids[seed % len(ids)]
-        src = dict(lib["sources"][sid])
-        kind = src.get("kind")
-        if kind == "uiowa_mis":
-            origin = "uiowa"
-            author = "University of Iowa Electronic Music Studios"
-            license_id = "PD"
-        elif kind == "freesound":
-            if not host_ok("freesound.org", host_ok_fn) or not host_ok("cdn.freesound.org", host_ok_fn):
-                continue
-            origin = "freesound"
-            author = "Freesound"
-            license_id = "CC0-1.0"
-        elif kind == "supplier":
-            origin = "musicmatter"
-            author = "musicmatter"
-            license_id = "CC-BY-SA-4.0"
-        else:
-            continue
-        src["_host_ok"] = host_ok_fn
-        src.setdefault("pitched", False)
-        cand = _cand(origin, f"{name}", author, license_id, name, src, terms, hint, chords)
-        if cand:
-            out.append(cand)
-    return out
+    """UIowa MIS is a library of single notes.
+
+    The terms are public-domain equivalent (see ncperf.fetch.IOWA_TERMS) and
+    fetch.resolve checks them live. A single note is not a chord strike, and it
+    is not an unpitched bed, so this search contributes nothing.
+    """
+    return []
 
 
 SEARCHERS = {
@@ -630,6 +980,24 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
         hits.sort(key=lambda c: (-c["fit"], c["title"]))
         for hit in hits:
             groups.setdefault(hit.get("origin") or origin, []).append(hit)
+    seen = {hit["key"] for hits in groups.values() for hit in hits if hit.get("key")}
+    texture_terms = ["field recording", "room tone", "ambience"]
+    for origin in order:
+        if origin in ("musicmatter", "uiowa"):
+            continue
+        fn = fns.get(origin)
+        if not fn:
+            continue
+        try:
+            extra = fn(texture_terms, None, syms, seed + 17, host_ok_fn, registry_url) or []
+        except Exception as exc:
+            errors[origin + ":texture"] = str(exc)[:180]
+            extra = []
+        for hit in extra:
+            if not hit or hit.get("key") in seen:
+                continue
+            seen.add(hit["key"])
+            groups.setdefault(hit.get("origin") or origin, []).append(hit)
     for origin in ORIGINS:
         groups.setdefault(origin, [])
     print(json.dumps({
@@ -640,28 +1008,43 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
         "counts": {k: len(v) for k, v in groups.items()},
         "errors": errors,
     }, ensure_ascii=False), flush=True)
-    n = min(6, max(len(syms), 2))
-    rejected: set[str] = set()
-    chosen: list[dict] = []
-    for _attempt in range(8):
-        usable = {origin: [c for c in hits if c["key"] not in rejected] for origin, hits in groups.items()}
-        picked = _select(usable, order, n, hint, named)
-        if not picked:
-            chosen = []
-            break
-        if not verify_live:
-            chosen = picked
-            break
-        bad = [c for c in picked if not _declared_on_page(c) or not _audio_reachable(c)]
-        if not bad:
-            chosen = picked
-            break
-        for cand in bad:
-            rejected.add(cand["key"])
-    if not chosen:
-        _EXCLUDE = previous_exclude
-        raise ValueError("No licensed sounds came back from the sources that were queried.")
-    # One clip per chord, repeating the chosen set so a short pool still covers the form.
+    pool = [c for hits in groups.values() for c in hits]
+    for cand in pool:
+        if cand.get("chord_symbol"):
+            spelled = CH.spell(str(cand["chord_symbol"])) or cand["chord_symbol"]
+            cand["chord_symbol"] = spelled
+            if spelled not in syms:
+                cand["_wrong_chord"] = True
+        else:
+            declared = _declared_chord(cand.get("title") or "", syms)
+            if declared:
+                cand["chord_symbol"] = declared
+                cand["voicing_kind"] = cand.get("voicing_kind") or "exact"
+                cand["pitched"] = True
+        if cand.get("origin") != "musicmatter" and not _rights_ok(_blob(cand)):
+            cand["_blocked"] = True
+
+    def accept(cand: dict, sym: str | None, bass) -> dict | None:
+        if cand.get("_blocked"):
+            return None
+        got = _ensure_credit(cand, verify_live, bass=bass)
+        if not got:
+            return None
+        if sym and got.get("chord_symbol") != sym:
+            declared = _declared_chord(got.get("title") or "", [sym])
+            if declared != sym:
+                return None
+            got["chord_symbol"] = sym
+            got["voicing_kind"] = got.get("voicing_kind") or "exact"
+            got["pitched"] = True
+        if not _rights_ok(_blob(got)):
+            return None
+        if verify_live and (not _declared_on_page(got) or not _audio_reachable(got)):
+            return None
+        src = {k: v for k, v in got["source"].items() if not str(k).startswith("_")}
+        got["source"] = src
+        return got
+
     sources = {}
     events = []
     used: dict[str, str] = {}
@@ -680,10 +1063,24 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
     dur = length / len(seq)
     chords = []
     strike_cands: list[dict] = []
-    for i, (sym, _bass) in enumerate(seq):
-        cand = chosen[i % len(chosen)]
-        strike_cands.append(cand)
-        sid = sid_for(cand, str(i))
+    per_chord = []
+    missing = []
+    for i, (sym, bass) in enumerate(seq):
+        usable = [
+            c for c in pool
+            if c.get("chord_symbol") == sym and not c.get("_wrong_chord") and not c.get("_blocked") and c.get("origin") != "uiowa"
+        ]
+        picked = None
+        for cand in _strike_order(usable, hint, seed, i, named):
+            picked = accept(cand, sym, bass)
+            if picked:
+                break
+        if not picked:
+            missing.append(sym)
+            continue
+        strike_cands.append(picked)
+        sid = sid_for(picked, str(len(sources)))
+        match = _match_label(picked)
         chords.append({
             "t": round(i * dur, 3),
             "dur": round(dur, 3),
@@ -692,47 +1089,89 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
             "section": "A" if i < len(seq) / 2 else "B",
         })
         events.append({
-            "t": round(i * dur + 0.2, 3),
+            "t": round(i * dur + 0.35, 3),
             "source": sid,
             "offset_s": 0.0,
-            "dur_s": round(min(8.0, max(2.0, dur * 0.9)), 3),
-            "fade_in_s": 0.03,
-            "fade_out_s": 1.2,
-            "gain": 0.72 if i % len(chosen) == 0 else 0.58,
+            "dur_s": 4.2,
+            "fade_in_s": 0.02,
+            "fade_out_s": 1.4,
+            "gain": 0.72,
             "flatten": False,
-            "role": f"{cand['instrument']} ({cand['origin']}) {cand['title'][:80]}",
+            "role": f"{picked['instrument']} ({picked['origin']}) {sym} {match}: {picked['title'][:80]}",
         })
+        per_chord.append({
+            "symbol": sym,
+            "bass": bass,
+            "origin": picked["origin"],
+            "instrument": picked["instrument"],
+            "match": match,
+            "title": picked["title"],
+            "author": picked["author"],
+            "license": picked["license"],
+            "page": picked["page"],
+            "source": sid,
+        })
+    if missing:
+        _EXCLUDE = previous_exclude
+        raise ValueError(
+            "No exact chord recording for: " + ", ".join(dict.fromkeys(missing))
+            + ". A pitched clip in another key was not used."
+        )
     bed = None
-    for cand in chosen:
-        if cand["origin"] != chosen[0]["origin"]:
-            bed = cand
-            break
+    textures = []
+    for cand in pool:
+        if cand.get("_blocked") or cand.get("_wrong_chord") or cand.get("chord_symbol"):
+            continue
+        if cand.get("origin") in ("musicmatter", "uiowa") or cand.get("pitched"):
+            continue
+        kind = (cand.get("source") or {}).get("kind")
+        if _texture_ok(cand) or (verify_live and kind == "freesound"):
+            textures.append(cand)
+    random.Random(seed + 29).shuffle(textures)
+    for cand in textures:
+        got = accept(cand, None, None)
+        if not got:
+            continue
+        got["instrument"] = _instrument_label(got.get("text") or got.get("title") or "", None)
+        if _declared_chord(got.get("title") or "", syms):
+            continue
+        if not _texture_ok(got):
+            continue
+        bed = got
+        break
     layers = [{
         "id": "strikes",
         "type": "clips",
         "bus": "keys",
-        "role": "chord colors from several sources, trimmed, not time-stretched",
+        "role": "chord strikes matched to the composition, trimmed, not time-stretched",
         "events": events,
     }]
+    bed_note = "Texture: none. No unpitched field recording, room tone, or pad passed the rights check."
     if bed:
         sid = sid_for(bed, "bed")
+        bed_events = []
+        t = 0.0
+        while t < length - 1.0:
+            bed_events.append({
+                "t": round(t, 3),
+                "source": sid,
+                "offset_s": 0.0,
+                "dur_s": 10.0,
+                "fade_in_s": 1.2,
+                "fade_out_s": 1.2,
+                "gain": 0.22,
+                "flatten": False,
+                "role": f"texture ({bed['origin']}) {bed['title'][:80]}",
+            })
+            t += 8.0
         layers.append({
             "id": "bed",
             "type": "clips",
             "bus": "pad",
-            "role": f"bed {bed['instrument']} ({bed['origin']}), trimmed, not time-stretched",
-            "events": [{
-                "t": 0.0,
-                "source": sid,
-                "offset_s": 0.0,
-                "dur_s": round(min(12.0, length), 3),
-                "fade_in_s": 1.5,
-                "fade_out_s": 2.0,
-                "gain": 0.28,
-                "flatten": False,
-                "role": f"bed {bed['instrument']} ({bed['origin']}) {bed['title'][:80]}",
-            }],
+            "role": f"texture {bed['instrument']} ({bed['origin']}), unaltered clips layered and crossfaded",
+            "events": bed_events,
         })
+        bed_note = f"Texture: {bed['title']} ({bed['origin']}, {bed['license']})."
     mix_counts: Counter = Counter(c["origin"] for c in strike_cands)
     instruments = []
     for cand in strike_cands:
@@ -751,12 +1190,29 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
         "returned": {k: len(v) for k, v in groups.items()},
         "terms": query,
         "instrument_hint": hint,
-        "rule": "Same query to every origin. Round-robin selection. One origin is capped at half the clips unless the notes name that origin, or it is the only origin that returned sounds.",
+        "per_chord": per_chord,
+        "texture": None if not bed else {
+            "origin": bed["origin"],
+            "title": bed["title"],
+            "author": bed["author"],
+            "license": bed["license"],
+            "page": bed["page"],
+        },
+        "rule": (
+            "Chord match wins over origin balance. A strike is an exact root/quality/bass match, "
+            "then an alternate voicing of that same chord, then the piano recording of that chord. "
+            "A pitched clip in any other key is not used. Texture is unpitched (field recording, room tone, pad) "
+            "and is omitted when none is safe. Every source has a title, author, license, and page."
+        ),
     }
+    chord_note = "; ".join(
+        f"{row['symbol']} {row['match']} via {row['instrument']} ({row['origin']})"
+        for row in per_chord
+    )
     note = (
-        "Source mix: " + ", ".join(f"{k} {v}" for k, v in mix_counts.most_common())
-        + ". Instruments: " + ", ".join(instruments)
-        + ". No pitch-shift and no time-stretch; clips are trimmed and faded."
+        "Per chord: " + chord_note
+        + ". " + bed_note
+        + " No pitch-shift and no time-stretch; strikes are trimmed and the bed is layered from unaltered clips."
     )
     title = (comp.get("title") or "Untitled")
     soft = bool(re.search(r"ambient|soft|calm|slow|gentle|dark|no harsh", words, re.I))
@@ -773,7 +1229,7 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
         "interpreter": {
             "kind": "discover",
             "at": __import__("datetime").datetime.now().astimezone().isoformat(timespec="seconds"),
-            "note": "Sounds were chosen by querying every origin with the same words and rotating the pick. musicmatter is one Supplier, not the default.",
+            "note": "Each chord strike matches that chord's root and quality. Texture is an unpitched field recording, room tone, or pad. musicmatter is one Supplier, not the default.",
         },
         "seed": int(seed),
         "length_s": round(length, 3),

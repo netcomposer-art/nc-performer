@@ -563,11 +563,8 @@ class ServiceTest(unittest.TestCase):
         glass = read_composition(os.path.join(ROOT, "examples", "glass-garden.composition.md"))
         glass["composer"] = glass.get("composer") or "anonymous"
         with egress_guard(s):
-            discovered, mode = app.runner._interpret(glass, 1, {})
-        self.assertEqual(mode, "discover")
-        self.assertEqual(discovered["interpreter"]["kind"], "discover")
-        self.assertNotIn("stretch_to_s", json.dumps(discovered))
-        self.assertIn("source_mix", discovered)
+            with self.assertRaises(Reject):
+                app.runner._interpret(glass, 1, {})
         self.assertEqual(calls["n"], 1)
 
         # Portable kit submission of this record, unsigned, through nc submit.
@@ -648,13 +645,11 @@ def _tiny_plan(manifest: str) -> dict:
                 "t": 0.1,
                 "source": "glass",
                 "dur_s": 1.0,
-                "stretch_to_s": 5.2,
-                "src_window_s": [0.0, 1.0],
                 "fade_in_s": 0.05,
                 "fade_out_s": 0.3,
                 "gain": 0.8,
                 "flatten": False,
-                "role": "time-stretched tone, pitch unchanged",
+                "role": "glass tone, trimmed, not time-stretched",
             }],
         }],
         "master": {

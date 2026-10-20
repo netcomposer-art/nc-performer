@@ -14,7 +14,7 @@ The rules are those of netcomposer.art and the kit enforces them:
 - Inputs: **CC0, CC BY, CC BY-SA or public domain**. NC, ND, Sampling+ and custom licenses are rejected.
   Licenses are read **live** at render time (Freesound: the sound's own page; Suppliers: the manifest;
   UIowa MIS: the terms page).
-- **No pitch-shifting.** There is no field for it. Time-stretch is allowed (Rubber Band, duration changes, pitch does not).
+- **No pitch-shifting and no time-stretching.** A recording keeps the pitch and the duration it was published with. A pad is made by layering and crossfading unaltered copies.
 - Pitch is **measured** (pYIN, FFT for bells), never taken from a label. A bank lists candidates per note;
   the first one that measures as the note within the tolerance (default 15 cents) is used, and every
   rejection is written into the record.
@@ -22,7 +22,7 @@ The rules are those of netcomposer.art and the kit enforces them:
 - Every Performance gets a full record: each source with URL, license, author, sha256 and uses; every
   setting and the seed; the interpreter; the outputs with sha256 and loudness; a `record_hash`.
 
-The transforms are called **hacks**: time-stretch, decay flatten, level match, fades, filters, brighten
+The transforms are called **hacks**: decay flatten, level match, fades, filters, brighten
 automation, ping-pong delay, reverb (Dragonfly Hall by default), high-pass, high shelf, loudness.
 
 ## Licenses
@@ -40,8 +40,7 @@ The kit calls them as separate installed tools; its own code stays MIT. Without 
 
 ## Quickstart
 
-Needs Python 3.10+ and `ffmpeg` with the `rubberband` filter (check: `ffmpeg -hide_banner -filters | grep rubberband`;
-on Debian/Ubuntu `apt install ffmpeg`, on macOS `brew install ffmpeg rubberband` or a build with librubberband).
+Needs Python 3.10+ and `ffmpeg` (on Debian/Ubuntu `apt install ffmpeg`, on macOS `brew install ffmpeg`). Decoding resamples to 48 kHz. That sample-rate conversion does not change pitch.
 
 Recommended for the best sound (each is optional; the record says what actually ran):
 
@@ -49,7 +48,7 @@ Recommended for the best sound (each is optional; the record says what actually 
 |---|---|---|
 | Dragonfly Hall (VST3) | Debian/Ubuntu `apt install dragonfly-reverb`; macOS/Windows: the VST3 from the [releases](https://github.com/michaelwillis/dragonfly-reverb/releases) into the standard VST3 folder | default reverb hack |
 | pedalboard | `pip install "nc-performer[reverb] @ git+https://github.com/netcomposer-art/nc-performer"` (or `pip install pedalboard`) | runs Dragonfly headless, offline |
-| Rubber Band CLI 3.x | `apt install rubberband-cli` / `brew install rubberband` | R3 ("finer") time-stretch |
+| ffmpeg | `apt install ffmpeg` / `brew install ffmpeg` | decode, 48 kHz resample, FLAC and MP3 |
 
 Dragonfly is looked up in `master.reverb.vst3_path`, then `NC_DRAGONFLY_VST3`, then the standard VST3 folders.
 
@@ -99,7 +98,7 @@ characters). The answer is validated against the schema; up to two repair rounds
 **No LLM at all:** write `plan.json` yourself (or let your agent write it) and use `--plan`. The record
 then says `interpreter: human/agent-written plan`. `--stub` gives a starting point: it finds the chord
 symbols in the words, voices each one from the full chord set by voice leading, and plays chord strikes
-plus a time-stretched pad (no melody or triplets; add a `notes` layer).
+plus a pad of overlapped unaltered copies (no melody or triplets; add a `notes` layer).
 
 ## plan.json
 
@@ -116,10 +115,11 @@ A plan holds: `sections`; `chords` (time, length, symbol, voicing as MIDI notes)
 `url` with a declared license); `banks`
 (instrument -> note -> candidate source ids); `layers` (`chord_notes`, `chord_pad`, `chord_under`, `drone`,
 `clips`, `notes` for the line and triplets); `master` (buses with the hacks, reverb, loudness); `quality`
-(time-stretch and resampling engines); `seed`; `notes`. Hosted Perform
+(resampling engine); `seed`; `notes`. Hosted Perform
 ([`service/`](service/)) searches Suppliers and the open commons with the same words and does not
-prefer one supplier. That search trims clips instead of time-stretching them. `--stub` still drafts
-a musicmatter chord plan with a time-stretched pad, for editing by hand.
+prefer one supplier. A chord strike has to be that chord. `--stub` drafts a musicmatter chord plan
+with a pad of overlapped unaltered copies, for editing by hand. Older example plans in this
+repository asked for `stretch_to_s`; the renderer now refuses those plans.
 
 ## The master hacks (kit 0.2)
 
@@ -158,12 +158,12 @@ acts where a peak would pass the ceiling. The record gives `mode_actual` (`linea
 with the largest gain reduction). `method: loudnorm` is the kit 0.1 ffmpeg two-pass; ffmpeg can silently
 switch it to dynamic (AGC) mode, and the record then says `mode_actual: dynamic`.
 
-**Quality** (`quality`): `stretch_engine` `auto` (default: Rubber Band CLI R3 `--fine` when installed, else
-the ffmpeg rubberband filter, R2) and `resampler` `soxr` (default, precision 28; ffmpeg's `swr` if soxr is
-missing). Pitch never changes.
+**Quality** (`quality`): `resampler` `soxr` (default, precision 28; ffmpeg's `swr` if soxr is
+missing). That is sample-rate conversion to 48 kHz. Pitch and duration stay as published.
+`stretch_engine` is ignored: time-stretch is refused.
 
-To reproduce a kit 0.1 render: `reverb: {engine: synthetic, send_rule: legacy_peak, ...}`,
-`tone_filter: lp_blend`, `loudness.method: loudnorm`, `quality: {stretch_engine: ffmpeg-rubberband, resampler: swr}`.
+To reproduce a kit 0.1 render's reverb and loudness: `reverb: {engine: synthetic, send_rule: legacy_peak, ...}`,
+`tone_filter: lp_blend`, `loudness.method: loudnorm`. The time-stretch those takes used is no longer available.
 
 ## Sources
 
@@ -217,7 +217,7 @@ rules and submit.
 OpenAI-compatible server (`tests/mock_llm.py`, including a repair round), BWV 846 parsing, `verify-record` on the
 two published ambient-cm records in `examples/ambient-cm/records/`, and the kit 0.2 hacks: the reverb send rule,
 Dragonfly determinism and decay (skipped if Dragonfly is not installed), the fallback, the IR list, the
-true-peak limiter, the high shelf, time-stretch without pitch change, and soxr resampling. No network needed. `tests/check_render.py <out_dir>` checks a render: loudness, true peak, clipping and
+true-peak limiter, the high shelf, the refusal of time-stretch, and soxr resampling. No network needed. `tests/check_render.py <out_dir>` checks a render: loudness, true peak, clipping and
 the chords (chroma of the harmony stems against each chord's voicing).
 
 ---

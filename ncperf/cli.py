@@ -15,7 +15,7 @@ def _comp_md(title, composer, comp, perf, minutes=None):
     return f"""# {title}
 
 **Composer of this Composition:** {composer} · **License out:** CC BY-SA 4.0
-**Allowed transforms:** trim, gain, fade, filter, reverb, delay, time_stretch (no pitch-shift)
+**Allowed transforms:** trim, gain, fade, filter, reverb, delay (no pitch-shift, no time-stretch)
 
 ## Composition
 
@@ -28,7 +28,7 @@ def _comp_md(title, composer, comp, perf, minutes=None):
 ## Material rules
 
 - Inputs: CC0, CC BY, CC BY-SA or public domain only.
-- No pitch-shifting. Time-stretch is fine.
+- No pitch-shifting and no time-stretching.
 - Output license: CC BY-SA 4.0.
 
 ## Credits
