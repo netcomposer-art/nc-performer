@@ -44,7 +44,6 @@ from . import interpret
 from . import licenses as LIC
 from . import notemap
 from .parallel import run_all, submit
-from . import pitch
 from . import progress
 from . import take
 from .fit import fit_plan
@@ -389,6 +388,31 @@ def _offering_bass_pc(off: dict):
     return bass
 
 
+def _collection_id(off: dict) -> str:
+    """One catalog pack. The main set is not ranked ahead of the others."""
+    named = off.get("collection")
+    if isinstance(named, str) and named.strip():
+        return named.strip().lower()
+    name = str(off.get("audio") or off.get("manifest") or "").rsplit("/", 1)[-1]
+    match = re.match(r"(00[a-z]_main(?:-voicings)?|\d{2}_[a-z]+(?:-[a-z]+)*)_", name, re.I)
+    if match:
+        return match.group(1).lower()
+    return "catalog"
+
+
+def _inversion_id(off: dict) -> str:
+    path = f"{off.get('audio') or ''} {off.get('manifest') or ''}".lower()
+    if "inv3" in path:
+        return "inv3"
+    if "inv2" in path:
+        return "inv2"
+    if "inv1" in path:
+        return "inv1"
+    if "root" in path:
+        return "root"
+    return "other"
+
+
 def _offering_instrument(off: dict) -> str:
     name = str(off.get("instrument_name") or "").strip().lower()
     if name:
@@ -724,38 +748,28 @@ def search_musicmatter(terms, hint, chords, seed, host_ok_fn=None, registry_url=
     out = []
     for (sym, inst, kind), group in buckets.items():
         group = sorted(group, key=lambda o: (0 if o.get("default_voicing") else 1, rng.random()))
-        # One-shot keeps two files. Gather also keeps a root and each inversion, so a
-        # written bass (Dm7/C) is in the pool when the note files did not finish.
-        # Main-catalog files come first. A filename like G7sharp9 still spells as G,
-        # and that must not take the inversion slot from the plain G voicing.
+        # One-shot keeps two files. Gather keeps a root and each inversion from
+        # every pack, so a second collection is not dropped in favour of 00a_main.
+        # A filename like G7sharp9 still spells as G, and that must not take the
+        # inversion slot of the plain G voicing inside the same pack.
         if _plan_until.get() is None:
             kept = group[:2]
         else:
-            group = sorted(group, key=lambda o: (
-                0 if ("00a_main" in (o.get("manifest") or "") or "00b_main" in (o.get("manifest") or "")) else 1,
-                0 if o.get("default_voicing") else 1,
-                rng.random(),
-            ))
             kept = []
-            seen_inv = set()
+            by_pack: dict[str, list] = {}
             for off in group:
-                path = f"{off.get('audio') or ''} {off.get('manifest') or ''}".lower()
-                if "inv3" in path:
-                    inv = "inv3"
-                elif "inv2" in path:
-                    inv = "inv2"
-                elif "inv1" in path:
-                    inv = "inv1"
-                elif "root" in path:
-                    inv = "root"
-                else:
-                    inv = "other"
-                if inv in seen_inv:
-                    continue
-                seen_inv.add(inv)
-                kept.append(off)
-                if len(kept) >= 4:
-                    break
+                by_pack.setdefault(_collection_id(off), []).append(off)
+            for pack in sorted(by_pack):
+                seen_inv = set()
+                rows = sorted(by_pack[pack], key=lambda o: (0 if o.get("default_voicing") else 1, rng.random()))
+                for off in rows:
+                    inv = _inversion_id(off)
+                    if inv in seen_inv:
+                        continue
+                    seen_inv.add(inv)
+                    kept.append(off)
+                    if len(seen_inv) >= 4:
+                        break
             if not kept:
                 kept = group[:2]
         for off in kept:
@@ -784,6 +798,7 @@ def search_musicmatter(terms, hint, chords, seed, host_ok_fn=None, registry_url=
             cand["voicing_kind"] = kind
             cand["pitched"] = True
             cand["instrument"] = inst
+            cand["collection"] = _collection_id(off)
             bass_pc = _offering_bass_pc(off)
             if bass_pc is not None:
                 cand["bass_pc"] = bass_pc
@@ -1884,6 +1899,7 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
 
     def _tones(opt: dict) -> list[dict]:
         tones = []
+        from . import pitch
         for sample in opt.get("samples") or []:
             tones.append({
                 "midi": int(sample["midi"]),

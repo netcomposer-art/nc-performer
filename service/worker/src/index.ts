@@ -41,6 +41,7 @@ import {
 } from "./keep";
 import { CANCELLED_MESSAGE, cancelToken, queueErrorIsCancel } from "./cancel";
 import { REQUIRED_OUTPUTS, containerPageUpdate, missingOutputs, readableBytes } from "./outputs";
+import { mapPool } from "./pool";
 import { applyPerformHit, burstBlock, claimToken, corsHeaders, failureForPage, forPage, GATHER_CACHE, isInternalFailure, jobStatusFields, newId, pageGatherState, PER_10MIN, PER_DAY, proxyHosts, publicInternalError, publishedRegistryStats, queuedGatherFields, registryPublicStats, rejectPlan, siteverifyRequest, testerPass, turnstileDeniedBody, turnstileFailure, turnstileToken, wordsTooLong, type FoundSound, type RateBlock, type RegistryStats, type TurnstileFailure } from "./policy";
 
 // @cloudflare/containers 0.3.7 looks up this exact export on ctx.exports when
@@ -96,11 +97,12 @@ const TURNSTILE_TEST: Record<string, boolean> = {
 };
 const DUMMY_TOKEN = "XXXX.DUMMY.TOKEN.XXXX";
 const ID_RE = /^[hkg]-[0-9abcdefghjkmnpqrstvwxyz]{12}$/;
-/** Importing Dragonfly and the Python audio stack on a cold instance can take a few minutes. */
+/** A cold container can take a while to schedule. Gather no longer imports librosa before the port opens. */
 const PORT_READY_MS = 300_000;
 /** One container for every Perform, so a focus ping warms the next job. */
 const WARM_ID = "nc-warm";
-const POLL_MS = 300;
+/** Status is read immediately, then this often. The old 300 ms sleep ran before the first read. */
+const POLL_MS = 100;
 const JOB_WALL_MS = 10 * 60 * 1000;
 
 export interface Env {
@@ -989,13 +991,11 @@ async function runContainer(env: Env, id: string): Promise<void> {
       await signalContainerCancel(env, id);
       return;
     }
-    await sleep(POLL_MS);
-    if (await abandonIfCancelled(env, id)) {
-      await signalContainerCancel(env, id);
-      return;
-    }
     const res = await containerFetch(container, id, `http://container/internal/jobs/${id}`, { headers });
-    if (!res.ok) continue;
+    if (!res.ok) {
+      await sleep(POLL_MS);
+      continue;
+    }
     last = await res.json();
     if (last.preview_ready === true && !previewOnR2) {
       try {
@@ -1030,6 +1030,7 @@ async function runContainer(env: Env, id: string): Promise<void> {
     }
     await stub.patch(patch);
     if (last.state === "done" || last.state === "failed" || last.state === "rejected") break;
+    await sleep(POLL_MS);
   }
   if (await abandonIfCancelled(env, id)) {
     await signalContainerCancel(env, id);
@@ -1182,6 +1183,15 @@ async function warmContainer(env: Env): Promise<void> {
   });
   await container.setAllowedHosts(proxyHosts(allowedHosts(env)));
   await containerFetch(container, WARM_ID, "http://container/health");
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (env.NC_INTERNAL_TOKEN) headers.authorization = `Bearer ${env.NC_INTERNAL_TOKEN}`;
+  try {
+    await seedNoteIndex(env, container, WARM_ID, headers);
+    await seedRegistry(env, container, WARM_ID, headers);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    console.error(JSON.stringify({ event: "warm_seed", detail }));
+  }
 }
 
 async function signalContainerCancel(env: Env, id: string): Promise<void> {
@@ -1250,11 +1260,22 @@ async function seedNoteIndex(env: Env, container: DurableObjectStub<RenderContai
 
 async function seedRegistry(env: Env, container: DurableObjectStub<RenderContainer>, id: string, headers: Record<string, string>): Promise<void> {
   // The checked-sounds registry is metadata. A newer copy in R2 replaces the bundled file.
+  // The body is about 5.5 MB. Skip the upload when this container already has that etag.
+  const head = await env.PERFORMANCES.head(REGISTRY_KEY);
+  if (!head || head.size <= 0 || head.size > 8 * 1024 * 1024) return;
+  const etag = head.httpEtag || "";
+  if (etag) {
+    const meta = await containerFetch(container, id, "http://container/internal/registry/meta", { headers });
+    if (meta.ok) {
+      const body = await meta.json() as { etag?: string };
+      if (body.etag && body.etag === etag) return;
+    }
+  }
   const obj = await env.PERFORMANCES.get(REGISTRY_KEY);
-  if (!obj || obj.size <= 0 || obj.size > 8 * 1024 * 1024) return;
+  if (!obj || obj.size <= 0) return;
   const seeded = await containerFetch(container, id, "http://container/internal/registry", {
     method: "POST",
-    headers,
+    headers: { ...headers, "x-registry-etag": etag },
     body: await obj.arrayBuffer(),
   });
   if (!seeded.ok && seeded.status !== 204) {
@@ -1296,15 +1317,16 @@ async function copyGather(env: Env, container: DurableObjectStub<RenderContainer
   const raw = await res.arrayBuffer();
   await env.PERFORMANCES.put(`gathers/${id}/collection.json`, raw, { httpMetadata: { contentType: "application/json" } });
   const doc = JSON.parse(new TextDecoder().decode(raw)) as GatherDoc;
-  for (const file of doc.files || []) {
+  const files = (doc.files || []).filter((file) => /^[A-Za-z0-9._-]{1,80}$/.test(String(file.sid || "")));
+  // One wave of copies. Sixteen serial container-to-R2 hops were the long tail of a Canon Gather.
+  await mapPool(files, 8, async (file) => {
     const sid = String(file.sid || "");
-    if (!/^[A-Za-z0-9._-]{1,80}$/.test(sid)) continue;
     const audio = await containerFetch(container, id, `http://container/internal/jobs/${id}/audio/${sid}`, { headers });
-    if (!audio.ok) continue;
+    if (!audio.ok) return;
     await env.PERFORMANCES.put(`gathers/${id}/audio/${sid}`, await audio.arrayBuffer(), {
       httpMetadata: { contentType: audioType(file.ext), cacheControl: GATHER_CACHE },
     });
-  }
+  });
   await env.PERFORMANCES.put(`gathers/${id}/meta.json`, JSON.stringify({ id, claim_token_sha256: doc.claim_hash || null }), {
     httpMetadata: { contentType: "application/json" },
   });

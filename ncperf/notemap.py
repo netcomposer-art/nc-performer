@@ -26,8 +26,13 @@ from . import deadline
 from . import fetch
 from . import licenses as LIC
 from .parallel import run_all
-from . import pitch
 from .util import SR, decode
+
+
+def _pitch():
+    """Librosa stays out of process start. Gather does not measure pitch."""
+    from . import pitch
+    return pitch
 
 UA = "nc-performer-kit/0.1 (+https://netcomposer.art/agents/)"
 MAP_VERSION = 1
@@ -101,7 +106,7 @@ def _midi(name: str, octave: str) -> int:
 
 def note_ok(meas: dict, expect: int, tol: float = 15.0) -> bool:
     """True when the measurement is the expected MIDI note, within tolerance."""
-    return bool(pitch.accept(meas, expect, tol))
+    return bool(_pitch().accept(meas, expect, tol))
 
 
 def philharmonia_compatible(text: str) -> bool:
@@ -220,7 +225,7 @@ def _source_from_resolve(spec: dict, resolved: dict, url: str | None, freesound_
         src["page"] = spec["page"]
         src["author"] = UIOWA_AUTHOR
         src["license"] = UIOWA_LICENSE
-        src["title"] = f"{spec['instrument']} {pitch.NOTE(midi)}"
+        src["title"] = f"{spec['instrument']} {_pitch().NOTE(midi)}"
     else:
         src["id"] = str(freesound_id)
         src["page"] = f"https://freesound.org/s/{freesound_id}/"
@@ -232,7 +237,7 @@ def _source_from_resolve(spec: dict, resolved: dict, url: str | None, freesound_
 
 
 def _measure_slice(y, expect: int) -> dict | None:
-    meas = pitch.measure(y, expect)
+    meas = _pitch().measure(y, expect)
     if note_ok(meas, expect):
         return meas
     return None
@@ -255,7 +260,7 @@ def _measure_uiowa_file(spec: dict, mp: dict, url: str, needed: set[int]) -> Non
         return
     _file_budget()
     mono = y.mean(1) if getattr(y, "ndim", 1) == 2 else y
-    segs = pitch.segment_run(mono, SR)
+    segs = _pitch().segment_run(mono, SR)
     expected = span[1] - span[0] + 1
     with _lock_for(mp):
         have = set(mp["notes"])

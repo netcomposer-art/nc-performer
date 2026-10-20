@@ -64,8 +64,9 @@ def plan_raw(
 ) -> dict:
     """One clip per chord. Whole-chord files first; indexed notes only as a stack.
 
-    ``instrument`` is ignored. The words choose the ensemble when they name
-    one. Otherwise each family that can play the chords is equally likely.
+    ``instrument`` is ignored. The words choose the family when they name one
+    other than piano. Otherwise each chord draws its own family, source, and
+    collection. Each of those has equal weight. Piano is not the default.
     """
     del instrument
     comp_text = comp.get("composition") or ""
@@ -441,6 +442,7 @@ def _whole_opt(cand: dict) -> dict:
         "instrument": cand.get("instrument"),
         "pluck": False,
         "tier": discover._tier(cand),
+        "collection": cand.get("collection") or "",
         "cand": cand,
         "title": cand.get("title"),
         "author": cand.get("author"),
@@ -556,10 +558,9 @@ def _option_groups(seq, pool, assembly, hint, seed, named) -> list:
             if any(discover._hint_ok(row.get("instrument") or "", word) for word in discover._EXCLUDE):
                 continue
             notes.append(_note_opt(row))
-        # A family with a file of this chord and a family that can stack it
-        # from indexed notes are both eligible. The draw is among families
-        # that can play the whole piece, so a note stack is not dropped just
-        # because some other family has a recording.
+        # A family with a file of this chord and a family that can only stack
+        # it are both eligible. The draw is per chord, so a note stack is not
+        # dropped just because some other family has a recording.
         option_groups.append(whole + notes)
     if named and option_groups and all(any(row.get("origin") == named for row in group) for group in option_groups):
         option_groups = [[row for row in group if row.get("origin") == named] for group in option_groups]
@@ -626,7 +627,7 @@ def _choose_files(groups, seq, seed, prefer, verify_live, on_pick=None):
             ])
         if not any(current):
             return [None] * len(groups)
-        chosen, _primary = take.choose(current, int(seed) + salt, prefer, None, False)
+        chosen, _primary = take.draw_each(current, int(seed) + salt, prefer)
         if any(row is None for row in chosen):
             return chosen
         pending = [
@@ -817,6 +818,8 @@ def _pack(comp, seq, slots, section_spec, chosen, seed, slice_note, prefer, maps
             "page": page,
             "built": built,
             "instrument": opt.get("instrument") or "",
+            "origin": opt.get("origin") or "",
+            "collection": take.collection_of(opt),
             "family": take.family_of(opt.get("instrument") or ""),
             "t": round(start, 3),
             "dur": round(dur, 3),

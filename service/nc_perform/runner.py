@@ -27,7 +27,6 @@ from urllib.parse import urlparse
 import ncperf.fetch as fetch
 import ncperf.interpret as interpret
 import ncperf.record as record
-from ncperf.render import Renderer
 
 from .config import Settings
 from .ids import sha256_text
@@ -40,7 +39,6 @@ from ncperf.cancel import bind as bind_cancel
 from ncperf.cancel import check as cancel_check
 from ncperf.cancel import reset as reset_cancel
 from ncperf import cancel as job_cancel
-from ncperf.discover import plan_for
 from ncperf.fit import fit_plan
 import ncperf.gather as gather
 from ncperf.gather import load_collection, public_sounds, restore_cache, save_collection, wipe_gather
@@ -591,6 +589,7 @@ class Runner:
         want = wants_model(text, settings) and not force_stub
         soft = self.store.spend_today() >= settings.daily_soft_usd
         discovered = None
+        from ncperf.discover import plan_for
 
         def progress_cb(line, sound=None):
             if job_id:
@@ -665,6 +664,8 @@ class Runner:
             if raw:
                 flac, mp3, rlog = assemble.render(plan, work, log=log)
             else:
+                # Librosa and the renderer stay out of process start. A raw Gather never loads them.
+                from ncperf.render import Renderer
                 flac, mp3, rlog = Renderer(plan, work, log=log).run("performance")
                 self._stage(job_id, "mastering", stage_t, mark)
             preview = os.path.join(work, "preview.mp3")

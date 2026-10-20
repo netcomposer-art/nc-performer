@@ -612,6 +612,17 @@ def _key(opt: dict) -> tuple:
     return (opt.get("origin") or "", opt.get("instrument") or "", opt.get("built") or "")
 
 
+def collection_of(opt: dict) -> str:
+    """The catalog pack inside a source. A bigger pack is not a heavier pack."""
+    named = opt.get("collection")
+    if named:
+        return str(named)
+    cand = opt.get("cand") or {}
+    if isinstance(cand, dict) and cand.get("collection"):
+        return str(cand["collection"])
+    return str(opt.get("instrument") or "catalog")
+
+
 def family_of(name: str) -> str:
     """The ensemble family of a recording. Piano is one family, wherever it was recorded."""
     inst = (name or "").lower()
@@ -739,6 +750,81 @@ def choose(groups: list[list[dict]], seed: int, prefer: list[str] | None, hint: 
             if all(row is not None for row in chosen):
                 break
     return chosen, primary
+
+
+def _pick_name(rng: random.Random, names: list[str]) -> str:
+    """Equal weight. Sorting first makes the shuffle reproducible."""
+    ordered = sorted(names)
+    rng.shuffle(ordered)
+    return ordered[0]
+
+
+def draw_each(groups: list[list[dict]], seed: int, prefer: list[str] | None, avoid: tuple | None = None) -> tuple[list, tuple | None]:
+    """Each chord draws on its own. The same seed draws the same take.
+
+    Families that can play that chord are equal, and piano is not the default.
+    A named choir, guitar, or synth narrows that chord when the family can play
+    it. The word "piano" does not. Inside the family, each source is equal, and
+    inside the source each collection is equal, so a library with more files is
+    not heavier. An exact voicing still ranks ahead of an inversion. A note
+    stack is used for a family that has no whole-chord file of that chord.
+    Nothing is pitch-shifted to fill a gap.
+    """
+    chosen = [_draw_chord(group, int(seed), index, prefer, avoid) for index, group in enumerate(groups)]
+    primary = next((row for row in chosen if row), None)
+    return chosen, (_key(primary) if primary else None)
+
+
+def _draw_chord(group: list[dict], seed: int, index: int, prefer: list[str] | None, avoid: tuple | None) -> dict | None:
+    rows = []
+    for opt in group or []:
+        if not opt:
+            continue
+        if avoid and _key(opt) == avoid:
+            continue
+        rows.append(opt)
+    if not rows:
+        return None
+    asked = [word for word in (prefer or []) if word != "piano"]
+    if asked:
+        named = [row for row in rows if matches_any(row, asked)]
+        if named:
+            rows = named
+    # A whole-chord file of this family ranks ahead of stacking that same family.
+    # A different family that can only stack notes stays in the draw.
+    file_families = {
+        family_of(row.get("instrument") or "")
+        for row in rows
+        if row.get("built") == "whole-chord file"
+    }
+    kept = []
+    for row in rows:
+        fam = family_of(row.get("instrument") or "")
+        if row.get("built") != "whole-chord file" and fam in file_families:
+            continue
+        kept.append(row)
+    rows = kept or rows
+    rng = random.Random(int(seed) + 17 + int(index) * 1009)
+    by_fam: dict[str, list] = {}
+    for row in rows:
+        by_fam.setdefault(family_of(row.get("instrument") or ""), []).append(row)
+    fam_rows = by_fam[_pick_name(rng, list(by_fam))]
+    by_src: dict[str, list] = {}
+    for row in fam_rows:
+        by_src.setdefault(str(row.get("origin") or ""), []).append(row)
+    src_rows = by_src[_pick_name(rng, list(by_src))]
+    best = min(_tier_value(row) for row in src_rows)
+    tier_rows = [row for row in src_rows if _tier_value(row) == best]
+    by_col: dict[str, list] = {}
+    for row in tier_rows:
+        by_col.setdefault(collection_of(row), []).append(row)
+    files = by_col[_pick_name(rng, list(by_col))]
+    files = sorted(files, key=lambda row: (
+        str(row.get("title") or ""),
+        str((row.get("cand") or {}).get("key") or ""),
+    ))
+    rng.shuffle(files)
+    return files[0]
 
 
 def _best_named(by_key: dict, words: list[str], n: int, seed: int, prefer, hint, long):

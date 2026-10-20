@@ -57,6 +57,7 @@ DEFER = "defer"
 _LOCK = threading.Lock()
 _MEM: dict | None = None
 _DIRTY = False
+_ETAG = ""
 _SESSION = {"hits": 0, "rejected": 0, "deferred": 0, "checks": 0, "license_due": 0}
 _PENDING_EVENT = threading.Event()
 _WORKER: threading.Thread | None = None
@@ -78,12 +79,23 @@ def recheck_days() -> float:
     return days
 
 
+def current_etag() -> str:
+    """The R2 etag last installed into this process. Empty until then."""
+    return _ETAG
+
+
+def set_etag(value: str) -> None:
+    global _ETAG
+    _ETAG = str(value or "")
+
+
 def reset() -> None:
     """Drop the in-process copy. Tests use this between files."""
-    global _MEM, _DIRTY
+    global _MEM, _DIRTY, _ETAG
     with _LOCK:
         _MEM = None
         _DIRTY = False
+        _ETAG = ""
         for key in _SESSION:
             _SESSION[key] = 0
 

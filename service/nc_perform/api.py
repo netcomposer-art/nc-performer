@@ -1072,6 +1072,9 @@ def make_handler(app: App):
         def _internal_get(self, path):
             if not _internal_ok(app, self):
                 return self._send(401, {"error": "internal token required"})
+            if path == "/internal/registry/meta":
+                from ncperf import registry
+                return self._send(200, {"etag": registry.current_etag()})
             if path == "/internal/registry":
                 from ncperf import registry
                 raw = registry.export_bytes()
@@ -1190,6 +1193,7 @@ def make_handler(app: App):
                 registry.install_bytes(raw)
             except ValueError as exc:
                 raise Reject(str(exc)) from exc
+            registry.set_etag(self.headers.get("X-Registry-Etag") or "")
             self._send(204, b"")
 
         def _internal_registry_check(self):
