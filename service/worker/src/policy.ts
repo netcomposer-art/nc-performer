@@ -380,6 +380,20 @@ export function registryPublicStats(doc: unknown): RegistryStats {
   };
 }
 
+/** The JSON field on Gather, Perform, and Save. */
+export function turnstileToken(body: unknown): string {
+  const value = body && typeof body === "object" ? (body as Record<string, unknown>).turnstile_token : "";
+  return typeof value === "string" ? value.trim() : "";
+}
+
+/**
+ * Siteverify fields. remoteip is left off: Turnstile compares it to the IP that
+ * solved the widget, and a mismatch rejects a fresh token.
+ */
+export function siteverifyFields(secret: string, token: string): { secret: string; response: string } {
+  return { secret, response: token };
+}
+
 /** R2 wins when the stats object exists. A missing object is the image seed, not an empty catalog. */
 export function publishedRegistryStats(stored: unknown): RegistryStats {
   if (stored == null) return { ...BUNDLED_REGISTRY_STATS };
