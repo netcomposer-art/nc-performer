@@ -33,6 +33,7 @@ from .ids import sha256_text
 from .jobs import Store
 from .limits import Reject, check_plan, load_suppliers
 from ncperf.discover import plan_for
+from ncperf.fit import fit_plan
 from .planner import cache_key, compute_cost, llm_cost, needs_llm
 from .sign import Signer, apply_signature
 from .storage import Storage
@@ -214,6 +215,16 @@ class Runner:
                 # and uiowa). If the registry itself is down, supplier sources fail closed.
                 if any((s or {}).get("kind") == "supplier" for s in (plan.get("sources") or {}).values()):
                     raise Reject(f"Could not read the Supplier registry: {e}") from e
+            # A generated plan must not fail its own validator. Pack or drop
+            # until the caps hold, and record what was left out.
+            fit_plan(
+                plan,
+                max_layers=settings.max_layers,
+                max_sources=settings.max_sources,
+                max_chords=settings.max_chords,
+                max_length_s=settings.max_length_s,
+                max_plan_bytes=settings.max_plan_bytes,
+            )
             check_plan(plan, settings, suppliers)
             self._stage(job_id, "fetching", stage_t, mark)
             out = self._render(job_id, plan, comp, req, stage_t, mark)

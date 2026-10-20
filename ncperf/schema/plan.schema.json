@@ -101,7 +101,7 @@
           "description": "chord_notes: strike or roll the voicing (per_chord). chord_pad: unaltered copies of each voicing note, overlapped. chord_under: extra held notes per chord (notes_by_chord). drone: unaltered copies (spans). clips: unpitched or fixed-pitch clips (events). notes: single notes such as a line, with triplets (events)."},
         "bank": {"type": "string"}, "fallback_banks": {"type": "array", "items": {"type": "string"}},
         "style": {"type": "string", "enum": ["roll", "strike"]}, "spread_s": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2}, "jitter_s": {"type": "number"},
-        "per_chord": {"type": "array", "items": {"type": "object", "required": ["chord"], "properties": {"chord": {"type": "integer", "minimum": 0}, "strikes_at": {"type": "array", "items": {"type": "number"}}}}},
+        "per_chord": {"type": "array", "items": {"type": "object", "required": ["chord"], "properties": {"chord": {"type": "integer", "minimum": 0}, "strikes_at": {"type": "array", "items": {"type": "number"}}, "bank": {"type": "string", "description": "Samples for this strike. When omitted, the layer bank is used. One layer can hold several chords, each with its own bank."}}}},
         "notes_by_chord": {"type": "object", "additionalProperties": {"type": "array", "items": {"type": "integer"}}},
         "spans": {"type": "array", "items": {"type": "object", "required": ["start_s", "dur_s", "midi"], "properties": {"start_s": {"type": "number"}, "dur_s": {"type": "number"}, "midi": {"type": "array", "items": {"type": "integer"}}}}},
         "events": {"type": "array", "items": {"type": "object", "required": ["t"],

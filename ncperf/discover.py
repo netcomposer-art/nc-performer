@@ -30,6 +30,7 @@ from . import interpret
 from . import licenses as LIC
 from . import notemap
 from . import pitch
+from .fit import fit_plan
 
 UA = "nc-performer-kit/0.1 (+https://netcomposer.art/agents/)"
 ORIGINS = (
@@ -1120,6 +1121,7 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
     events = []
     banks: dict = {}
     note_layers = []
+    assembled: list[dict] = []
     used: dict[str, str] = {}
     sample_ids: dict[str, str] = {}
 
@@ -1245,23 +1247,9 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
                 "cents": sample.get("cents"),
             })
         banks[bank_id] = {"notes": notes}
-        note_layers.append({
-            "id": f"notes-{i}",
-            "type": "chord_notes",
-            "bus": "keys",
-            "bank": bank_id,
-            "style": "strike",
-            "jitter_s": 0.06,
-            "offset_s": 0.05,
-            "gain": 0.72,
-            "first_gain": 0.85,
-            "note_s": 6.5,
-            "fade_out_s": 2.4,
-            "last_note_s": 9.0,
-            "last_fade_out_s": 4.0,
-            "role": f"{opt['instrument']} ({opt['origin']}) {sym} assembled from native-pitch notes",
-            "per_chord": [{"chord": i, "strikes_at": [0.0]}],
-        })
+        # One layer for every assembled strike. A bank per chord keeps each
+        # instrument's samples together without spending a layer per note.
+        assembled.append({"chord": i, "bank": bank_id})
         chords.append({
             "t": round(i * dur, 3),
             "dur": round(dur, 3),
@@ -1377,6 +1365,27 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
             continue
         bed = got
         break
+    if assembled:
+        note_layers.append({
+            "id": "notes",
+            "type": "chord_notes",
+            "bus": "keys",
+            "bank": assembled[0]["bank"],
+            "style": "strike",
+            "jitter_s": 0.06,
+            "offset_s": 0.05,
+            "gain": 0.72,
+            "first_gain": 0.85,
+            "note_s": 6.5,
+            "fade_out_s": 2.4,
+            "last_note_s": 9.0,
+            "last_fade_out_s": 4.0,
+            "role": "assembled native-pitch strikes sharing one layer; each chord uses its own samples",
+            "per_chord": [
+                {"chord": row["chord"], "strikes_at": [0.0], "bank": row["bank"]}
+                for row in assembled
+            ],
+        })
     layers = []
     if events:
         layers.append({
@@ -1456,12 +1465,12 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
         "Per chord: " + chord_note
         + ". Strike share: " + (share_note or "none")
         + ". " + bed_note
-        + " No pitch-shift and no time-stretch. Assembled tones keep their recorded pitch and are layered with a small onset jitter."
+        + " No pitch-shift and no time-stretch. Assembled tones keep their recorded pitch, share one layer, and sound together with a small onset jitter."
     )
     title = (comp.get("title") or "Untitled")
     soft = bool(re.search(r"ambient|soft|calm|slow|gentle|dark|no harsh", words, re.I))
     _EXCLUDE = previous_exclude
-    return {
+    plan = {
         "nc_plan_version": "0.1",
         "id": (re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:40] or "untitled"),
         "title": title + " (discovered performance)",
@@ -1501,3 +1510,5 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
         "source_mix": mix,
         "notes": [note],
     }
+    fit_plan(plan)
+    return plan

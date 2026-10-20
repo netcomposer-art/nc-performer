@@ -44,6 +44,7 @@ def validate(plan):
                 if b not in B: errs.append(f"layers.{ly['id']}: unknown bank {b}")
         for pc in ly.get('per_chord', []):
             if pc['chord'] >= n: errs.append(f"layers.{ly['id']}: chord {pc['chord']} out of range")
+            if pc.get('bank') and pc['bank'] not in B: errs.append(f"layers.{ly['id']}: unknown bank {pc['bank']}")
         for e in ly.get('events', []):
             if 'source' in e and e['source'] not in S: errs.append(f"layers.{ly['id']}: unknown source {e['source']}")
             for tb in e.get('timbres', []):
