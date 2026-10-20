@@ -1,0 +1,1324 @@
+{
+ "glass-garden": {
+  "performance": "Clear and open, like light through glass. Gentle strikes, a little space between chords.",
+  "seed": 11,
+  "preview_s": 22.032,
+  "sha256": "fd8d61df147ed4f6db09b664edccde72560e61d5b479fca0abb7dacd74e013cb",
+  "time_stretch": [],
+  "time_stretch_ratios": [
+   1.0
+  ],
+  "rejected": [],
+  "source_mix": {
+   "by_origin": {
+    "uiowa": 1,
+    "musicmatter": 2,
+    "freesound": 2
+   },
+   "share": {
+    "uiowa": 0.2,
+    "musicmatter": 0.4,
+    "freesound": 0.4
+   },
+   "strike_share": {
+    "uiowa": 0.2,
+    "musicmatter": 0.4,
+    "freesound": 0.4
+   },
+   "instruments": [
+    "guitar",
+    "fat synth",
+    "cello",
+    "piano",
+    "choir",
+    "texture"
+   ],
+   "queried": [
+    "wikimedia",
+    "ccmixter",
+    "uiowa",
+    "musicmatter",
+    "freesound",
+    "openverse",
+    "internet_archive"
+   ],
+   "returned": {
+    "musicmatter": 60,
+    "openverse": 7,
+    "ccmixter": 3,
+    "freesound": 6,
+    "internet_archive": 1,
+    "wikimedia": 0,
+    "uiowa": 0
+   },
+   "terms": [
+    "percussion",
+    "texture",
+    "pluck"
+   ],
+   "instrument_hint": null,
+   "per_chord": [
+    {
+     "symbol": "Ebsus2",
+     "bass": null,
+     "origin": "uiowa",
+     "instrument": "guitar",
+     "built": "assembled notes",
+     "match": "native pitch",
+     "title": "guitar Ebsus2 from 3 native-pitch notes",
+     "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+     "license": "PD-equivalent",
+     "licenses": [
+      "PD-equivalent"
+     ],
+     "page": "https://theremin.music.uiowa.edu/MISguitar.html",
+     "voicing": [
+      58,
+      63,
+      65
+     ],
+     "tones": [
+      {
+       "midi": 58,
+       "note": "A#3",
+       "title": "guitar A#3",
+       "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+       "license": "PD-equivalent",
+       "page": "https://theremin.music.uiowa.edu/MISguitar.html",
+       "cents": -4.0
+      },
+      {
+       "midi": 63,
+       "note": "D#4",
+       "title": "guitar D#4",
+       "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+       "license": "PD-equivalent",
+       "page": "https://theremin.music.uiowa.edu/MISguitar.html",
+       "cents": -5.0
+      },
+      {
+       "midi": 65,
+       "note": "F4",
+       "title": "guitar F4",
+       "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+       "license": "PD-equivalent",
+       "page": "https://theremin.music.uiowa.edu/MISguitar.html",
+       "cents": 24.0
+      }
+     ]
+    },
+    {
+     "symbol": "Cm-add9",
+     "bass": null,
+     "origin": "musicmatter",
+     "instrument": "fat synth",
+     "built": "whole-chord file",
+     "match": "exact",
+     "title": "C minor add9 chord, root (full chord set v4, Fat Synth)",
+     "author": "Petrus",
+     "license": "CC-BY-SA-4.0",
+     "licenses": [
+      "CC-BY-SA-4.0"
+     ],
+     "page": "https://audio.musicmatter.art/fullchords/fatsynth/C/07_add_Cm-add9_root.nc.json",
+     "source": "mu-3"
+    },
+    {
+     "symbol": "Ab6-9",
+     "bass": null,
+     "origin": "freesound",
+     "instrument": "cello",
+     "built": "assembled notes",
+     "match": "native pitch",
+     "title": "cello Ab6-9 from 4 native-pitch notes",
+     "author": "MTG",
+     "license": "CC-BY-3.0",
+     "licenses": [
+      "CC-BY-3.0"
+     ],
+     "page": "https://freesound.org/people/MTG/sounds/",
+     "voicing": [
+      48,
+      53,
+      58,
+      63
+     ],
+     "tones": [
+      {
+       "midi": 48,
+       "note": "C3",
+       "title": "overall quality of single note - cello - C3",
+       "author": "MTG",
+       "license": "CC-BY-3.0",
+       "page": "https://freesound.org/s/248000/",
+       "cents": 10.0
+      },
+      {
+       "midi": 53,
+       "note": "F3",
+       "title": "overall quality of single note - cello - F3",
+       "author": "MTG",
+       "license": "CC-BY-3.0",
+       "page": "https://freesound.org/s/247995/",
+       "cents": 16.0
+      },
+      {
+       "midi": 58,
+       "note": "A#3",
+       "title": "overall quality of single note - cello - A#3",
+       "author": "MTG",
+       "license": "CC-BY-3.0",
+       "page": "https://freesound.org/s/247489/",
+       "cents": 10.0
+      },
+      {
+       "midi": 63,
+       "note": "D#4",
+       "title": "overall quality of single note - cello - D#4",
+       "author": "MTG",
+       "license": "CC-BY-3.0",
+       "page": "https://freesound.org/s/247494/",
+       "cents": 14.0
+      }
+     ]
+    },
+    {
+     "symbol": "Bb7sus4",
+     "bass": null,
+     "origin": "freesound",
+     "instrument": "piano",
+     "built": "assembled notes",
+     "match": "native pitch",
+     "title": "piano Bb7sus4 from 4 native-pitch notes",
+     "author": "feelander",
+     "license": "CC0-1.0",
+     "licenses": [
+      "CC0-1.0"
+     ],
+     "page": "https://freesound.org/people/feelander/packs/17718/",
+     "voicing": [
+      56,
+      58,
+      63,
+      65
+     ],
+     "tones": [
+      {
+       "midi": 56,
+       "note": "G#3",
+       "title": "Piano.mf.Ab3.aiff",
+       "author": "feelander",
+       "license": "CC0-1.0",
+       "page": "https://freesound.org/s/316012/",
+       "cents": 12.0
+      },
+      {
+       "midi": 58,
+       "note": "A#3",
+       "title": "Piano.mf.Bb3.aiff",
+       "author": "feelander",
+       "license": "CC0-1.0",
+       "page": "https://freesound.org/s/316043/",
+       "cents": 10.0
+      },
+      {
+       "midi": 63,
+       "note": "D#4",
+       "title": "Piano.mf.Eb4.aiff",
+       "author": "feelander",
+       "license": "CC0-1.0",
+       "page": "https://freesound.org/s/316050/",
+       "cents": 8.0
+      },
+      {
+       "midi": 65,
+       "note": "F4",
+       "title": "Piano.mf.F4.aiff",
+       "author": "feelander",
+       "license": "CC0-1.0",
+       "page": "https://freesound.org/s/316025/",
+       "cents": 10.0
+      }
+     ]
+    },
+    {
+     "symbol": "Eb6",
+     "bass": null,
+     "origin": "musicmatter",
+     "instrument": "choir",
+     "built": "whole-chord file",
+     "match": "exact",
+     "title": "E\u266d major 6th chord, root (full chord set v4, Choir)",
+     "author": "Petrus",
+     "license": "CC-BY-SA-4.0",
+     "licenses": [
+      "CC-BY-SA-4.0"
+     ],
+     "page": "https://audio.musicmatter.art/fullchords/jacobschoir/Eb/06_sixths_Eb6_root.nc.json",
+     "source": "mu-12"
+    }
+   ],
+   "texture": {
+    "origin": "openverse",
+    "title": "Quiet Neighborhood Ambience (light wind, no people)",
+    "author": "ahriik",
+    "license": "CC0-1.0",
+    "page": "https://freesound.org/people/ahriik/sounds/481964"
+   },
+   "libraries": [
+    {
+     "library": "Philharmonia Orchestra",
+     "page": "https://philharmonia.co.uk/resources/sound-samples/",
+     "used": false,
+     "reason": "Rejected. The sound-samples page allows use in a finished work but forbids selling or redistributing the files as samples or as a sampler instrument. That is a custom licence, not CC0, CC BY, CC BY-SA, or public domain."
+    },
+    {
+     "library": "VSCO 2 Community Edition",
+     "page": "https://github.com/sgossner/VSCO-2-CE",
+     "used": false,
+     "reason": "The library is CC0 and the GitHub tree is fetchable, but its notes are a sparse grid (about a minor third or a fifth apart). No catalog voicing of these chords is covered, so the files were not used. The Freesound copies of the same grid disagree between title and filename."
+    },
+    {
+     "library": "Wikimedia Commons",
+     "page": "https://commons.wikimedia.org/",
+     "used": false,
+     "reason": "Searches for instrument notes returned photographs, a G-major pizzicato scale, and one short pizzicato file. None of those is a pitch-checked single note for every tone of one of these chords."
+    }
+   ],
+   "rule": "A strike is that chord: a whole-chord file of the same root, quality, and bass, or the chord assembled from single notes recorded at those pitches. No origin is more than half the strikes unless the notes name it, or it is the only origin that can play them. Share counts strikes only; the texture bed is separate. Nothing is pitch-shifted or time-stretched. Every source has a title, author, license, and page."
+  },
+  "notes": [
+   "Per chord: Ebsus2 assembled notes via guitar (uiowa); Cm-add9 whole-chord file via fat synth (musicmatter); Ab6-9 assembled notes via cello (freesound); Bb7sus4 assembled notes via piano (freesound); Eb6 whole-chord file via choir (musicmatter). Strike share: uiowa 1/5, musicmatter 2/5, freesound 2/5. Texture: Quiet Neighborhood Ambience (light wind, no people) (openverse, CC0-1.0). No pitch-shift and no time-stretch. Assembled tones keep their recorded pitch and are layered with a small onset jitter.",
+   "Philharmonia Orchestra samples were rejected: the sound-samples page allows a finished work but forbids selling or redistributing the files as samples or as a sampler instrument, which is a custom licence. VSCO 2 Community Edition is CC0 and fetchable, but its note grid does not cover a catalog voicing of these chords. Wikimedia Commons had no pitch-checked single note for every tone of one chord. UIowa violin pizzicato, marimba, flute, and vibraphone were measured and did not cover a full voicing. The Freesound piano notes are feelander's CC0 re-upload of University of Iowa MIS piano (pack 17718); MTG cello notes are a different CC BY 3.0 recording."
+  ],
+  "sources": {
+   "n0": {
+    "kind": "uiowa_mis",
+    "title": "guitar A#3",
+    "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+    "license": "PD-equivalent",
+    "page": "https://theremin.music.uiowa.edu/MISguitar.html",
+    "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/guitar/Guitar.mf.sulG.G3B3.stereo.aif",
+    "id": null,
+    "expect_midi": 58
+   },
+   "n1": {
+    "kind": "uiowa_mis",
+    "title": "guitar D#4",
+    "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+    "license": "PD-equivalent",
+    "page": "https://theremin.music.uiowa.edu/MISguitar.html",
+    "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/guitar/Guitar.mf.sulB.C4B4.stereo.aif",
+    "id": null,
+    "expect_midi": 63
+   },
+   "n2": {
+    "kind": "uiowa_mis",
+    "title": "guitar F4",
+    "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+    "license": "PD-equivalent",
+    "page": "https://theremin.music.uiowa.edu/MISguitar.html",
+    "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/guitar/Guitar.mf.sulB.C4B4.stereo.aif",
+    "id": null,
+    "expect_midi": 65
+   },
+   "mu-3": {
+    "kind": "supplier",
+    "title": "C minor add9 chord, root (full chord set v4, Fat Synth)",
+    "author": "Petrus",
+    "license": "CC-BY-SA-4.0",
+    "page": "https://audio.musicmatter.art/fullchords/fatsynth/C/07_add_Cm-add9_root.nc.json",
+    "url": null,
+    "id": null,
+    "expect_midi": null
+   },
+   "n4": {
+    "kind": "freesound",
+    "title": "overall quality of single note - cello - C3",
+    "author": "MTG",
+    "license": "CC-BY-3.0",
+    "page": "https://freesound.org/s/248000/",
+    "url": null,
+    "id": "248000",
+    "expect_midi": 48
+   },
+   "n5": {
+    "kind": "freesound",
+    "title": "overall quality of single note - cello - F3",
+    "author": "MTG",
+    "license": "CC-BY-3.0",
+    "page": "https://freesound.org/s/247995/",
+    "url": null,
+    "id": "247995",
+    "expect_midi": 53
+   },
+   "n6": {
+    "kind": "freesound",
+    "title": "overall quality of single note - cello - A#3",
+    "author": "MTG",
+    "license": "CC-BY-3.0",
+    "page": "https://freesound.org/s/247489/",
+    "url": null,
+    "id": "247489",
+    "expect_midi": 58
+   },
+   "n7": {
+    "kind": "freesound",
+    "title": "overall quality of single note - cello - D#4",
+    "author": "MTG",
+    "license": "CC-BY-3.0",
+    "page": "https://freesound.org/s/247494/",
+    "url": null,
+    "id": "247494",
+    "expect_midi": 63
+   },
+   "n8": {
+    "kind": "freesound",
+    "title": "Piano.mf.Ab3.aiff",
+    "author": "feelander",
+    "license": "CC0-1.0",
+    "page": "https://freesound.org/s/316012/",
+    "url": null,
+    "id": "316012",
+    "expect_midi": 56
+   },
+   "n9": {
+    "kind": "freesound",
+    "title": "Piano.mf.Bb3.aiff",
+    "author": "feelander",
+    "license": "CC0-1.0",
+    "page": "https://freesound.org/s/316043/",
+    "url": null,
+    "id": "316043",
+    "expect_midi": 58
+   },
+   "n10": {
+    "kind": "freesound",
+    "title": "Piano.mf.Eb4.aiff",
+    "author": "feelander",
+    "license": "CC0-1.0",
+    "page": "https://freesound.org/s/316050/",
+    "url": null,
+    "id": "316050",
+    "expect_midi": 63
+   },
+   "n11": {
+    "kind": "freesound",
+    "title": "Piano.mf.F4.aiff",
+    "author": "feelander",
+    "license": "CC0-1.0",
+    "page": "https://freesound.org/s/316025/",
+    "url": null,
+    "id": "316025",
+    "expect_midi": 65
+   },
+   "mu-12": {
+    "kind": "supplier",
+    "title": "E\u266d major 6th chord, root (full chord set v4, Choir)",
+    "author": "Petrus",
+    "license": "CC-BY-SA-4.0",
+    "page": "https://audio.musicmatter.art/fullchords/jacobschoir/Eb/06_sixths_Eb6_root.nc.json",
+    "url": null,
+    "id": null,
+    "expect_midi": null
+   },
+   "op-bed": {
+    "kind": "commons",
+    "title": "Quiet Neighborhood Ambience (light wind, no people)",
+    "author": "ahriik",
+    "license": "CC0-1.0",
+    "page": "https://freesound.org/people/ahriik/sounds/481964",
+    "url": "https://cdn.freesound.org/previews/481/481964_6657854-hq.mp3",
+    "id": null,
+    "expect_midi": null
+   }
+  }
+ },
+ "choir-synth": {
+  "performance": "A choir in the distance, then a soft synth answers. Keep the piano out of the lead.",
+  "seed": 12,
+  "preview_s": 22.032,
+  "sha256": "34b8f2e2a962fb3b6c7520efeaeec9196a472759f06fc2f516cb100d0abf1ff6",
+  "time_stretch": [],
+  "time_stretch_ratios": [
+   1.0
+  ],
+  "rejected": [],
+  "source_mix": {
+   "by_origin": {
+    "musicmatter": 2,
+    "uiowa": 2,
+    "freesound": 1
+   },
+   "share": {
+    "musicmatter": 0.4,
+    "uiowa": 0.4,
+    "freesound": 0.2
+   },
+   "strike_share": {
+    "musicmatter": 0.4,
+    "uiowa": 0.4,
+    "freesound": 0.2
+   },
+   "instruments": [
+    "fat synth",
+    "synth arp",
+    "cello pizzicato",
+    "cello",
+    "guitar",
+    "texture"
+   ],
+   "queried": [
+    "ccmixter",
+    "uiowa",
+    "musicmatter",
+    "freesound",
+    "openverse",
+    "internet_archive",
+    "wikimedia"
+   ],
+   "returned": {
+    "musicmatter": 60,
+    "freesound": 12,
+    "openverse": 12,
+    "ccmixter": 3,
+    "internet_archive": 1,
+    "wikimedia": 0,
+    "uiowa": 0
+   },
+   "terms": [
+    "synth",
+    "choir"
+   ],
+   "instrument_hint": null,
+   "per_chord": [
+    {
+     "symbol": "Ebsus2",
+     "bass": null,
+     "origin": "musicmatter",
+     "instrument": "fat synth",
+     "built": "whole-chord file",
+     "match": "exact",
+     "title": "E\u266d sus2 chord, root (full chord set v4, Fat Synth)",
+     "author": "Petrus",
+     "license": "CC-BY-SA-4.0",
+     "licenses": [
+      "CC-BY-SA-4.0"
+     ],
+     "page": "https://audio.musicmatter.art/fullchords/fatsynth/Eb/05_suspended_Ebsus2_root.nc.json",
+     "source": "mu-0"
+    },
+    {
+     "symbol": "Cm-add9",
+     "bass": null,
+     "origin": "musicmatter",
+     "instrument": "synth arp",
+     "built": "whole-chord file",
+     "match": "exact",
+     "title": "C minor add9 chord, root (full chord set v4, synth arp)",
+     "author": "Petrus",
+     "license": "CC-BY-SA-4.0",
+     "licenses": [
+      "CC-BY-SA-4.0"
+     ],
+     "page": "https://audio.musicmatter.art/fullchords/syntharp/C/07_add_Cm-add9_root.nc.json",
+     "source": "mu-1"
+    },
+    {
+     "symbol": "Ab6-9",
+     "bass": null,
+     "origin": "uiowa",
+     "instrument": "cello pizzicato",
+     "built": "assembled notes",
+     "match": "native pitch",
+     "title": "cello pizzicato Ab6-9 from 4 native-pitch notes",
+     "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+     "license": "PD-equivalent",
+     "licenses": [
+      "PD-equivalent"
+     ],
+     "page": "https://theremin.music.uiowa.edu/MIScello.html",
+     "voicing": [
+      48,
+      53,
+      58,
+      63
+     ],
+     "tones": [
+      {
+       "midi": 48,
+       "note": "C3",
+       "title": "cello pizzicato C3",
+       "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+       "license": "PD-equivalent",
+       "page": "https://theremin.music.uiowa.edu/MIScello.html",
+       "cents": 24.0
+      },
+      {
+       "midi": 53,
+       "note": "F3",
+       "title": "cello pizzicato F3",
+       "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+       "license": "PD-equivalent",
+       "page": "https://theremin.music.uiowa.edu/MIScello.html",
+       "cents": 10.0
+      },
+      {
+       "midi": 58,
+       "note": "A#3",
+       "title": "cello pizzicato A#3",
+       "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+       "license": "PD-equivalent",
+       "page": "https://theremin.music.uiowa.edu/MIScello.html",
+       "cents": 12.0
+      },
+      {
+       "midi": 63,
+       "note": "D#4",
+       "title": "cello pizzicato D#4",
+       "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+       "license": "PD-equivalent",
+       "page": "https://theremin.music.uiowa.edu/MIScello.html",
+       "cents": 10.0
+      }
+     ]
+    },
+    {
+     "symbol": "Bb7sus4",
+     "bass": null,
+     "origin": "freesound",
+     "instrument": "cello",
+     "built": "assembled notes",
+     "match": "native pitch",
+     "title": "cello Bb7sus4 from 4 native-pitch notes",
+     "author": "MTG",
+     "license": "CC-BY-3.0",
+     "licenses": [
+      "CC-BY-3.0"
+     ],
+     "page": "https://freesound.org/people/MTG/sounds/",
+     "voicing": [
+      51,
+      53,
+      56,
+      58
+     ],
+     "tones": [
+      {
+       "midi": 51,
+       "note": "D#3",
+       "title": "overall quality of single note - cello - D#3",
+       "author": "MTG",
+       "license": "CC-BY-3.0",
+       "page": "https://freesound.org/s/247482/",
+       "cents": 10.0
+      },
+      {
+       "midi": 53,
+       "note": "F3",
+       "title": "overall quality of single note - cello - F3",
+       "author": "MTG",
+       "license": "CC-BY-3.0",
+       "page": "https://freesound.org/s/247995/",
+       "cents": 16.0
+      },
+      {
+       "midi": 56,
+       "note": "G#3",
+       "title": "overall quality of single note - cello - G#3",
+       "author": "MTG",
+       "license": "CC-BY-3.0",
+       "page": "https://freesound.org/s/247487/",
+       "cents": 6.0
+      },
+      {
+       "midi": 58,
+       "note": "A#3",
+       "title": "overall quality of single note - cello - A#3",
+       "author": "MTG",
+       "license": "CC-BY-3.0",
+       "page": "https://freesound.org/s/247489/",
+       "cents": 10.0
+      }
+     ]
+    },
+    {
+     "symbol": "Eb6",
+     "bass": null,
+     "origin": "uiowa",
+     "instrument": "guitar",
+     "built": "assembled notes",
+     "match": "native pitch",
+     "title": "guitar Eb6 from 4 native-pitch notes",
+     "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+     "license": "PD-equivalent",
+     "licenses": [
+      "PD-equivalent"
+     ],
+     "page": "https://theremin.music.uiowa.edu/MISguitar.html",
+     "voicing": [
+      55,
+      58,
+      60,
+      63
+     ],
+     "tones": [
+      {
+       "midi": 55,
+       "note": "G3",
+       "title": "guitar G3",
+       "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+       "license": "PD-equivalent",
+       "page": "https://theremin.music.uiowa.edu/MISguitar.html",
+       "cents": -14.0
+      },
+      {
+       "midi": 58,
+       "note": "A#3",
+       "title": "guitar A#3",
+       "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+       "license": "PD-equivalent",
+       "page": "https://theremin.music.uiowa.edu/MISguitar.html",
+       "cents": -4.0
+      },
+      {
+       "midi": 60,
+       "note": "C4",
+       "title": "guitar C4",
+       "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+       "license": "PD-equivalent",
+       "page": "https://theremin.music.uiowa.edu/MISguitar.html",
+       "cents": -4.0
+      },
+      {
+       "midi": 63,
+       "note": "D#4",
+       "title": "guitar D#4",
+       "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+       "license": "PD-equivalent",
+       "page": "https://theremin.music.uiowa.edu/MISguitar.html",
+       "cents": -5.0
+      }
+     ]
+    }
+   ],
+   "texture": {
+    "origin": "openverse",
+    "title": "Living Room Room Tone.wav",
+    "author": "mixxythepixxy",
+    "license": "CC-BY-4.0",
+    "page": "https://freesound.org/people/mixxythepixxy/sounds/348013"
+   },
+   "libraries": [
+    {
+     "library": "Philharmonia Orchestra",
+     "page": "https://philharmonia.co.uk/resources/sound-samples/",
+     "used": false,
+     "reason": "Rejected. The sound-samples page allows use in a finished work but forbids selling or redistributing the files as samples or as a sampler instrument. That is a custom licence, not CC0, CC BY, CC BY-SA, or public domain."
+    },
+    {
+     "library": "VSCO 2 Community Edition",
+     "page": "https://github.com/sgossner/VSCO-2-CE",
+     "used": false,
+     "reason": "The library is CC0 and the GitHub tree is fetchable, but its notes are a sparse grid (about a minor third or a fifth apart). No catalog voicing of these chords is covered, so the files were not used. The Freesound copies of the same grid disagree between title and filename."
+    },
+    {
+     "library": "Wikimedia Commons",
+     "page": "https://commons.wikimedia.org/",
+     "used": false,
+     "reason": "Searches for instrument notes returned photographs, a G-major pizzicato scale, and one short pizzicato file. None of those is a pitch-checked single note for every tone of one of these chords."
+    }
+   ],
+   "rule": "A strike is that chord: a whole-chord file of the same root, quality, and bass, or the chord assembled from single notes recorded at those pitches. No origin is more than half the strikes unless the notes name it, or it is the only origin that can play them. Share counts strikes only; the texture bed is separate. Nothing is pitch-shifted or time-stretched. Every source has a title, author, license, and page."
+  },
+  "notes": [
+   "Per chord: Ebsus2 whole-chord file via fat synth (musicmatter); Cm-add9 whole-chord file via synth arp (musicmatter); Ab6-9 assembled notes via cello pizzicato (uiowa); Bb7sus4 assembled notes via cello (freesound); Eb6 assembled notes via guitar (uiowa). Strike share: musicmatter 2/5, uiowa 2/5, freesound 1/5. Texture: Living Room Room Tone.wav (openverse, CC-BY-4.0). No pitch-shift and no time-stretch. Assembled tones keep their recorded pitch and are layered with a small onset jitter.",
+   "Philharmonia Orchestra samples were rejected: the sound-samples page allows a finished work but forbids selling or redistributing the files as samples or as a sampler instrument, which is a custom licence. VSCO 2 Community Edition is CC0 and fetchable, but its note grid does not cover a catalog voicing of these chords. Wikimedia Commons had no pitch-checked single note for every tone of one chord. UIowa violin pizzicato, marimba, flute, and vibraphone were measured and did not cover a full voicing. The Freesound piano notes are feelander's CC0 re-upload of University of Iowa MIS piano (pack 17718); MTG cello notes are a different CC BY 3.0 recording."
+  ],
+  "sources": {
+   "mu-0": {
+    "kind": "supplier",
+    "title": "E\u266d sus2 chord, root (full chord set v4, Fat Synth)",
+    "author": "Petrus",
+    "license": "CC-BY-SA-4.0",
+    "page": "https://audio.musicmatter.art/fullchords/fatsynth/Eb/05_suspended_Ebsus2_root.nc.json",
+    "url": null,
+    "id": null,
+    "expect_midi": null
+   },
+   "mu-1": {
+    "kind": "supplier",
+    "title": "C minor add9 chord, root (full chord set v4, synth arp)",
+    "author": "Petrus",
+    "license": "CC-BY-SA-4.0",
+    "page": "https://audio.musicmatter.art/fullchords/syntharp/C/07_add_Cm-add9_root.nc.json",
+    "url": null,
+    "id": null,
+    "expect_midi": null
+   },
+   "n2": {
+    "kind": "uiowa_mis",
+    "title": "cello pizzicato C3",
+    "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+    "license": "PD-equivalent",
+    "page": "https://theremin.music.uiowa.edu/MIScello.html",
+    "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/cello/Cello.pizz.mf.sulC.C3Bb3.aiff",
+    "id": null,
+    "expect_midi": 48
+   },
+   "n3": {
+    "kind": "uiowa_mis",
+    "title": "cello pizzicato F3",
+    "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+    "license": "PD-equivalent",
+    "page": "https://theremin.music.uiowa.edu/MIScello.html",
+    "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/cello/Cello.pizz.mf.sulC.C3Bb3.aiff",
+    "id": null,
+    "expect_midi": 53
+   },
+   "n4": {
+    "kind": "uiowa_mis",
+    "title": "cello pizzicato A#3",
+    "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+    "license": "PD-equivalent",
+    "page": "https://theremin.music.uiowa.edu/MIScello.html",
+    "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/cello/Cello.pizz.mf.sulD.D3B3.aiff",
+    "id": null,
+    "expect_midi": 58
+   },
+   "n5": {
+    "kind": "uiowa_mis",
+    "title": "cello pizzicato D#4",
+    "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+    "license": "PD-equivalent",
+    "page": "https://theremin.music.uiowa.edu/MIScello.html",
+    "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/cello/Cello.pizz.mf.sulD.C4B4.aiff",
+    "id": null,
+    "expect_midi": 63
+   },
+   "n6": {
+    "kind": "freesound",
+    "title": "overall quality of single note - cello - D#3",
+    "author": "MTG",
+    "license": "CC-BY-3.0",
+    "page": "https://freesound.org/s/247482/",
+    "url": null,
+    "id": "247482",
+    "expect_midi": 51
+   },
+   "n7": {
+    "kind": "freesound",
+    "title": "overall quality of single note - cello - F3",
+    "author": "MTG",
+    "license": "CC-BY-3.0",
+    "page": "https://freesound.org/s/247995/",
+    "url": null,
+    "id": "247995",
+    "expect_midi": 53
+   },
+   "n8": {
+    "kind": "freesound",
+    "title": "overall quality of single note - cello - G#3",
+    "author": "MTG",
+    "license": "CC-BY-3.0",
+    "page": "https://freesound.org/s/247487/",
+    "url": null,
+    "id": "247487",
+    "expect_midi": 56
+   },
+   "n9": {
+    "kind": "freesound",
+    "title": "overall quality of single note - cello - A#3",
+    "author": "MTG",
+    "license": "CC-BY-3.0",
+    "page": "https://freesound.org/s/247489/",
+    "url": null,
+    "id": "247489",
+    "expect_midi": 58
+   },
+   "n10": {
+    "kind": "uiowa_mis",
+    "title": "guitar G3",
+    "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+    "license": "PD-equivalent",
+    "page": "https://theremin.music.uiowa.edu/MISguitar.html",
+    "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/guitar/Guitar.mf.sulG.G3B3.stereo.aif",
+    "id": null,
+    "expect_midi": 55
+   },
+   "n11": {
+    "kind": "uiowa_mis",
+    "title": "guitar A#3",
+    "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+    "license": "PD-equivalent",
+    "page": "https://theremin.music.uiowa.edu/MISguitar.html",
+    "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/guitar/Guitar.mf.sulG.G3B3.stereo.aif",
+    "id": null,
+    "expect_midi": 58
+   },
+   "n12": {
+    "kind": "uiowa_mis",
+    "title": "guitar C4",
+    "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+    "license": "PD-equivalent",
+    "page": "https://theremin.music.uiowa.edu/MISguitar.html",
+    "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/guitar/Guitar.mf.sulB.C4B4.stereo.aif",
+    "id": null,
+    "expect_midi": 60
+   },
+   "n13": {
+    "kind": "uiowa_mis",
+    "title": "guitar D#4",
+    "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+    "license": "PD-equivalent",
+    "page": "https://theremin.music.uiowa.edu/MISguitar.html",
+    "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/guitar/Guitar.mf.sulB.C4B4.stereo.aif",
+    "id": null,
+    "expect_midi": 63
+   },
+   "op-bed": {
+    "kind": "commons",
+    "title": "Living Room Room Tone.wav",
+    "author": "mixxythepixxy",
+    "license": "CC-BY-4.0",
+    "page": "https://freesound.org/people/mixxythepixxy/sounds/348013",
+    "url": "https://cdn.freesound.org/previews/348/348013_6271616-hq.mp3",
+    "id": null,
+    "expect_midi": null
+   }
+  }
+ },
+ "pluck-synth": {
+  "performance": "Layer a plucked string with a fat synth. Vary the color on each chord.",
+  "seed": 13,
+  "preview_s": 22.032,
+  "sha256": "e0bee6439c6be4f029d7238fc833ede1207653026b57456c49c6e2cc0dddaac7",
+  "time_stretch": [],
+  "time_stretch_ratios": [
+   1.0
+  ],
+  "rejected": [],
+  "source_mix": {
+   "by_origin": {
+    "uiowa": 2,
+    "musicmatter": 2,
+    "freesound": 1
+   },
+   "share": {
+    "uiowa": 0.4,
+    "musicmatter": 0.4,
+    "freesound": 0.2
+   },
+   "strike_share": {
+    "uiowa": 0.4,
+    "musicmatter": 0.4,
+    "freesound": 0.2
+   },
+   "instruments": [
+    "guitar",
+    "cello pizzicato",
+    "fat synth",
+    "synth arp",
+    "piano",
+    "texture"
+   ],
+   "queried": [
+    "uiowa",
+    "musicmatter",
+    "freesound",
+    "openverse",
+    "internet_archive",
+    "wikimedia",
+    "ccmixter"
+   ],
+   "returned": {
+    "musicmatter": 60,
+    "freesound": 12,
+    "openverse": 12,
+    "internet_archive": 1,
+    "ccmixter": 3,
+    "wikimedia": 0,
+    "uiowa": 0
+   },
+   "terms": [
+    "synth"
+   ],
+   "instrument_hint": null,
+   "per_chord": [
+    {
+     "symbol": "Ebsus2",
+     "bass": null,
+     "origin": "uiowa",
+     "instrument": "guitar",
+     "built": "assembled notes",
+     "match": "native pitch",
+     "title": "guitar Ebsus2 from 3 native-pitch notes",
+     "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+     "license": "PD-equivalent",
+     "licenses": [
+      "PD-equivalent"
+     ],
+     "page": "https://theremin.music.uiowa.edu/MISguitar.html",
+     "voicing": [
+      58,
+      63,
+      65
+     ],
+     "tones": [
+      {
+       "midi": 58,
+       "note": "A#3",
+       "title": "guitar A#3",
+       "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+       "license": "PD-equivalent",
+       "page": "https://theremin.music.uiowa.edu/MISguitar.html",
+       "cents": -4.0
+      },
+      {
+       "midi": 63,
+       "note": "D#4",
+       "title": "guitar D#4",
+       "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+       "license": "PD-equivalent",
+       "page": "https://theremin.music.uiowa.edu/MISguitar.html",
+       "cents": -5.0
+      },
+      {
+       "midi": 65,
+       "note": "F4",
+       "title": "guitar F4",
+       "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+       "license": "PD-equivalent",
+       "page": "https://theremin.music.uiowa.edu/MISguitar.html",
+       "cents": 24.0
+      }
+     ]
+    },
+    {
+     "symbol": "Cm-add9",
+     "bass": null,
+     "origin": "uiowa",
+     "instrument": "cello pizzicato",
+     "built": "assembled notes",
+     "match": "native pitch",
+     "title": "cello pizzicato Cm-add9 from 4 native-pitch notes",
+     "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+     "license": "PD-equivalent",
+     "licenses": [
+      "PD-equivalent"
+     ],
+     "page": "https://theremin.music.uiowa.edu/MIScello.html",
+     "voicing": [
+      48,
+      50,
+      51,
+      55
+     ],
+     "tones": [
+      {
+       "midi": 48,
+       "note": "C3",
+       "title": "cello pizzicato C3",
+       "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+       "license": "PD-equivalent",
+       "page": "https://theremin.music.uiowa.edu/MIScello.html",
+       "cents": 24.0
+      },
+      {
+       "midi": 50,
+       "note": "D3",
+       "title": "cello pizzicato D3",
+       "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+       "license": "PD-equivalent",
+       "page": "https://theremin.music.uiowa.edu/MIScello.html",
+       "cents": -10.0
+      },
+      {
+       "midi": 51,
+       "note": "D#3",
+       "title": "cello pizzicato D#3",
+       "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+       "license": "PD-equivalent",
+       "page": "https://theremin.music.uiowa.edu/MIScello.html",
+       "cents": -15.0
+      },
+      {
+       "midi": 55,
+       "note": "G3",
+       "title": "cello pizzicato G3",
+       "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+       "license": "PD-equivalent",
+       "page": "https://theremin.music.uiowa.edu/MIScello.html",
+       "cents": -2.0
+      }
+     ]
+    },
+    {
+     "symbol": "Ab6-9",
+     "bass": null,
+     "origin": "musicmatter",
+     "instrument": "fat synth",
+     "built": "whole-chord file",
+     "match": "exact",
+     "title": "A\u266d 6/9 chord, root (full chord set v4, Fat Synth)",
+     "author": "Petrus",
+     "license": "CC-BY-SA-4.0",
+     "licenses": [
+      "CC-BY-SA-4.0"
+     ],
+     "page": "https://audio.musicmatter.art/fullchords/fatsynth/Ab/06_sixths_Ab6-9_root.nc.json",
+     "source": "mu-7"
+    },
+    {
+     "symbol": "Bb7sus4",
+     "bass": null,
+     "origin": "musicmatter",
+     "instrument": "synth arp",
+     "built": "whole-chord file",
+     "match": "exact",
+     "title": "B\u266d 7sus4 chord, root (full chord set v4, synth arp)",
+     "author": "Petrus",
+     "license": "CC-BY-SA-4.0",
+     "licenses": [
+      "CC-BY-SA-4.0"
+     ],
+     "page": "https://audio.musicmatter.art/fullchords/syntharp/Bb/05_suspended_Bb7sus4_root.nc.json",
+     "source": "mu-8"
+    },
+    {
+     "symbol": "Eb6",
+     "bass": null,
+     "origin": "freesound",
+     "instrument": "piano",
+     "built": "assembled notes",
+     "match": "native pitch",
+     "title": "piano Eb6 from 4 native-pitch notes",
+     "author": "feelander",
+     "license": "CC0-1.0",
+     "licenses": [
+      "CC0-1.0"
+     ],
+     "page": "https://freesound.org/people/feelander/packs/17718/",
+     "voicing": [
+      55,
+      58,
+      60,
+      63
+     ],
+     "tones": [
+      {
+       "midi": 55,
+       "note": "G3",
+       "title": "Piano.mf.G3.aiff",
+       "author": "feelander",
+       "license": "CC0-1.0",
+       "page": "https://freesound.org/s/316017/",
+       "cents": 11.0
+      },
+      {
+       "midi": 58,
+       "note": "A#3",
+       "title": "Piano.mf.Bb3.aiff",
+       "author": "feelander",
+       "license": "CC0-1.0",
+       "page": "https://freesound.org/s/316043/",
+       "cents": 10.0
+      },
+      {
+       "midi": 60,
+       "note": "C4",
+       "title": "Piano.mf.C4.aiff",
+       "author": "feelander",
+       "license": "CC0-1.0",
+       "page": "https://freesound.org/s/316083/",
+       "cents": 6.0
+      },
+      {
+       "midi": 63,
+       "note": "D#4",
+       "title": "Piano.mf.Eb4.aiff",
+       "author": "feelander",
+       "license": "CC0-1.0",
+       "page": "https://freesound.org/s/316050/",
+       "cents": 8.0
+      }
+     ]
+    }
+   ],
+   "texture": {
+    "origin": "openverse",
+    "title": "Quiet Neighborhood Ambience (light wind, no people)",
+    "author": "ahriik",
+    "license": "CC0-1.0",
+    "page": "https://freesound.org/people/ahriik/sounds/481964"
+   },
+   "libraries": [
+    {
+     "library": "Philharmonia Orchestra",
+     "page": "https://philharmonia.co.uk/resources/sound-samples/",
+     "used": false,
+     "reason": "Rejected. The sound-samples page allows use in a finished work but forbids selling or redistributing the files as samples or as a sampler instrument. That is a custom licence, not CC0, CC BY, CC BY-SA, or public domain."
+    },
+    {
+     "library": "VSCO 2 Community Edition",
+     "page": "https://github.com/sgossner/VSCO-2-CE",
+     "used": false,
+     "reason": "The library is CC0 and the GitHub tree is fetchable, but its notes are a sparse grid (about a minor third or a fifth apart). No catalog voicing of these chords is covered, so the files were not used. The Freesound copies of the same grid disagree between title and filename."
+    },
+    {
+     "library": "Wikimedia Commons",
+     "page": "https://commons.wikimedia.org/",
+     "used": false,
+     "reason": "Searches for instrument notes returned photographs, a G-major pizzicato scale, and one short pizzicato file. None of those is a pitch-checked single note for every tone of one of these chords."
+    }
+   ],
+   "rule": "A strike is that chord: a whole-chord file of the same root, quality, and bass, or the chord assembled from single notes recorded at those pitches. No origin is more than half the strikes unless the notes name it, or it is the only origin that can play them. Share counts strikes only; the texture bed is separate. Nothing is pitch-shifted or time-stretched. Every source has a title, author, license, and page."
+  },
+  "notes": [
+   "Per chord: Ebsus2 assembled notes via guitar (uiowa); Cm-add9 assembled notes via cello pizzicato (uiowa); Ab6-9 whole-chord file via fat synth (musicmatter); Bb7sus4 whole-chord file via synth arp (musicmatter); Eb6 assembled notes via piano (freesound). Strike share: uiowa 2/5, musicmatter 2/5, freesound 1/5. Texture: Quiet Neighborhood Ambience (light wind, no people) (openverse, CC0-1.0). No pitch-shift and no time-stretch. Assembled tones keep their recorded pitch and are layered with a small onset jitter.",
+   "Philharmonia Orchestra samples were rejected: the sound-samples page allows a finished work but forbids selling or redistributing the files as samples or as a sampler instrument, which is a custom licence. VSCO 2 Community Edition is CC0 and fetchable, but its note grid does not cover a catalog voicing of these chords. Wikimedia Commons had no pitch-checked single note for every tone of one chord. UIowa violin pizzicato, marimba, flute, and vibraphone were measured and did not cover a full voicing. The Freesound piano notes are feelander's CC0 re-upload of University of Iowa MIS piano (pack 17718); MTG cello notes are a different CC BY 3.0 recording."
+  ],
+  "sources": {
+   "n0": {
+    "kind": "uiowa_mis",
+    "title": "guitar A#3",
+    "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+    "license": "PD-equivalent",
+    "page": "https://theremin.music.uiowa.edu/MISguitar.html",
+    "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/guitar/Guitar.mf.sulG.G3B3.stereo.aif",
+    "id": null,
+    "expect_midi": 58
+   },
+   "n1": {
+    "kind": "uiowa_mis",
+    "title": "guitar D#4",
+    "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+    "license": "PD-equivalent",
+    "page": "https://theremin.music.uiowa.edu/MISguitar.html",
+    "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/guitar/Guitar.mf.sulB.C4B4.stereo.aif",
+    "id": null,
+    "expect_midi": 63
+   },
+   "n2": {
+    "kind": "uiowa_mis",
+    "title": "guitar F4",
+    "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+    "license": "PD-equivalent",
+    "page": "https://theremin.music.uiowa.edu/MISguitar.html",
+    "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Piano_Other/guitar/Guitar.mf.sulB.C4B4.stereo.aif",
+    "id": null,
+    "expect_midi": 65
+   },
+   "n3": {
+    "kind": "uiowa_mis",
+    "title": "cello pizzicato C3",
+    "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+    "license": "PD-equivalent",
+    "page": "https://theremin.music.uiowa.edu/MIScello.html",
+    "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/cello/Cello.pizz.mf.sulC.C3Bb3.aiff",
+    "id": null,
+    "expect_midi": 48
+   },
+   "n4": {
+    "kind": "uiowa_mis",
+    "title": "cello pizzicato D3",
+    "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+    "license": "PD-equivalent",
+    "page": "https://theremin.music.uiowa.edu/MIScello.html",
+    "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/cello/Cello.pizz.mf.sulD.D3B3.aiff",
+    "id": null,
+    "expect_midi": 50
+   },
+   "n5": {
+    "kind": "uiowa_mis",
+    "title": "cello pizzicato D#3",
+    "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+    "license": "PD-equivalent",
+    "page": "https://theremin.music.uiowa.edu/MIScello.html",
+    "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/cello/Cello.pizz.mf.sulD.D3B3.aiff",
+    "id": null,
+    "expect_midi": 51
+   },
+   "n6": {
+    "kind": "uiowa_mis",
+    "title": "cello pizzicato G3",
+    "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+    "license": "PD-equivalent",
+    "page": "https://theremin.music.uiowa.edu/MIScello.html",
+    "url": "https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/cello/Cello.pizz.mf.sulC.C3Bb3.aiff",
+    "id": null,
+    "expect_midi": 55
+   },
+   "mu-7": {
+    "kind": "supplier",
+    "title": "A\u266d 6/9 chord, root (full chord set v4, Fat Synth)",
+    "author": "Petrus",
+    "license": "CC-BY-SA-4.0",
+    "page": "https://audio.musicmatter.art/fullchords/fatsynth/Ab/06_sixths_Ab6-9_root.nc.json",
+    "url": null,
+    "id": null,
+    "expect_midi": null
+   },
+   "mu-8": {
+    "kind": "supplier",
+    "title": "B\u266d 7sus4 chord, root (full chord set v4, synth arp)",
+    "author": "Petrus",
+    "license": "CC-BY-SA-4.0",
+    "page": "https://audio.musicmatter.art/fullchords/syntharp/Bb/05_suspended_Bb7sus4_root.nc.json",
+    "url": null,
+    "id": null,
+    "expect_midi": null
+   },
+   "n9": {
+    "kind": "freesound",
+    "title": "Piano.mf.G3.aiff",
+    "author": "feelander",
+    "license": "CC0-1.0",
+    "page": "https://freesound.org/s/316017/",
+    "url": null,
+    "id": "316017",
+    "expect_midi": 55
+   },
+   "n10": {
+    "kind": "freesound",
+    "title": "Piano.mf.Bb3.aiff",
+    "author": "feelander",
+    "license": "CC0-1.0",
+    "page": "https://freesound.org/s/316043/",
+    "url": null,
+    "id": "316043",
+    "expect_midi": 58
+   },
+   "n11": {
+    "kind": "freesound",
+    "title": "Piano.mf.C4.aiff",
+    "author": "feelander",
+    "license": "CC0-1.0",
+    "page": "https://freesound.org/s/316083/",
+    "url": null,
+    "id": "316083",
+    "expect_midi": 60
+   },
+   "n12": {
+    "kind": "freesound",
+    "title": "Piano.mf.Eb4.aiff",
+    "author": "feelander",
+    "license": "CC0-1.0",
+    "page": "https://freesound.org/s/316050/",
+    "url": null,
+    "id": "316050",
+    "expect_midi": 63
+   },
+   "op-bed": {
+    "kind": "commons",
+    "title": "Quiet Neighborhood Ambience (light wind, no people)",
+    "author": "ahriik",
+    "license": "CC0-1.0",
+    "page": "https://freesound.org/people/ahriik/sounds/481964",
+    "url": "https://cdn.freesound.org/previews/481/481964_6657854-hq.mp3",
+    "id": null,
+    "expect_midi": null
+   }
+  }
+ }
+}

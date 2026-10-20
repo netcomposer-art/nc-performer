@@ -18,17 +18,24 @@ def rhash(r): return hashlib.sha256(canon({k: v for k, v in r.items() if k not i
 def interpreter_label(it):
     if not it: return 'human/agent-written plan'
     if it.get('kind') == 'llm': return it.get('model') or 'llm (model not named)'
+    if it.get('kind') == 'discover': return 'even-handed source discovery (no supplier preferred)'
     if it.get('kind') == 'stub': return 'nc interpret --stub (rule-based draft, no LLM)'
     return 'human/agent-written plan'
 
 def hacks_chain(plan, log=None):
-    """The hacks in the order they ran. With a render log, the reverb, tone, stretch and loudness entries say what actually ran."""
+    """The hacks in the order they ran. With a render log, the reverb, tone and loudness entries say what actually ran.
+
+    Time-stretch is not a hack this kit runs. A log that still lists a stretch engine records that fact;
+    a new render leaves that list empty.
+    """
     log = log or {}; M = plan['master']; Q = log.get('quality') or {}
-    st = Q.get('stretch') or ['ffmpeg rubberband filter (librubberband R2): transients=smooth, window=long, phase=independent, pitch=1']
-    H = [dict(n=1, tool='time_stretch', engine='; '.join(st), engine_requested=(plan.get('quality') or {}).get('stretch_engine', 'auto'), pitch_shift=False,
-              options='duration changes, pitch does not')]
-    if Q.get('resampler'): H.append(dict(n=len(H) + 1, tool='sample-rate conversion (decode to 48 kHz)', engine='; '.join(Q['resampler'])))
-    H.append(dict(n=len(H) + 1, tool='gain', type='decay flatten (300 ms RMS follower, max +20 dB) on stretched notes where the plan asks for it'))
+    H = []
+    st = Q.get('stretch') or []
+    if st:
+        H.append(dict(n=len(H) + 1, tool='time_stretch', engine='; '.join(st), engine_requested=(plan.get('quality') or {}).get('stretch_engine', 'auto'), pitch_shift=False,
+                      options='recorded from an older log; the current renderer refuses time-stretch'))
+    if Q.get('resampler'): H.append(dict(n=len(H) + 1, tool='sample-rate conversion (decode to 48 kHz)', engine='; '.join(Q['resampler']), pitch_shift=False))
+    H.append(dict(n=len(H) + 1, tool='gain', type='decay flatten (300 ms RMS follower, max +20 dB) where the plan asks for it'))
     if any(ly.get('level_match_rms') for ly in plan['layers']): H.append(dict(n=len(H) + 1, tool='gain', type='level match: every line source to the same 1.5 s RMS'))
     H.append(dict(n=len(H) + 1, tool='fade', type='equal-power fades; seeded rolls/strikes', seed=plan['seed']))
     H.append(dict(n=len(H) + 1, tool='filters/automation/lufs_match/pan/delay', buses=M['buses']))
@@ -97,7 +104,7 @@ def build(plan, plan_path, log, flac, mp3, out_path, performer='nc-performer kit
         interpreter=it, plan_ref=dict(path=os.path.basename(plan_path), sha256=sha256_file(plan_path)),
         composition_ref=dict(title=C['title'], composer=dict(display_name=C.get('composer')), words_verbatim=C.get('words_verbatim'), **({'sha256': sha256_file(composition_path)} if composition_path and os.path.exists(composition_path) else {})),
         rule_set=dict(seed=plan['seed'], pulse_bpm=plan.get('pulse_bpm'), sections=plan.get('sections'), layers=[dict(id=l['id'], type=l['type'], bus=l.get('bus'), role=l.get('role')) for l in plan['layers']],
-                      pitch_shift=False, transforms_enabled=['trim', 'gain', 'fade', 'filter', 'reverb', 'delay', 'time_stretch'],
+                      pitch_shift=False, transforms_enabled=['trim', 'gain', 'fade', 'filter', 'reverb', 'delay'],
                       pitch_policy=f"Every pitched sound chosen by NC measurement (pYIN / FFT), not by label; accepted within {plan.get('pitch_tolerance_cents', 15)} cents.", selections=log['selections']),
         timeline=[dict(chord_index=i, start_s=c['t'], end_s=c['t'] + c['dur'], section=c.get('section'), chord=c['symbol'], voicing_midi=c['voicing']) for i, c in enumerate(plan['chords'])],
         line_events=[e for ly in plan['layers'] if ly['type'] == 'notes' for e in ly['events']],
@@ -105,7 +112,7 @@ def build(plan, plan_path, log, flac, mp3, out_path, performer='nc-performer kit
                  dict(file=os.path.basename(mp3), format='MP3 320 kbps, 48 kHz (preview)', sha256=sha256_file(mp3), size_bytes=os.path.getsize(mp3), duration_s=round(dur(mp3), 3), loudness_lufs_integrated=mI, true_peak_dbtp=mP, lra_lu=mL)],
         known_compromises=comp, license_out=dict(id=LIC.OUT['id'], uri=LIC.OUT['uri'])),
       hacks_chain=hacks_chain(plan, log), sounds_used=sounds,
-      summary=dict(distinct_sounds=len(sounds), authors=authors, contributors=len(authors), sources=dict(cnt), licenses=dict(lic), total_events=len(log['uses'])),
+      summary=dict(distinct_sounds=len(sounds), authors=authors, contributors=len(authors), sources=dict(cnt), licenses=dict(lic), total_events=len(log['uses']), **({'source_mix': plan['source_mix']} if plan.get('source_mix') else {})),
       derived_inputs=dict(accepted_input_licenses=['CC0-1.0', 'CC-BY (any version)', 'CC-BY-SA (any version)', 'Public domain (incl. UIowa MIS no-restriction terms)'], present=sorted(lic),
                           check='OK: no NC, ND, Sampling+ or custom-restrictive licenses. CC BY / BY-SA inputs credited; output CC BY-SA 4.0.'),
       attribution=f"\u201c{C['title']}\u201d, composed by {C.get('composer')}. Performed with the NetComposer Performer kit (interpreter: {it['label']}) using sounds by: {credit}. Licensed CC BY-SA 4.0, {LIC.OUT['uri']}",

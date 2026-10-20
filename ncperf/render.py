@@ -4,7 +4,7 @@ import json, os, random, subprocess
 import numpy as np, soundfile as sf, pyloudnorm as pyln
 from scipy.signal import fftconvolve
 from . import fetch, pitch
-from .util import SR, decode, stretch, fade, flatten, lp, hp, onset
+from .util import SR, decode, fade, flatten, loop_unaltered, lp, hp, onset
 from . import util, dsp, reverb
 
 class Renderer:
@@ -16,6 +16,12 @@ class Renderer:
         self.bus = {}; self.uses = []; self.res = {}; self.meas = {}; self.rejected = []; self.sel = {}
         q = plan.get('quality', {}); util.Q.update(resampler=q.get('resampler', 'soxr'), stretch_engine=q.get('stretch_engine', 'auto'))
         util.USED['resampler'].clear(); util.USED['stretch'].clear(); self.reverb_info = None; self.ir_inputs = None; self.master_info = None
+        for ly in plan.get('layers') or []:
+            if ly.get('stretch_to_s'):
+                raise RuntimeError('time-stretch is not allowed')
+            for ev in ly.get('events') or []:
+                if ev.get('stretch_to_s'):
+                    raise RuntimeError('time-stretch is not allowed')
 
     # ---------- sources ----------
     def source(self, sid):
@@ -95,12 +101,12 @@ class Renderer:
                     if sid: break
                 if not sid: continue
                 a, b = ly.get('src_window_s', {}).get(bank, [0.25, 4.0])
-                z, so = self.note(sid, b + 0.2); seg = z[int(a * SR):int(b * SR)]; r = plen / (b - a)
-                zz = flatten(stretch(seg, r, tag=sid)) if ly.get('flatten', True) else stretch(seg, r, tag=sid)
+                z, so = self.note(sid, b + 0.2); seg = z[int(a * SR):int(b * SR)]
+                zz = loop_unaltered(seg, plen)
                 zz = fade(zz[:int(plen * SR)], ly.get('fade_in_s', 3.0) if i else ly.get('first_fade_in_s', 4.5), ly.get('last_fade_out_s', 8.0) if last else ly.get('fade_out_s', 4.5))
                 t0 = max(0.0, c['t'] - ly.get('lead_s', 1.5)) if i else 0.0
                 self.put(ly.get('bus', 'pad'), zz, t0, ly.get('gain_total', 0.7) / np.sqrt(len(c['voicing'])), sid, chord_index=i, midi=m, source_offset_s=round(so + a, 3),
-                         source_len_s=round(b - a, 3), time_stretch=round(r, 4), role=ly.get('role', ly['id']) + f' ({bank})')
+                         source_len_s=round(b - a, 3), time_stretch=1.0, role=ly.get('role', ly['id']) + f' ({bank})')
 
     def L_chord_under(self, ly):
         C = self.chords(); last_i = len(C) - 1
@@ -110,10 +116,10 @@ class Renderer:
                 sid = self.pick(ly['bank'], m)
                 if not sid: continue
                 z, so = self.note(sid); a = ly.get('trim_start_s', 0.3); seg = z[int(a * SR):int((len(z) / SR - ly.get('trim_end_s', 0.4)) * SR)]
-                r = plen / (len(seg) / SR); zz = fade(stretch(seg, r, tag=sid)[:int(plen * SR)], ly.get('fade_in_s', 2.5), ly.get('last_fade_out_s', 8.0) if last else ly.get('fade_out_s', 4.0))
+                zz = fade(loop_unaltered(seg, plen)[:int(plen * SR)], ly.get('fade_in_s', 2.5), ly.get('last_fade_out_s', 8.0) if last else ly.get('fade_out_s', 4.0))
                 g = ly.get('gain_low', ly.get('gain', 0.4)) if m < 48 else ly.get('gain', 0.4)
                 self.put(ly.get('bus', 'pad'), zz, max(0.0, c['t'] - ly.get('lead_s', 1.0)) if i else ly.get('first_t_s', 0.0), g, sid, chord_index=i, midi=m,
-                         source_offset_s=round(so + a, 3), source_len_s=round(len(seg) / SR, 3), time_stretch=round(r, 4), role=ly.get('role', ly['id']))
+                         source_offset_s=round(so + a, 3), source_len_s=round(len(seg) / SR, 3), time_stretch=1.0, role=ly.get('role', ly['id']))
 
     def L_drone(self, ly):
         P = ly.get('piece_s', 15.0); H = ly.get('hop_s', 11.0); pieces = {}
@@ -124,9 +130,9 @@ class Renderer:
                     if not sid: continue
                     z, so = self.note(sid); a, b = ly.get('src_window_s', [0.5, None])
                     b = (len(z) / SR - 0.5) if b is None else b; b = min(b, len(z) / SR)
-                    seg = z[int(a * SR):int(b * SR)]; r = P / (len(seg) / SR); x = stretch(seg, r, tag='dr' + sid)
+                    seg = z[int(a * SR):int(b * SR)]; x = loop_unaltered(seg, P)
                     if ly.get('flatten'): x = flatten(x)
-                    pieces[m] = (sid, so + a, len(seg) / SR, r, fade(x[:int(P * SR)], ly.get('fade_s', 4.0), ly.get('fade_s', 4.0)))
+                    pieces[m] = (sid, so + a, len(seg) / SR, 1.0, fade(x[:int(P * SR)], ly.get('fade_s', 4.0), ly.get('fade_s', 4.0)))
                 if m not in pieces: continue
                 sid, so, sl, r, pc = pieces[m]; t = sp['start_s']; end = sp['start_s'] + sp['dur_s']
                 while t < end - 2.0:
@@ -143,12 +149,10 @@ class Renderer:
                 z, so = self.note(sid, e.get('dur_s'))
             else:
                 y = r['y']; o = int(e.get('offset_s', 0.0) * SR); z = y[o:o + int(e['dur_s'] * SR)] if e.get('dur_s') else y[o:]; so = r['offset_s'] + e.get('offset_s', 0.0)
-            ts = 1.0
             if e.get('stretch_to_s'):
-                a, b = e.get('src_window_s', [0.0, len(z) / SR]); seg = z[int(a * SR):int(min(b, len(z) / SR) * SR)]; ts = e['stretch_to_s'] / (len(seg) / SR)
-                z = stretch(seg, ts, tag=f"{sid}@{a}-{b}"); z = flatten(z) if e.get('flatten', True) else z; z = z[:int(e['stretch_to_s'] * SR)]; so += a
+                raise RuntimeError('time-stretch is not allowed')
             z = fade(z, e.get('fade_in_s', 0.01), e.get('fade_out_s', 3.0))
-            self.put(ly.get('bus', ly['id']), z, e['t'], e.get('gain', 1.0), sid, midi=s.get('expect_midi'), source_offset_s=round(so, 3), time_stretch=round(ts, 4), role=e.get('role', ly.get('role', ly['id'])))
+            self.put(ly.get('bus', ly['id']), z, e['t'], e.get('gain', 1.0), sid, midi=s.get('expect_midi'), source_offset_s=round(so, 3), time_stretch=1.0, role=e.get('role', ly.get('role', ly['id'])))
 
     def L_notes(self, ly):
         half = ly.get('half_s', self.END / 2); first_db = ly.get('first_half_db', 0.0)

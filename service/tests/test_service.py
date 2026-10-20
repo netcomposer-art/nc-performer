@@ -114,10 +114,66 @@ class ServiceTest(unittest.TestCase):
             check_plan(plan, s, {"suppliers": []})
         self.assertIn("kind=url", str(cm.exception))
 
+    def test_freesound_and_commons_sources(self):
+        s = Settings(allowed_hosts=("freesound.org", "cdn.freesound.org", "upload.wikimedia.org", "commons.wikimedia.org"))
+        plan = _tiny_plan("https://musicmatter.art/x.nc.json")
+        plan["sources"] = {
+            "fs": {"kind": "freesound", "id": "325647", "pitched": False},
+            "cm": {
+                "kind": "commons",
+                "url": "https://upload.wikimedia.org/wikipedia/commons/a/a.ogg",
+                "page": "https://commons.wikimedia.org/wiki/File:A.ogg",
+                "license": "CC0-1.0",
+                "title": "A",
+                "author": "Ada",
+                "pitched": False,
+            },
+        }
+        plan["layers"][0]["events"][0]["source"] = "fs"
+        check_plan(plan, s, {"suppliers": []})
+        plan["sources"]["fs"]["id"] = "not-a-number"
+        with self.assertRaises(Reject) as bad_id:
+            check_plan(plan, s, None)
+        self.assertIn("not a sound id", str(bad_id.exception))
+        plan["sources"]["fs"]["id"] = "325647"
+        plan["sources"]["cm"]["url"] = "https://evil.example/a.ogg"
+        with self.assertRaises(Reject) as bad_host:
+            check_plan(plan, s, None)
+        self.assertIn("evil.example", str(bad_host.exception))
+
+    def test_uiowa_mis_audio_outside_the_old_library_is_allowed(self):
+        s = Settings(allowed_hosts=("theremin.music.uiowa.edu",))
+        plan = _tiny_plan("https://musicmatter.art/x.nc.json")
+        plan["interpreter"] = {"kind": "discover"}
+        url = "https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/violin/Violin.pizz.mf.sulG.G3B3.aiff"
+        plan["sources"] = {
+            "pz": {
+                "kind": "uiowa_mis",
+                "url": url,
+                "page": "https://theremin.music.uiowa.edu/MISviolin.html",
+                "title": "Violin pizzicato G3",
+                "author": "University of Iowa Electronic Music Studios",
+                "license": "PD-equivalent",
+                "pitched": True,
+                "expect_midi": 55,
+                "segment": {"index": 0},
+            },
+        }
+        plan["layers"][0]["events"][0]["source"] = "pz"
+        check_plan(plan, s, {"suppliers": []})
+        plan["sources"]["pz"]["url"] = "https://philharmonia.co.uk/samples/violin.wav"
+        with self.assertRaises(Reject) as bad:
+            check_plan(plan, s, None)
+        self.assertIn("not a UIowa MIS", str(bad.exception))
+
     def test_chord_audio_host_is_allowed(self):
         s = Settings()
         self.assertTrue(s.host_allowed("audio.musicmatter.art"))
         self.assertTrue(s.host_allowed("musicmatter.art"))
+        self.assertTrue(s.host_allowed("api.openverse.org"))
+        self.assertTrue(s.host_allowed("ia801234.us.archive.org"))
+        self.assertTrue(s.host_allowed("upload.wikimedia.org"))
+        self.assertTrue(s.host_allowed("ccmixter.org"))
         self.assertFalse(s.host_allowed("evil.example"))
 
     def test_egress_guard_rechecks_redirects(self):
@@ -520,17 +576,20 @@ class ServiceTest(unittest.TestCase):
         self.assertFalse(any(p["id"] == created["id"] for p in feed["performances"]))
 
         # Plan cache: same words and seed do not call xAI again. Do not render twice.
+        # Stay inside the egress guard so discovery does not wander onto the public internet.
         comp = app.store.get(created["id"])["request"]["composition"]
-        _plan, mode = app.runner._interpret(comp, 7, {})
+        with egress_guard(s):
+            _plan, mode = app.runner._interpret(comp, 7, {})
         self.assertEqual(mode, "llm-cache")
         self.assertEqual(calls["n"], 1)
 
-        # A stub Composition does not call xAI.
+        # Ordinary notes do not call xAI. They use even-handed discovery.
         from ncperf.interpret import read_composition
         glass = read_composition(os.path.join(ROOT, "examples", "glass-garden.composition.md"))
         glass["composer"] = glass.get("composer") or "anonymous"
-        _stub, mode = app.runner._interpret(glass, 1, {})
-        self.assertEqual(mode, "stub")
+        with egress_guard(s):
+            with self.assertRaises(Reject):
+                app.runner._interpret(glass, 1, {})
         self.assertEqual(calls["n"], 1)
 
         # Portable kit submission of this record, unsigned, through nc submit.
@@ -611,13 +670,11 @@ def _tiny_plan(manifest: str) -> dict:
                 "t": 0.1,
                 "source": "glass",
                 "dur_s": 1.0,
-                "stretch_to_s": 5.2,
-                "src_window_s": [0.0, 1.0],
                 "fade_in_s": 0.05,
                 "fade_out_s": 0.3,
                 "gain": 0.8,
                 "flatten": False,
-                "role": "time-stretched tone, pitch unchanged",
+                "role": "glass tone, trimmed, not time-stretched",
             }],
         }],
         "master": {

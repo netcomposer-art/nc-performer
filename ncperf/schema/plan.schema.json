@@ -18,7 +18,7 @@
     },
     "interpreter": {
       "type": "object", "description": "Who turned the words into this plan. Copied into the record.",
-      "properties": {"kind": {"type": "string", "enum": ["llm", "human/agent-written plan", "stub"]}, "model": {"type": "string"}, "base_url": {"type": "string"}, "at": {"type": "string"}, "note": {"type": "string"}}
+      "properties": {"kind": {"type": "string", "enum": ["llm", "human/agent-written plan", "stub", "discover"]}, "model": {"type": "string"}, "base_url": {"type": "string"}, "at": {"type": "string"}, "note": {"type": "string"}}
     },
     "seed": {"type": "integer", "description": "Seeds every random choice in the render (roll spreads, gain jitter, and the noise of the synthetic reverb engine)."},
     "length_s": {"type": "number", "minimum": 5, "description": "Where the music ends."},
@@ -82,7 +82,7 @@
     "source": {
       "type": "object", "required": ["kind"],
       "properties": {
-        "kind": {"type": "string", "enum": ["supplier", "freesound", "uiowa_mis", "url"], "description": "supplier: a manifest from a registered Supplier (suppliers.json). freesound: a sound id (license read from the live page, HQ preview used). uiowa_mis: a UIowa MIS file URL (terms checked live). url: any other file with a declared license, checked on its page when given."},
+        "kind": {"type": "string", "enum": ["supplier", "freesound", "uiowa_mis", "url", "commons"], "description": "supplier: a manifest from a registered Supplier. freesound: a sound id (license read from the live page, HQ preview used). uiowa_mis: a UIowa MIS file URL (terms checked live). commons: a file from the open commons whose license is checked on its live page. url: any other file with a declared license, checked on its page when given. Hosted Perform does not accept kind=url."},
         "manifest": {"type": "string"}, "id": {"type": "string"}, "url": {"type": "string"}, "page": {"type": "string"},
         "license": {"type": "string", "description": "kind=url only: CC0-1.0, CC-BY-x.y, CC-BY-SA-x.y or PD."},
         "author": {"type": "string"}, "title": {"type": "string"}, "source": {"type": "string"},
@@ -98,7 +98,7 @@
       "properties": {
         "id": {"type": "string"}, "bus": {"type": "string"}, "role": {"type": "string"},
         "type": {"type": "string", "enum": ["chord_notes", "chord_pad", "chord_under", "drone", "clips", "notes"],
-          "description": "chord_notes: strike or roll the voicing (per_chord). chord_pad: stretched sustain of each voicing note. chord_under: extra held notes per chord (notes_by_chord). drone: tiled stretched notes (spans). clips: unpitched or fixed-pitch clips (events). notes: single notes such as a line, with triplets (events)."},
+          "description": "chord_notes: strike or roll the voicing (per_chord). chord_pad: unaltered copies of each voicing note, overlapped. chord_under: extra held notes per chord (notes_by_chord). drone: unaltered copies (spans). clips: unpitched or fixed-pitch clips (events). notes: single notes such as a line, with triplets (events)."},
         "bank": {"type": "string"}, "fallback_banks": {"type": "array", "items": {"type": "string"}},
         "style": {"type": "string", "enum": ["roll", "strike"]}, "spread_s": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2}, "jitter_s": {"type": "number"},
         "per_chord": {"type": "array", "items": {"type": "object", "required": ["chord"], "properties": {"chord": {"type": "integer", "minimum": 0}, "strikes_at": {"type": "array", "items": {"type": "number"}}}}},
@@ -107,7 +107,7 @@
         "events": {"type": "array", "items": {"type": "object", "required": ["t"],
           "properties": {"t": {"type": "number", "minimum": 0}, "source": {"type": "string"}, "midi": {"type": "integer"}, "dur_s": {"type": "number"}, "kind": {"type": "string", "enum": ["line", "triplet"]},
             "timbres": {"type": "array", "items": {"type": "object", "required": ["bank"], "properties": {"bank": {"type": "string"}, "gain": {"type": "number"}, "fade_in_s": {"type": "number"}, "fade_out_s": {"type": "number"}, "max_s": {"type": "number"}, "pre_s": {"type": "number"}}}},
-            "offset_s": {"type": "number"}, "from_onset": {"type": "boolean"}, "stretch_to_s": {"type": "number", "description": "clips only: time-stretch the clip (pitch unchanged) to this length."}, "src_window_s": {"type": "array", "items": {"type": "number"}}, "fade_in_s": {"type": "number"}, "fade_out_s": {"type": "number"}, "gain": {"type": "number"}, "role": {"type": "string"}}}},
+            "offset_s": {"type": "number"}, "from_onset": {"type": "boolean"}, "stretch_to_s": {"type": "number", "description": "Refused. The renderer does not time-stretch. Older plans may still contain this field."}, "src_window_s": {"type": "array", "items": {"type": "number"}}, "fade_in_s": {"type": "number"}, "fade_out_s": {"type": "number"}, "gain": {"type": "number"}, "role": {"type": "string"}}}},
         "gain": {"type": "number"}, "first_gain": {"type": "number"}, "restrike_gain": {"type": "number"}, "offset_s": {"type": "number"},
         "src_window_s": {}, "overlap_s": {"type": "number"}, "lead_s": {"type": "number"}, "gain_total": {"type": "number"}, "flatten": {"type": "boolean"},
         "piece_s": {"type": "number"}, "hop_s": {"type": "number"}, "level_match_rms": {"type": ["number", "null"]}, "first_half_db": {"type": "number"}, "half_s": {"type": "number"},

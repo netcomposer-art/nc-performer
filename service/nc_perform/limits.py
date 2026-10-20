@@ -1,14 +1,16 @@
 """Request and plan limits. The kit checks licenses again at fetch time.
-This module rejects plans the kit should never see: kind=url (SSRF), sources
-outside the curated library, and anything over the size caps.
+This module rejects plans the kit should never see: kind=url (SSRF), UIowa
+files that are not MIS audio on the university host, and anything over the size caps.
 """
 from __future__ import annotations
 
 import json
 import os
+import urllib.parse
 import urllib.request
 from urllib.parse import urlparse
 
+from ncperf import licenses as LIC
 from ncperf.schema import validate as schema_validate
 
 from .config import Settings
@@ -64,26 +66,37 @@ def check_plan(plan: dict, settings: Settings, suppliers: dict | None) -> None:
     _check_sources(plan, settings, suppliers)
 
 
+def _uiowa_mis_url(url: str) -> bool:
+    """A UIowa MIS audio file. The live terms check happens again at fetch."""
+    parts = urlparse(url or "")
+    host = (parts.hostname or "").lower()
+    if host != "theremin.music.uiowa.edu":
+        return False
+    path = urllib.parse.unquote(parts.path).lower()
+    if not path.endswith((".aif", ".aiff", ".wav")):
+        return False
+    return "mis" in path
+
+
 def _check_sources(plan: dict, settings: Settings, suppliers: dict | None) -> None:
-    lib = library()
-    freesound = set()
-    uiowa = set()
-    for src in lib.get("sources", {}).values():
-        if src.get("kind") == "freesound" and src.get("id"):
-            freesound.add(str(src["id"]))
-        if src.get("kind") == "uiowa_mis" and src.get("url"):
-            uiowa.add(src["url"])
     listed = _listed_manifests(suppliers)
     for sid, src in (plan.get("sources") or {}).items():
         kind = src.get("kind")
         if kind == "url":
             raise Reject(f"Source {sid} is kind=url. Hosted Perform does not fetch arbitrary URLs.")
         if kind == "freesound":
-            if str(src.get("id")) not in freesound:
-                raise Reject(f"Freesound id {src.get('id')} is not in the curated library.")
+            if not str(src.get("id") or "").isdigit():
+                raise Reject(f"Freesound id {src.get('id')} is not a sound id.")
+        elif kind == "commons":
+            if not src.get("url") or not src.get("page") or not src.get("license"):
+                raise Reject(f"Source {sid} needs a url, a page, and a license.")
+            if not LIC.allowed(LIC.from_id(str(src.get("license")))[0]):
+                raise Reject(f"Source {sid} license is not allowed.")
+            _need_host(src["url"], settings)
+            _need_host(src["page"], settings)
         elif kind == "uiowa_mis":
-            if src.get("url") not in uiowa:
-                raise Reject(f"Source {sid} is not a UIowa file from the curated library.")
+            if not _uiowa_mis_url(src.get("url") or ""):
+                raise Reject(f"Source {sid} is not a UIowa MIS audio file.")
             _need_host(src.get("url"), settings)
         elif kind == "supplier":
             manifest = src.get("manifest") or ""
@@ -94,6 +107,12 @@ def _check_sources(plan: dict, settings: Settings, suppliers: dict | None) -> No
                 raise Reject(f"Manifest is not listed by an active Supplier: {manifest}")
         else:
             raise Reject(f"Source {sid} has an unknown kind {kind!r}.")
+        if (plan.get("interpreter") or {}).get("kind") == "discover":
+            missing = [k for k in ("title", "author", "license", "page") if not src.get(k)]
+            if missing:
+                raise Reject(f"Source {sid} is missing {', '.join(missing)}.")
+            if not LIC.allowed(LIC.from_id(str(src.get("license")))[0]):
+                raise Reject(f"Source {sid} license is not allowed.")
 
 
 def _need_host(url: str, settings: Settings) -> None:

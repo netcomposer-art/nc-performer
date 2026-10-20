@@ -71,8 +71,16 @@ def stub(comp, seed=1, length_s=None, plan_id=None):
         chords.append(dict(t=round(i * dur, 3), dur=round(dur, 3), symbol=s, voicing=notes, section='A'))
         mm.append(dict(t=round(i * dur + 0.3, 3), source=sid, offset_s=0.0, dur_s=4.3, fade_in_s=0.02, fade_out_s=2.0, gain=0.8, role='chord strike (full chord set)'))
         mm.append(dict(t=round(i * dur + dur / 2 + 0.3, 3), source=sid, offset_s=0.0, dur_s=4.3, fade_in_s=0.02, fade_out_s=2.0, gain=0.45, role='chord restrike (full chord set)'))
-    pad = [dict(t=max(0.0, round(c['t'] - 1.5, 3)) if i else 0.0, source=mm[2 * i]['source'], offset_s=0.0, src_window_s=[0.05, 3.6], stretch_to_s=round(c['dur'] + 4.0, 3),
-                fade_in_s=3.0 if i else 4.5, fade_out_s=4.0, gain=0.6, role='stretched chord pad (time-stretch, no pitch-shift)') for i, c in enumerate(chords)]
+    pad = []
+    for i, c in enumerate(chords):
+        # Hold the chord by overlapping unaltered copies. Each copy keeps the recording's duration and pitch.
+        start = 0.0 if i == 0 else max(0.0, round(c['t'] - 1.5, 3))
+        end = start + c['dur'] + 4.0
+        t = start
+        while t < end - 0.5:
+            pad.append(dict(t=round(t, 3), source=mm[2 * i]['source'], offset_s=0.0, dur_s=min(4.0, round(end - t, 3)),
+                            fade_in_s=0.35, fade_out_s=0.45, gain=0.55, role='chord pad (unaltered copies, overlapped)'))
+            t += 3.2
     lo = min(min(c['voicing']) for c in chords)
     lib = _data('library.json')
     bass = [dict(chord=i) for i in range(len(chords))]
@@ -81,14 +89,14 @@ def stub(comp, seed=1, length_s=None, plan_id=None):
     under = {k: v for k, v in under.items() if v}
     used = {sid for v in lib['banks'].get('cello', {}).get('notes', {}).values() for sid in v} if under else set()
     for sid in used: sources[sid] = lib['sources'][sid]
-    layers = [dict(id='pad', type='clips', bus='pad', role='stretched chord pad', events=pad), dict(id='keys', type='clips', bus='keys', role='chord strikes', events=mm)]
+    layers = [dict(id='pad', type='clips', bus='pad', role='chord pad from overlapped unaltered copies', events=pad), dict(id='keys', type='clips', bus='keys', role='chord strikes', events=mm)]
     banks = {}
     if under:
         banks['cello'] = lib['banks']['cello']; layers.append(dict(id='cello', type='chord_under', bus='low', bank='cello', notes_by_chord=under, gain=0.35, lead_s=1.0, role='cello root (where a measured cello note exists)'))
     soft = bool(re.search(r'ambient|soft|calm|slow|gentle|dark|no harsh', words, re.I))
     plan = dict(nc_plan_version='0.1', id=plan_id or re.sub(r'[^a-z0-9]+', '-', comp['title'].lower()).strip('-')[:40] or 'untitled', title=comp['title'] + ' (stub performance)',
         composition=dict(title=comp['title'], composer=comp.get('composer'), words_verbatim=dict(composition=comp['composition'], performance=comp['performance']), **({'file': os.path.basename(comp['file'])} if comp.get('file') else {})),
-        interpreter=dict(kind='stub', at=datetime.datetime.now().astimezone().isoformat(timespec='seconds'), note='Rule-based draft: chord symbols found in the words, each voiced from the full chord set by voice leading, chord strikes plus a time-stretched pad. Performance words only set the tone (soft/bright). Edit this plan or use an LLM for more.'),
+        interpreter=dict(kind='stub', at=datetime.datetime.now().astimezone().isoformat(timespec='seconds'), note='Rule-based draft: chord symbols found in the words, each voiced from the full chord set by voice leading, chord strikes plus a pad of overlapped unaltered copies. No pitch-shift and no time-stretch. Performance words only set the tone (soft/bright). Edit this plan or use an LLM for more.'),
         seed=seed, length_s=round(L, 3), tail_s=4.0, pulse_bpm=60, pitch_tolerance_cents=15,
         sections=[dict(id='A', start_s=0, end_s=round(L, 3), harmony=' '.join(syms))], chords=chords, sources=sources, banks=banks, layers=layers,
         master=dict(buses=dict(pad=dict(filters=[dict(type='lp', hz=2500 if soft else 6000, order=2)], lufs=-21.0, pan=0.05), keys=dict(filters=[dict(type='lp', hz=3000 if soft else 8000, order=2)], lufs=-23.0, pan=-0.08),
@@ -102,8 +110,8 @@ SYSTEM = """You are the INTERPRETER of a NetComposer Performer. You turn a Compo
 Rules you must keep:
 - Keep the composer's chords, line and form; choose voicings, orchestration, pacing, hacks and seed yourself.
 - Voicings are MIDI note lists (60 = C4). Prefer voicings that exist in the full chord set (given) so the chord strikes can come from it.
-- Sounds: use only ids from the LIBRARY below, or add supplier manifests (kind "supplier") from the full chord set, or Freesound ids (kind "freesound") you are sure are CC0/CC BY/CC BY-SA. Licenses are checked live; anything else is rejected.
-- Never ask for pitch-shifting; there is no such field. Time-stretch is allowed.
+- Sounds: use the DISCOVERED SOUNDS when they are listed. They already come from several origins on equal footing. Do not put most layers on one supplier unless the Performance names that supplier. Otherwise use only ids from the LIBRARY below, or Freesound ids you are sure are CC0/CC BY/CC BY-SA. Licenses are checked live; anything else is rejected.
+- Never ask for pitch-shifting; there is no such field. Do not set stretch_to_s. Trim and fade instead.
 - Reverb: master.reverb.engine "dragonfly" (default) with send_lu (wet loudness vs dry, LU; about 5 for ambient, 1-2 for drier) and optional params (decay_s etc.). "convolution" only with an ir id from the kit's list.
 - Loudness: master.loudness.lufs -17, tp -1.5.
 - Reply with the JSON object only."""
@@ -120,16 +128,17 @@ def _json_from(text):
     i, j = text.find('{'), text.rfind('}')
     return json.loads(text[i:j + 1])
 
-def llm(comp, seed=1, base_url=None, model=None, api_key=None, example=None, repair_rounds=2, log=print):
+def llm(comp, seed=1, base_url=None, model=None, api_key=None, example=None, repair_rounds=2, log=print, discovered_plan=None):
     base = base_url or os.environ.get('NC_LLM_BASE_URL') or os.environ.get('OPENAI_BASE_URL')
     model = model or os.environ.get('NC_LLM_MODEL')
     key = api_key if api_key is not None else os.environ.get('NC_LLM_API_KEY', os.environ.get('OPENAI_API_KEY'))
     if not base or not model: raise SystemExit('LLM interpreter needs NC_LLM_BASE_URL and NC_LLM_MODEL (and usually NC_LLM_API_KEY). Or use --plan FILE or --stub.')
     lib = _data('library.json')
     example = example or _data('example.plan.json')
-    draft = None
-    try: draft = stub(comp, seed=seed)
-    except ValueError: pass
+    draft = discovered_plan
+    if draft is None:
+        try: draft = stub(comp, seed=seed)
+        except ValueError: pass
     user = '\n\n'.join([
         'JSON SCHEMA (plan.json):\n' + json.dumps(SCHEMA, separators=(',', ':')),
         'LIBRARY (sources and banks you may use; each bank note lists candidates, the renderer keeps the first that measures right):\n' + json.dumps(dict(sources=lib['sources'], banks=lib['banks']), separators=(',', ':')),
@@ -162,5 +171,5 @@ def from_plan(path):
     errs = validate(plan)
     if errs: raise SystemExit(f'{path} does not validate:\n' + '\n'.join(errs[:40]))
     it = plan.get('interpreter') or {}
-    if it.get('kind') not in ('llm', 'stub'): plan['interpreter'] = dict(it, kind='human/agent-written plan')
+    if it.get('kind') not in ('llm', 'stub', 'discover'): plan['interpreter'] = dict(it, kind='human/agent-written plan')
     return plan
