@@ -6,10 +6,12 @@ import { fileURLToPath } from "node:url";
 import {
   applyPerformHit,
   BURST_LIMIT,
+  DEFAULT_LIMITS,
   forPage,
   isInternalFailure,
   proxyHosts,
   publicInternalError,
+  rejectPlan,
   BURST_PERIOD_S,
   PER_10MIN,
   PER_DAY,
@@ -101,6 +103,14 @@ test("proxy allowlist covers subdomains the exact apex would miss", () => {
   assert.ok(hosts.includes("*.audio.musicmatter.art"));
   assert.ok(hosts.includes("*.example.com"));
   assert.equal(hosts.includes("*.*.example.com"), false);
+});
+
+test("a Performance can have 16 layers and not 17", () => {
+  assert.equal(DEFAULT_LIMITS.maxLayers, 16);
+  const plan = { sources: {}, chords: [{ t: 0 }], layers: Array.from({ length: 16 }, () => ({})), length_s: 10, tail_s: 0 };
+  assert.equal(rejectPlan(plan), null);
+  plan.layers.push({});
+  assert.match(rejectPlan(plan) || "", /at most 16 layers/);
 });
 
 test("a raw HTTP 520 is replaced and a license rejection is kept", () => {

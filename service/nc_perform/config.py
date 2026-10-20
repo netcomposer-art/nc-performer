@@ -93,7 +93,7 @@ class Settings:
     max_queue: int = 50
     max_sources: int = 24
     max_chords: int = 40
-    max_layers: int = 8
+    max_layers: int = 16
     max_words: int = 4000
     max_plan_bytes: int = 64 * 1024
     max_submit_bytes: int = 50 * 1024 * 1024
@@ -196,7 +196,7 @@ def load() -> Settings:
         max_queue=_i("NC_MAX_QUEUE", 50),
         max_sources=_i("NC_MAX_SOURCES", 24),
         max_chords=_i("NC_MAX_CHORDS", 40),
-        max_layers=_i("NC_MAX_LAYERS", 8),
+        max_layers=_i("NC_MAX_LAYERS", 16),
         max_words=_i("NC_MAX_WORDS", 4000),
         job_timeout_s=_i("NC_JOB_TIMEOUT_S", 600),
         daily_soft_usd=_f("NC_DAILY_BUDGET_USD", 3.0),

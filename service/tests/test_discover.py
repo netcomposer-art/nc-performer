@@ -9,14 +9,18 @@ import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.join(ROOT, "service"))
 
 from collections import Counter
 
 from ncperf import chords as CH
 from ncperf import discover, licenses as LIC, notemap
 from ncperf.fetch import IOWA_TERMS
+from ncperf.fit import fit_plan
 from ncperf.interpret import from_plan
 from ncperf.schema import validate
+from nc_perform.config import Settings
+from nc_perform.limits import check_plan
 
 
 COMP = {
@@ -315,6 +319,9 @@ class AssembledStrikeTest(unittest.TestCase):
         self.assertLessEqual(counts.get("musicmatter", 0), 2)
         self.assertTrue(any(row["built"] == "assembled notes" for row in rows))
         self.assertEqual(plan["source_mix"]["share"], plan["source_mix"]["strike_share"])
+        self.assertLessEqual(len(plan["layers"]), Settings().max_layers)
+        self.assertEqual(Settings().max_layers, 16)
+        self.assertLessEqual(sum(1 for ly in plan["layers"] if ly["type"] == "chord_notes"), 1)
         for src in plan["sources"].values():
             for key in ("title", "author", "license", "page"):
                 self.assertTrue(src.get(key), src)
@@ -368,6 +375,174 @@ class AssembledStrikeTest(unittest.TestCase):
             json.dump(plan, open(path, "w", encoding="utf-8"))
             loaded = from_plan(path)
         self.assertEqual(loaded["interpreter"]["kind"], "discover")
+
+
+def _fs(i: int) -> dict:
+    return {
+        "kind": "freesound",
+        "id": str(i),
+        "title": f"note {i}",
+        "author": "Ada",
+        "license": "CC0-1.0",
+        "page": f"https://freesound.org/s/{i}/",
+        "pitched": True,
+    }
+
+
+def _shell() -> dict:
+    return {
+        "nc_plan_version": "0.1",
+        "title": "Packed",
+        "composition": {"title": "Packed", "words_verbatim": {"composition": "C"}},
+        "interpreter": {"kind": "discover"},
+        "seed": 1,
+        "length_s": 30,
+        "tail_s": 4,
+        "chords": [],
+        "sources": {},
+        "banks": {},
+        "layers": [],
+        "master": {"buses": {"keys": {}}},
+        "notes": [],
+    }
+
+
+class LayerCapTest(unittest.TestCase):
+    def test_many_assembled_chords_pass_the_real_validator(self):
+        """Twelve assembled strikes share one layer, under the 16-layer cap."""
+        comp = dict(
+            COMP,
+            composition="2 mins. Cm, F, G, Am, Dm.",
+            performance="Bright and open; let each chord ring into the next.",
+        )
+        maps = [_map("uiowa", "cello pizzicato", pluck=True), _map("freesound", "flute")]
+        pools = {
+            "freesound": [_clip(
+                "freesound", "Rain room tone", "texture", "325647", kind="freesound",
+                text="field recording of rain, room tone",
+            )],
+        }
+        plan = discover.plan_for(
+            comp, seed=11, searchers=_searchers(pools), verify_live=False, note_maps=maps,
+        )
+        self.assertEqual(validate(plan), [])
+        self.assertEqual(len(plan["chords"]), 12)
+        self.assertEqual(Settings().max_layers, 16)
+        self.assertLessEqual(len(plan["layers"]), 16)
+        notes = [ly for ly in plan["layers"] if ly["type"] == "chord_notes"]
+        self.assertEqual(len(notes), 1)
+        self.assertEqual(len(notes[0]["per_chord"]), 12)
+        for pc in notes[0]["per_chord"]:
+            self.assertIn(pc["bank"], plan["banks"])
+            self.assertTrue(plan["banks"][pc["bank"]]["notes"])
+        rows = plan["source_mix"]["per_chord"]
+        self.assertTrue(all(row["built"] == "assembled notes" for row in rows))
+        counts = Counter(row["origin"] for row in rows)
+        self.assertGreaterEqual(len(counts), 2)
+        self.assertLessEqual(max(counts.values()), max(1, len(rows) // 2))
+        self.assertNotIn("stretch_to_s", json.dumps(plan))
+        check_plan(plan, Settings(), None)
+
+    def test_split_layers_are_packed_instead_of_rejected(self):
+        plan = _shell()
+        for i in range(20):
+            sid = f"n{i}"
+            plan["sources"][sid] = _fs(810000 + i)
+            plan["banks"][f"b{i}"] = {"notes": {"60": [sid]}}
+            plan["chords"].append({
+                "t": round(i * 1.0, 3), "dur": 1.0, "symbol": "C", "voicing": [60],
+            })
+            plan["layers"].append({
+                "id": f"notes-{i}",
+                "type": "chord_notes",
+                "bus": "keys",
+                "bank": f"b{i}",
+                "style": "strike",
+                "per_chord": [{"chord": i, "strikes_at": [0.0]}],
+            })
+        plan["sources"]["bed"] = _fs(325647)
+        plan["layers"].append({
+            "id": "bed",
+            "type": "clips",
+            "bus": "pad",
+            "role": "texture room tone",
+            "events": [{"t": 0.0, "source": "bed", "dur_s": 10.0, "gain": 0.2}],
+        })
+        self.assertGreater(len(plan["layers"]), 16)
+        added = fit_plan(plan)
+        self.assertLessEqual(len(plan["layers"]), 16)
+        notes = [ly for ly in plan["layers"] if ly["type"] == "chord_notes"]
+        self.assertEqual(len(notes), 1)
+        self.assertEqual(len(notes[0]["per_chord"]), 20)
+        banks = {pc["bank"] for pc in notes[0]["per_chord"]}
+        self.assertGreaterEqual(len(banks), 20)
+        self.assertTrue(any("packed into one layer" in note for note in added))
+        check_plan(plan, Settings(), None)
+        self.assertEqual(fit_plan(plan), [])
+
+    def test_one_layer_per_note_shares_a_strike(self):
+        plan = _shell()
+        plan["chords"] = [{"t": 0, "dur": 8, "symbol": "C", "voicing": [60, 64, 67]}]
+        for i, midi in enumerate((60, 64, 67)):
+            sid = f"n{i}"
+            plan["sources"][sid] = _fs(820000 + i)
+            plan["banks"][f"b{i}"] = {"notes": {str(midi): [sid]}}
+            plan["layers"].append({
+                "id": f"note-{i}",
+                "type": "chord_notes",
+                "bank": f"b{i}",
+                "per_chord": [{"chord": 0, "strikes_at": [0.0]}],
+            })
+        fit_plan(plan)
+        notes = [ly for ly in plan["layers"] if ly["type"] == "chord_notes"]
+        self.assertEqual(len(notes), 1)
+        self.assertEqual(len(notes[0]["per_chord"]), 1)
+        bank = notes[0]["per_chord"][0]["bank"]
+        self.assertEqual(set(plan["banks"][bank]["notes"]), {"60", "64", "67"})
+        check_plan(plan, Settings(), None)
+
+    def test_too_many_sources_are_trimmed_not_rejected(self):
+        plan = _shell()
+        voicing = list(range(40, 70))
+        plan["chords"] = [{"t": 0, "dur": 8, "symbol": "C", "voicing": list(voicing)}]
+        notes = {}
+        for midi in voicing:
+            sid = f"n{midi}"
+            plan["sources"][sid] = _fs(830000 + midi)
+            notes[str(midi)] = [sid]
+        plan["banks"]["b"] = {"notes": notes}
+        plan["layers"] = [{
+            "id": "notes",
+            "type": "chord_notes",
+            "bank": "b",
+            "per_chord": [{"chord": 0, "bank": "b", "strikes_at": [0.0]}],
+        }]
+        added = fit_plan(plan, max_sources=24)
+        self.assertLessEqual(len(plan["sources"]), 24)
+        self.assertGreaterEqual(len(plan["chords"][0]["voicing"]), 1)
+        self.assertTrue(any("sources" in note for note in added))
+        check_plan(plan, Settings(), None)
+        self.assertEqual(fit_plan(plan, max_sources=24), [])
+
+    def test_overlong_piece_is_shortened_not_rejected(self):
+        plan = _shell()
+        plan["length_s"] = 400
+        plan["tail_s"] = 4
+        plan["chords"] = [{"t": 0, "dur": 400, "symbol": "C", "voicing": [60]}]
+        plan["sources"] = {"n": _fs(840000)}
+        plan["banks"] = {"b": {"notes": {"60": ["n"]}}}
+        plan["layers"] = [{
+            "id": "notes",
+            "type": "chord_notes",
+            "bank": "b",
+            "per_chord": [{"chord": 0, "bank": "b", "strikes_at": [0.0]}],
+        }]
+        added = fit_plan(plan)
+        self.assertLessEqual(plan["length_s"] + plan["tail_s"], 180)
+        self.assertGreaterEqual(plan["chords"][0]["dur"], 0.1)
+        self.assertTrue(any("shortened" in note for note in added))
+        check_plan(plan, Settings(), None)
+        self.assertEqual(fit_plan(plan), [])
 
 
 if __name__ == "__main__":

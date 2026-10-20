@@ -82,8 +82,9 @@ class Renderer:
                     lo, hi = ly.get('spread_s', [0.15, 0.45]); sp = self.rng.uniform(lo, hi); dts = [j * sp / max(1, len(notes) - 1) for j in range(len(notes))]
                 else: dts = sorted(self.rng.uniform(0, ly.get('jitter_s', 0.05)) for _ in notes)
                 g0 = ly.get('first_gain', 0.85) if k == 0 else ly.get('restrike_gain', 0.5)
+                bank = pc.get('bank') or ly.get('bank')
                 for m, dt in zip(notes, dts):
-                    sid = self.pick(ly['bank'], m)
+                    sid = self.pick(bank, m) if bank else None
                     gj = self.rng.uniform(*ly.get('gain_jitter', [0.8, 1.0]))
                     if sid is None: continue
                     z, so = self.note(sid, ly.get('last_note_s', 12.0) if last else ly.get('note_s', 9.0))

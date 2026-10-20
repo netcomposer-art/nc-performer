@@ -47,7 +47,7 @@ export const DEFAULT_LIMITS: LimitSettings = {
   maxLengthS: 180,
   maxSources: 24,
   maxChords: 40,
-  maxLayers: 8,
+  maxLayers: 16,
 };
 
 export function rejectPlan(plan: unknown, limits: LimitSettings = DEFAULT_LIMITS): string | null {
