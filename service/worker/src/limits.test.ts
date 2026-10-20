@@ -20,6 +20,7 @@ import {
   testerPass,
   WINDOW_S,
   corsHeaders,
+  publishedRegistryStats,
   registryPublicStats,
 } from "./policy.ts";
 
@@ -218,6 +219,14 @@ test("registry stats are counts only", () => {
     recheck_days: null,
   });
   assert.equal(registryPublicStats({ size: 4, token: "secret" }).size, 4);
+  assert.deepEqual(publishedRegistryStats(null), {
+    size: 10334,
+    ok: 8977,
+    rejected: 1357,
+    checker_version: 1,
+    recheck_days: 90,
+  });
+  assert.equal(publishedRegistryStats({ size: 4, ok: 4, rejected: 0 }).size, 4);
 });
 
 test("public job status always has trimmed, seed, found sounds, and a stage line", () => {

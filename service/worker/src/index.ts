@@ -41,7 +41,7 @@ import {
 } from "./keep";
 import { CANCELLED_MESSAGE, cancelToken, queueErrorIsCancel } from "./cancel";
 import { REQUIRED_OUTPUTS, containerPageUpdate, missingOutputs, readableBytes } from "./outputs";
-import { applyPerformHit, burstBlock, claimToken, corsHeaders, forPage, GATHER_CACHE, isInternalFailure, jobStatusFields, newId, PER_10MIN, PER_DAY, proxyHosts, publicInternalError, registryPublicStats, rejectPlan, testerPass, wordsTooLong, type FoundSound, type RateBlock, type RegistryStats } from "./policy";
+import { applyPerformHit, burstBlock, claimToken, corsHeaders, forPage, GATHER_CACHE, isInternalFailure, jobStatusFields, newId, PER_10MIN, PER_DAY, proxyHosts, publicInternalError, publishedRegistryStats, registryPublicStats, rejectPlan, testerPass, wordsTooLong, type FoundSound, type RateBlock, type RegistryStats } from "./policy";
 
 // @cloudflare/containers 0.3.7 looks up this exact export on ctx.exports when
 // allowedHosts is set. It is a WorkerEntrypoint, not a Durable Object, so it
@@ -485,6 +485,7 @@ async function config(env: Env): Promise<Response> {
       formula:
         "fresh prompt tokens times the input price, plus cached prompt tokens times the cached price, plus completion tokens times the output price",
     },
+    browser_assembly: true,
     registry: await readRegistryStats(env),
   });
 }
@@ -492,10 +493,10 @@ async function config(env: Env): Promise<Response> {
 async function readRegistryStats(env: Env): Promise<RegistryStats> {
   try {
     const obj = await env.PERFORMANCES.get(REGISTRY_STATS_KEY);
-    if (!obj) return registryPublicStats(null);
-    return registryPublicStats(await obj.json());
+    if (!obj) return publishedRegistryStats(null);
+    return publishedRegistryStats(await obj.json());
   } catch {
-    return registryPublicStats(null);
+    return publishedRegistryStats(null);
   }
 }
 

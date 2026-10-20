@@ -242,6 +242,7 @@ def make_handler(app: App):
                     "llm": bool(s.llm_configured),
                     "llm_model": s.llm_model or None,
                     "llm_price": llm_price_card(s),
+                    "browser_assembly": True,
                     "registry": _registry_stats(),
                 })
                 return

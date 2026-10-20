@@ -208,7 +208,18 @@ class RegistryTest(unittest.TestCase):
         self.assertEqual(config["registry"]["ok"], 1)
         self.assertEqual(config["registry"]["rejected"], 1)
         self.assertEqual(health["registry"], config["registry"])
+        self.assertIs(config["browser_assembly"], True)
         self.assertNotIn("NC_TESTER_TOKEN", json.dumps(config))
+
+    def test_the_worker_seed_matches_the_bundled_registry(self):
+        with open(registry.BUNDLED, encoding="utf-8") as fh:
+            stats = json.load(fh)["stats"]
+        with open(os.path.join(ROOT, "service", "worker", "src", "policy.ts"), encoding="utf-8") as fh:
+            policy = fh.read()
+        self.assertEqual(stats, {"size": 10334, "ok": 8977, "rejected": 1357})
+        self.assertIn("size: 10334", policy)
+        self.assertIn("ok: 8977", policy)
+        self.assertIn("rejected: 1357", policy)
 
 
 if __name__ == "__main__":
