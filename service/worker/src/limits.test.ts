@@ -20,7 +20,9 @@ import {
   testerPass,
   WINDOW_S,
   corsHeaders,
+  pageGatherState,
   publishedRegistryStats,
+  queuedGatherFields,
   registryPublicStats,
   siteverifyFields,
   siteverifyRequest,
@@ -306,6 +308,34 @@ test("a chord row keeps its position and preview, and a later pick replaces that
     { title: "Piano Cm", supplier: "Musicmatter", license: "CC-BY-SA-4.0", chord: 0, id: "c0", preview_url: "/api/jobs/g-0123456789ab/audio/c0", symbol: "Cm" },
     { title: "Choir F", supplier: "Musicmatter", license: "CC-BY-SA-4.0", chord: 1, id: "c1", preview_url: "/api/jobs/g-0123456789ab/audio/c1", symbol: "F" },
   ]);
+});
+
+test("a queued gather has state, and a finished gather is published as done", () => {
+  // create/perform.js postGather: empty sounds skip acceptGather; watch starts only when state is set.
+  function afterPost(body: { id?: string; gather_id?: string; state?: string; sounds?: unknown[] }) {
+    const sounds = Array.isArray(body.sounds) ? body.sounds : null;
+    if (sounds && sounds.length && (body.gather_id || body.id)) return "accepted";
+    if (body.id && body.state) return "watch";
+    return "fail";
+  }
+  const queued = { id: "g-0123456789ab", gather_id: "g-0123456789ab", ...queuedGatherFields() };
+  assert.equal(afterPost(queued), "watch");
+  const withoutState = { ...queued } as { id: string; gather_id: string; state?: string; sounds: [] };
+  delete withoutState.state;
+  assert.equal(afterPost(withoutState), "fail");
+  assert.equal(pageGatherState("g-0123456789ab", "gathered"), "done");
+  assert.equal(pageGatherState("g-0123456789ab", "gathering"), "gathering");
+  assert.equal(pageGatherState("h-0123456789ab", "done"), "done");
+  assert.equal(afterPost({
+    id: "g-0123456789ab",
+    gather_id: "g-0123456789ab",
+    state: pageGatherState("g-0123456789ab", "gathered"),
+    sounds: [{ id: "c0" }],
+  }), "accepted");
+  const worker = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
+  assert.match(worker, /queuedGatherFields\(\)/);
+  assert.match(worker, /pageGatherState\(id, state\)/);
+  assert.match(worker, /if \(state === "done"\)/);
 });
 
 test("a gathered chord keeps the fields the page assembles with", () => {

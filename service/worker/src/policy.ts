@@ -338,6 +338,21 @@ export function jobStatusFields(input: {
   return { seed, trimmed, found_sounds: foundSounds(input.found_sounds), stage_line: line, tester: input.tester === true };
 }
 
+/**
+ * The create page starts watching only when the POST body has `state`.
+ * It treats a Gather as finished only when a later status says `done`.
+ * The stored job stays `gathered` so it is not a Performance.
+ */
+export function pageGatherState(id: string, state: string): string {
+  if (id.startsWith("g-") && state === "gathered") return "done";
+  return state;
+}
+
+/** Fields the page needs on the Worker 202. `status` alone does not start the watch. */
+export function queuedGatherFields(): { state: "queued"; status: "queued"; pending: true; sounds: [] } {
+  return { state: "queued", status: "queued", pending: true, sounds: [] };
+}
+
 export type RegistryStats = {
   size: number;
   ok: number;
