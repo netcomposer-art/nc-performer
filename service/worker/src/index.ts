@@ -41,7 +41,7 @@ import {
 } from "./keep";
 import { CANCELLED_MESSAGE, cancelToken, queueErrorIsCancel } from "./cancel";
 import { REQUIRED_OUTPUTS, containerPageUpdate, missingOutputs, readableBytes } from "./outputs";
-import { applyPerformHit, burstBlock, claimToken, corsHeaders, forPage, GATHER_CACHE, isInternalFailure, jobStatusFields, newId, PER_10MIN, PER_DAY, proxyHosts, publicInternalError, publishedRegistryStats, registryPublicStats, rejectPlan, siteverifyRequest, testerPass, turnstileDeniedBody, turnstileFailure, turnstileToken, wordsTooLong, type FoundSound, type RateBlock, type RegistryStats, type TurnstileFailure } from "./policy";
+import { applyPerformHit, burstBlock, claimToken, corsHeaders, forPage, GATHER_CACHE, isInternalFailure, jobStatusFields, newId, pageGatherState, PER_10MIN, PER_DAY, proxyHosts, publicInternalError, publishedRegistryStats, queuedGatherFields, registryPublicStats, rejectPlan, siteverifyRequest, testerPass, turnstileDeniedBody, turnstileFailure, turnstileToken, wordsTooLong, type FoundSound, type RateBlock, type RegistryStats, type TurnstileFailure } from "./policy";
 
 // @cloudflare/containers 0.3.7 looks up this exact export on ctx.exports when
 // allowedHosts is set. It is a WorkerEntrypoint, not a Durable Object, so it
@@ -601,9 +601,7 @@ async function gather(request: Request, env: Env, base: string): Promise<Respons
     id,
     claim_token: token,
     seed,
-    sounds: [],
-    pending: true,
-    status: "queued",
+    ...queuedGatherFields(),
     position: placed.position,
     poll: `/api/jobs/${id}`,
     excluded_gather_id: excluded,
@@ -1558,9 +1556,12 @@ function publicJob(
     stage_line: extras?.stage_line || job?.stage_line,
     tester: job?.tester === true || extras?.tester === true,
   });
+  // The page accepts a Gather only from state "done". Performance files stay
+  // tied to a real done, so a gathered collection does not advertise them.
+  const shown = pageGatherState(id, state);
   const out: Record<string, unknown> = {
     id,
-    state,
+    state: shown,
     stage,
     percent: percent || 0,
     position,
