@@ -5,14 +5,17 @@ Nothing here pitch-shifts or time-stretches. A chromatic run is cut on silence,
 with the same segmentation the renderer uses, and a slice is kept only when it
 measures as that note. Libraries and note files are fetched together. One file
 still has 20 seconds; a slow file does not hold the rest of the library.
+Gather can arm a shorter wall-clock budget. One-shot Perform does not.
 """
 from __future__ import annotations
 
+import contextvars
 import html as html_lib
 import json
 import os
 import re
 import threading
+import time
 import urllib.parse
 import urllib.request
 
@@ -28,6 +31,28 @@ UA = "nc-performer-kit/0.1 (+https://netcomposer.art/agents/)"
 MAP_VERSION = 1
 # One page or one note file. The whole piano library is not capped at this.
 NOTE_HTTP_S = 20
+# Set by Gather on the caller, then copied into the file workers. None means
+# each file keeps NOTE_HTTP_S, which is what one-shot Perform uses.
+_until: contextvars.ContextVar[float | None] = contextvars.ContextVar("nc_note_until", default=None)
+
+
+def arm_budget(seconds: float):
+    """Stop starting note files once this many seconds have passed."""
+    return _until.set(time.monotonic() + max(0.0, float(seconds)))
+
+
+def reset_budget(token) -> None:
+    _until.reset(token)
+
+
+def _file_budget() -> float:
+    until = _until.get()
+    if until is None:
+        return float(NOTE_HTTP_S)
+    left = until - time.monotonic()
+    if left <= 0.05:
+        raise deadline.SearchTimeout("note map")
+    return min(float(NOTE_HTTP_S), left)
 UIOWA_AUTHOR = "University of Iowa Electronic Music Studios (Lawrence Fritts, director)"
 UIOWA_LICENSE = "PD-equivalent"
 PHILHARMONIA_PAGE = "https://philharmonia.co.uk/resources/sound-samples/"
@@ -216,14 +241,17 @@ def _measure_uiowa_file(spec: dict, mp: dict, url: str, needed: set[int]) -> Non
     if not span:
         return
     print(json.dumps({"event": "note_file", "id": spec["id"], "url": url.rsplit("/", 1)[-1]}), flush=True)
-    with deadline.limit(NOTE_HTTP_S):
+    with deadline.limit(_file_budget()):
         resolved = fetch.resolve({"kind": "uiowa_mis", "url": url, "page": spec["page"]})
+    _file_budget()
     y = decode(resolved["path"])
     if span[0] == span[1]:
+        _file_budget()
         meas = _measure_slice(y, span[0])
         if meas and span[0] in needed:
             _store(mp, span[0], _source_from_resolve(spec, resolved, url, None, span[0], None), meas.get("cents"))
         return
+    _file_budget()
     mono = y.mean(1) if getattr(y, "ndim", 1) == 2 else y
     segs = pitch.segment_run(mono, SR)
     expected = span[1] - span[0] + 1
@@ -237,6 +265,9 @@ def _measure_uiowa_file(spec: dict, mp: dict, url: str, needed: set[int]) -> Non
     for index, midi in pairs:
         if str(midi) in mp["notes"] and midi not in needed:
             continue
+        # A chromatic run is many measurements. Stop when the Gather wall is gone;
+        # notes already stored stay. One-shot has no wall, so this does not raise.
+        _file_budget()
         t0, t1 = segs[index]
         sl = y[int(t0 * SR):int(t1 * SR)]
         meas = _measure_slice(sl, midi)
@@ -275,7 +306,7 @@ def _fill_uiowa(spec: dict, mp: dict, needed: set[int]) -> None:
     if not missing:
         return
     try:
-        with deadline.limit(NOTE_HTTP_S):
+        with deadline.limit(_file_budget()):
             files = _uiowa_files(spec["page"])
     except deadline.SearchTimeout:
         mp.setdefault("errors", []).append("timed out reading the note page")
@@ -321,6 +352,8 @@ def _fill_uiowa(spec: dict, mp: dict, needed: set[int]) -> None:
             used.add(url)
             try:
                 _try_uiowa_file(spec, mp, url, needed)
+            except deadline.SearchTimeout:
+                return
             except Exception as exc:
                 if _blocked(exc):
                     return
@@ -338,7 +371,7 @@ def _one_freesound(spec: dict, mp: dict, cand: dict, needed: set[int], misses: s
     sid = str(cand["id"])
     print(json.dumps({"event": "note_file", "id": spec["id"], "freesound": sid, "midi": midi}), flush=True)
     try:
-        with deadline.limit(NOTE_HTTP_S):
+        with deadline.limit(_file_budget()):
             _get(f"https://freesound.org/s/{sid}/")
             resolved = fetch.resolve({"kind": "freesound", "id": sid})
     except deadline.SearchTimeout:
@@ -354,6 +387,7 @@ def _one_freesound(spec: dict, mp: dict, cand: dict, needed: set[int], misses: s
     if not lid or not LIC.allowed(lid) or author.strip().lower() in ("", "unknown", "?", "none"):
         return
     try:
+        _file_budget()
         y = decode(resolved["path"])
         meas = _measure_slice(y, midi)
     except Exception as exc:
@@ -517,7 +551,7 @@ def library_status(refresh: bool = False) -> dict:
     text = ""
     live = False
     try:
-        with deadline.limit(NOTE_HTTP_S):
+        with deadline.limit(_file_budget()):
             text = _get(PHILHARMONIA_PAGE).decode("utf-8", "replace")
         live = True
     except deadline.SearchTimeout:
@@ -567,12 +601,15 @@ def library_status(refresh: bool = False) -> dict:
     return doc
 
 
-def ensure(symbols: list[str], refresh_status: bool = False) -> tuple[list[dict], dict]:
+def ensure(symbols: list[str], refresh_status: bool = False, hint: str | None = None) -> tuple[list[dict], dict]:
     """Load or build a pitch-verified note map for each instrument. Network when a note is missing.
 
     The libraries are filled together. Within a library, the note files that
     cover the missing pitches are fetched together. The saved map is still one
     file per library, written after that library's files have been measured.
+    Gather arms a short wall and names an instrument: that instrument's libraries
+    go first and get the file slots. The other libraries run only if time is left.
+    One-shot Perform does not arm the wall, so every library still runs together.
     """
     needed: set[int] = set()
     for sym in symbols:
@@ -596,11 +633,35 @@ def ensure(symbols: list[str], refresh_status: bool = False) -> tuple[list[dict]
             _save(mp)
         return mp
 
-    results = run_all(
-        [lambda spec=spec: fill(spec) for spec in specs] + [lambda: library_status(refresh=refresh_status)],
-        workers=4,
-    )
-    maps = results[:-1]
+    def _wall_open() -> bool:
+        until = _until.get()
+        return until is None or until - time.monotonic() > 0.05
+
+    if _until.get() is not None and hint:
+        low = hint.lower()
+        hinted = [spec for spec in specs if low in (spec.get("instrument") or "").lower()]
+        others = [spec for spec in specs if spec not in hinted]
+        if hinted:
+            first = run_all(
+                [lambda spec=spec: fill(spec) for spec in hinted] + [lambda: library_status(refresh=refresh_status)],
+                workers=4,
+            )
+            maps = first[:-1]
+            status = first[-1]
+            if others and _wall_open():
+                maps = maps + run_all([lambda spec=spec: fill(spec) for spec in others], workers=4)
+        else:
+            results = run_all(
+                [lambda spec=spec: fill(spec) for spec in specs] + [lambda: library_status(refresh=refresh_status)],
+                workers=4,
+            )
+            maps, status = results[:-1], results[-1]
+    else:
+        results = run_all(
+            [lambda spec=spec: fill(spec) for spec in specs] + [lambda: library_status(refresh=refresh_status)],
+            workers=4,
+        )
+        maps, status = results[:-1], results[-1]
     for mp in maps:
         print(json.dumps({
             "event": "note_map",
@@ -609,7 +670,7 @@ def ensure(symbols: list[str], refresh_status: bool = False) -> tuple[list[dict]
             "errors": len(mp.get("errors") or []),
             "rejected": len(mp.get("rejected") or []),
         }), flush=True)
-    return maps, results[-1]
+    return maps, status
 
 
 def assemblies_for(symbols: list[str], maps: list[dict], exclude: set[str] | None = None) -> dict[str, list[dict]]:

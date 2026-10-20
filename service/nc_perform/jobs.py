@@ -124,7 +124,7 @@ class Store:
 
     def running_count(self) -> int:
         return self.db.execute(
-            "SELECT COUNT(*) FROM jobs WHERE state NOT IN ('queued','done','failed','rejected','cancelled')"
+            "SELECT COUNT(*) FROM jobs WHERE state NOT IN ('queued','done','failed','rejected','cancelled','gathered')"
         ).fetchone()[0]
 
     def mark_cancelled(self, job_id: str, message: str) -> str | None:
@@ -147,6 +147,19 @@ class Store:
             )
             self.db.commit()
             return "cancelled"
+
+    def mark_gathered(self, job_id: str, result: dict) -> bool:
+        """A Gather finished. It is not a Performance, so it does not become done."""
+        with self._lock:
+            row = self.db.execute("SELECT state FROM jobs WHERE id=?", (job_id,)).fetchone()
+            if not row or row["state"] == "cancelled":
+                return False
+            self.db.execute(
+                """UPDATE jobs SET state=?, stage=?, percent=?, result_json=?, updated_at=? WHERE id=?""",
+                ("gathered", "gathered", 100, json.dumps(result), _now(), job_id),
+            )
+            self.db.commit()
+            return True
 
     def mark_done(self, job_id: str, **fields) -> bool:
         """Finish a job. A cancel that won the race keeps the row cancelled and returns False."""

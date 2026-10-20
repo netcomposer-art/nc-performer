@@ -88,7 +88,7 @@ const TURNSTILE_TEST: Record<string, boolean> = {
   "3x0000000000000000000000000000000AA": false,
 };
 const DUMMY_TOKEN = "XXXX.DUMMY.TOKEN.XXXX";
-const ID_RE = /^[hk]-[0-9abcdefghjkmnpqrstvwxyz]{12}$/;
+const ID_RE = /^[hkg]-[0-9abcdefghjkmnpqrstvwxyz]{12}$/;
 /** Importing Dragonfly and the Python audio stack on a cold instance can take a few minutes. */
 const PORT_READY_MS = 300_000;
 
@@ -133,7 +133,32 @@ type Job = {
   seed?: number | null;
   trimmed?: string | null;
   found_sounds?: FoundSound[];
+  sounds?: GatherSound[];
   stage_line?: string;
+};
+
+type GatherSound = {
+  id: string;
+  title: string;
+  supplier: string;
+  license: string;
+  preview_url: string;
+  page?: string;
+  source_url?: string;
+};
+
+type GatherFile = { sid?: string; url?: string; ext?: string; range_bytes?: number | null };
+
+type GatherDoc = {
+  id?: string;
+  seed?: number;
+  claim_hash?: string;
+  composition?: Record<string, unknown>;
+  plan?: unknown;
+  sounds?: GatherSound[];
+  picked_keys?: string[];
+  picked_sample_ids?: string[];
+  files?: GatherFile[];
 };
 
 export class RenderContainer extends Container<Env> {
@@ -164,7 +189,7 @@ export class JobDO extends DurableObject<Env> {
   async patch(fields: Partial<Job>): Promise<Job | null> {
     const job = await this.get();
     if (!job) return null;
-    const finished = job.state === "done" || job.state === "failed" || job.state === "rejected" || job.state === "cancelled";
+    const finished = job.state === "done" || job.state === "failed" || job.state === "rejected" || job.state === "cancelled" || job.state === "gathered";
     if (finished && fields.state && fields.state !== job.state) {
       const next = { ...job };
       if (typeof fields.cost_usd === "number") next.cost_usd = fields.cost_usd;
@@ -403,6 +428,7 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (request.method === "GET" && path === "/.well-known/nc-record-keys.json") return keys(env);
   if (request.method === "GET" && path === "/api/feed") return feed(env, base);
   if (request.method === "GET" && path === "/admin") return adminPage(request, env);
+  if (request.method === "POST" && path === "/api/gather") return gather(request, env, base);
   if (request.method === "POST" && path === "/api/perform") return perform(request, env, base);
   if (request.method === "POST" && path === "/api/submit") return submit(request, env, base);
   if (request.method === "POST" && path === "/admin/enabled") return adminEnabled(request, env);
@@ -410,21 +436,23 @@ async function route(request: Request, env: Env): Promise<Response> {
     return adminModerate(request, env, path.endsWith("hide") ? "hide" : "takedown");
   }
 
-  let m = path.match(/^\/api\/jobs\/([hk]-[0-9a-z]+)$/);
+  let m = path.match(/^\/api\/jobs\/([hkg]-[0-9a-z]+)$/);
   if (request.method === "GET" && m) return jobStatus(env, m[1], base);
-  m = path.match(/^\/api\/jobs\/([hk]-[0-9a-z]+)\/files\/([A-Za-z0-9._-]+)$/);
+  m = path.match(/^\/api\/jobs\/([hkg]-[0-9a-z]+)\/files\/([A-Za-z0-9._-]+)$/);
   if (request.method === "GET" && m) return file(env, m[1], m[2]);
-  m = path.match(/^\/api\/jobs\/([hk]-[0-9a-z]+)\/events$/);
+  m = path.match(/^\/api\/jobs\/([hkg]-[0-9a-z]+)\/audio\/([A-Za-z0-9._-]+)$/);
+  if (request.method === "GET" && m) return gatherAudio(env, m[1], m[2]);
+  m = path.match(/^\/api\/jobs\/([hkg]-[0-9a-z]+)\/events$/);
   if (request.method === "GET" && m) return events(env, m[1], base);
-  m = path.match(/^\/api\/jobs\/([hk]-[0-9a-z]+)\/cancel$/);
+  m = path.match(/^\/api\/jobs\/([hkg]-[0-9a-z]+)\/cancel$/);
   if (request.method === "POST" && m) return cancelJob(request, env, m[1], base);
-  m = path.match(/^\/api\/jobs\/([hk]-[0-9a-z]+)\/(keep|visibility)$/);
+  m = path.match(/^\/api\/jobs\/([hkg]-[0-9a-z]+)\/(keep|visibility)$/);
   if (request.method === "POST" && m) return metaPost(request, env, m[1], m[2]);
-  m = path.match(/^\/api\/verify\/([hk]-[0-9a-z]+)$/);
+  m = path.match(/^\/api\/verify\/([hkg]-[0-9a-z]+)$/);
   if (request.method === "GET" && m) return verify(env, m[1]);
   m = path.match(/^\/records\/sha256\/([0-9a-f]{64})$/);
   if (request.method === "GET" && m) return alias(env, m[1]);
-  m = path.match(/^\/records\/([hk]-[0-9a-z]+)(\.json)?$/);
+  m = path.match(/^\/records\/([hkg]-[0-9a-z]+)(\.json)?$/);
   if (request.method === "GET" && m) return record(env, m[1], Boolean(m[2]));
   return json({ error: "not found" }, 404);
 }
@@ -456,7 +484,7 @@ async function keys(env: Env): Promise<Response> {
   return json({ keys: signer ? [publicJwk(signer)] : [] });
 }
 
-async function perform(request: Request, env: Env, base: string): Promise<Response> {
+async function gather(request: Request, env: Env, base: string): Promise<Response> {
   const b = budget(env);
   const spend = await b.spendToday();
   const on = await b.enabled(env.PERFORM_ENABLED !== "0");
@@ -474,7 +502,141 @@ async function perform(request: Request, env: Env, base: string): Promise<Respon
   const words = `${comp.composition || ""}\n${comp.performance || ""}`;
   const wordErr = wordsTooLong(words);
   if (wordErr) return json({ error: wordErr, code: "rejected" }, 400);
-  if (body.plan != null) {
+  let excluded: string | null = null;
+  let avoidKeys: string[] | null = null;
+  let avoidSamples: string[] | null = null;
+  if (typeof body.exclude_gather_id === "string" && body.exclude_gather_id.trim()) {
+    excluded = body.exclude_gather_id.trim();
+    if (!ID_RE.test(excluded) || !excluded.startsWith("g-")) return json({ error: "not found" }, 404);
+    const token = typeof body.claim_token === "string" ? body.claim_token.trim() : "";
+    if (!token) return json({ error: "claim_token is required.", code: "rejected" }, 400);
+    const previous = await readJsonKey(env, `gathers/${excluded}/collection.json`) as GatherDoc | null;
+    const previousJob = await jobs(env, excluded).get();
+    if (!previous) return json({ error: "not found" }, 404);
+    const claim = previous.claim_hash || previousJob?.claim_hash;
+    if (!(await claimMatches(claim, token))) {
+      return json({ error: "claim_token does not match this Gather." }, 403);
+    }
+    avoidKeys = Array.isArray(previous.picked_keys) ? previous.picked_keys : [];
+    avoidSamples = Array.isArray(previous.picked_sample_ids) ? previous.picked_sample_ids : [];
+  }
+  const ipHash = await sha256Text(`${env.NC_IP_HASH_SALT || "nc-perform"}:${ip}`);
+  const limited = await rateLimit(env, ipHash);
+  if (limited) return json({ error: limited, code: "rate" }, 429);
+  const randomSeed = () => crypto.getRandomValues(new Uint32Array(1))[0] % 2147483646 || 1;
+  const seed = body.seed == null ? randomSeed() : (Number(body.seed) || 1);
+  const token = claimToken();
+  const id = newId("g");
+  const created = isoNow();
+  const req = {
+    kind: "gather",
+    composition: comp,
+    visibility: "unlisted",
+    seed,
+    instrument,
+    claim_hash: await sha256Text(token),
+    public_base: base,
+    avoid_keys: avoidKeys,
+    avoid_sample_ids: avoidSamples,
+    excluded_gather_id: excluded,
+    force_stub: spend >= 3,
+  };
+  const job: Job = {
+    id,
+    state: "queued",
+    stage: "queued",
+    percent: 0,
+    error: null,
+    error_code: null,
+    request_json: JSON.stringify(req),
+    ip_hash: ipHash,
+    claim_hash: req.claim_hash,
+    cost_usd: 0,
+    created_at: created,
+    seed,
+    trimmed: null,
+    found_sounds: [],
+    sounds: [],
+    stage_line: "Queued",
+  };
+  await jobs(env, id).create(job);
+  const placed = await b.enqueue(id, created, 50);
+  if ("error" in placed) {
+    await jobs(env, id).patch({ state: "rejected", stage: "rejected", percent: 100, error: placed.error, error_code: "busy" });
+    return json({ error: placed.error, code: "busy" }, 503);
+  }
+  try {
+    await env.PERFORM_JOBS.send({ id });
+  } catch (err) {
+    await b.dequeue(id);
+    const error = logInternal(id, err);
+    await jobs(env, id).patch({ state: "failed", stage: "failed", percent: 100, error, error_code: "queue" });
+    return json({ error, id, gather_id: id, code: "error" }, 500);
+  }
+  return json({
+    gather_id: id,
+    id,
+    claim_token: token,
+    seed,
+    sounds: [],
+    pending: true,
+    status: "queued",
+    position: placed.position,
+    poll: `/api/jobs/${id}`,
+    excluded_gather_id: excluded,
+  }, 202);
+}
+
+async function keptGather(env: Env, body: Record<string, unknown>): Promise<{ gather_id: string; plan: unknown; composition: Record<string, unknown>; seed: number } | Response | null> {
+  const raw = body.gather_id;
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  const gatherId = raw.trim();
+  if (!ID_RE.test(gatherId) || !gatherId.startsWith("g-")) return json({ error: "not found" }, 404);
+  const token = typeof body.claim_token === "string" ? body.claim_token.trim() : "";
+  if (!token) return json({ error: "claim_token is required.", code: "rejected" }, 400);
+  const doc = await readJsonKey(env, `gathers/${gatherId}/collection.json`) as GatherDoc | null;
+  const gatherJob = await jobs(env, gatherId).get();
+  if (!doc) {
+    if (gatherJob && !["gathered", "failed", "rejected", "cancelled", "done"].includes(gatherJob.state)) {
+      return json({ error: "That Gather is not ready.", code: "rejected", gather_id: gatherId, state: gatherJob.state }, 409);
+    }
+    return json({ error: "not found" }, 404);
+  }
+  const claim = doc.claim_hash || gatherJob?.claim_hash;
+  if (!(await claimMatches(claim, token))) return json({ error: "claim_token does not match this Gather." }, 403);
+  if (!doc.plan || !doc.composition || typeof doc.composition !== "object") {
+    return json({ error: "That Gather is not ready.", code: "rejected", gather_id: gatherId }, 409);
+  }
+  const planErr = rejectPlan(doc.plan);
+  if (planErr) return json({ error: planErr, code: "rejected" }, 400);
+  const planSeed = (doc.plan as { seed?: number }).seed;
+  const seed = Number(doc.seed || planSeed) || 1;
+  return { gather_id: gatherId, plan: doc.plan, composition: doc.composition, seed };
+}
+
+async function perform(request: Request, env: Env, base: string): Promise<Response> {
+  const b = budget(env);
+  const spend = await b.spendToday();
+  const on = await b.enabled(env.PERFORM_ENABLED !== "0");
+  if (!on || spend >= 5) return json({ error: "Perform is resting until tomorrow.", code: "resting" }, 503);
+  const body = (await readJson(request)) as Record<string, unknown>;
+  const ip = clientIp(request);
+  if (env.TURNSTILE_SECRET_KEY && !(await turnstile(env, body.turnstile_token, ip))) {
+    return json({ error: "The bot check failed. Reload the page and try again.", code: "turnstile" }, 403);
+  }
+  const kept = await keptGather(env, body);
+  if (kept instanceof Response) return kept;
+  const comp = kept ? kept.composition : compositionFrom(body);
+  const instrumentError = kept ? null : instrumentProblem(body.instrument);
+  if (instrumentError) return json({ error: instrumentError, code: "rejected" }, 400);
+  const instrument = typeof body.instrument === "string" && body.instrument.trim() ? body.instrument.trim() : null;
+  if (!kept && instrument) comp.instrument = instrument;
+  if (!kept) {
+    const words = `${comp.composition || ""}\n${comp.performance || ""}`;
+    const wordErr = wordsTooLong(words);
+    if (wordErr) return json({ error: wordErr, code: "rejected" }, 400);
+  }
+  if (!kept && body.plan != null) {
     if (typeof body.plan !== "object" || Array.isArray(body.plan)) return json({ error: "plan must be a JSON object.", code: "rejected" }, 400);
     const planErr = rejectPlan(body.plan);
     if (planErr) return json({ error: planErr, code: "rejected" }, 400);
@@ -488,14 +650,16 @@ async function perform(request: Request, env: Env, base: string): Promise<Respon
   }
   const randomSeed = () => crypto.getRandomValues(new Uint32Array(1))[0] % 2147483646 || 1;
   let seed: number;
-  if (body.perform_again || body.seed == null) seed = randomSeed();
+  if (kept) seed = kept.seed;
+  else if (body.perform_again || body.seed == null) seed = randomSeed();
   else seed = Number(body.seed) || 1;
   const token = claimToken();
   const id = newId("h");
   const created = isoNow();
   const req = {
     composition: comp,
-    plan: body.plan ?? null,
+    plan: kept ? kept.plan : (body.plan ?? null),
+    gather_id: kept ? kept.gather_id : null,
     visibility,
     seed,
     keep: Boolean(body.keep),
@@ -556,11 +720,11 @@ async function runContainer(env: Env, id: string): Promise<void> {
     await writeCancelledStatus(env, id);
     return;
   }
-  if (job.state === "done" || job.state === "failed" || job.state === "rejected") return;
+  if (job.state === "done" || job.state === "failed" || job.state === "rejected" || job.state === "gathered") return;
   await budget(env).dequeue(id);
   if (await abandonIfCancelled(env, id)) return;
   const container = getContainer(env.RENDER, id);
-  const requested = JSON.parse(job.request_json) as { public_base?: string };
+  const requested = JSON.parse(job.request_json) as { public_base?: string; gather_id?: string; kind?: string };
   const base = (env.NC_PUBLIC_BASE_URL || requested.public_base || "").replace(/\/$/, "");
   const envVars = containerEnv(env, base);
   await container.startAndWaitForPorts({
@@ -570,6 +734,9 @@ async function runContainer(env: Env, id: string): Promise<void> {
   await container.setAllowedHosts(proxyHosts(allowedHosts(env)));
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (env.NC_INTERNAL_TOKEN) headers.authorization = `Bearer ${env.NC_INTERNAL_TOKEN}`;
+  if (requested.gather_id && requested.kind !== "gather") {
+    await seedGatherCache(env, container, id, requested.gather_id, headers);
+  }
   const started = await containerFetch(container, id, "http://container/internal/jobs", {
     method: "POST",
     headers,
@@ -587,6 +754,7 @@ async function runContainer(env: Env, id: string): Promise<void> {
     seed?: number | null;
     trimmed?: string | null;
     found_sounds?: FoundSound[];
+    sounds?: GatherSound[];
     stage_line?: string;
   } = {};
   let loggedFault = false;
@@ -616,13 +784,24 @@ async function runContainer(env: Env, id: string): Promise<void> {
     if (last.seed != null && Number.isFinite(Number(last.seed))) patch.seed = Number(last.seed);
     if ("trimmed" in last) patch.trimmed = typeof last.trimmed === "string" && last.trimmed.trim() ? last.trimmed : null;
     if (Array.isArray(last.found_sounds)) patch.found_sounds = last.found_sounds;
+    if (Array.isArray(last.sounds)) patch.sounds = last.sounds;
     if (page.stage_line) patch.stage_line = page.stage_line;
     if (await abandonIfCancelled(env, id)) return;
+    // Publish gathered only after the files are in R2. Until then the page stays on gathering.
+    if (last.state === "gathered") {
+      await stub.patch({ ...patch, state: "gathering", stage: "gathering", percent: 90, stage_line: "Gathering the sounds…" });
+      break;
+    }
     await stub.patch(patch);
     if (last.state === "done" || last.state === "failed" || last.state === "rejected") break;
   }
   if (await abandonIfCancelled(env, id)) return;
-  if (last.state === "done") {
+  if (last.state === "gathered") {
+    const doc = await copyGather(env, container, id, headers);
+    last.sounds = Array.isArray(doc.sounds) ? doc.sounds : [];
+    last.stage_line = "Gathered.";
+    if (doc.seed != null) last.seed = Number(doc.seed);
+  } else if (last.state === "done") {
     await sleep(400);
     if (await abandonIfCancelled(env, id)) return;
     const again = await containerFetch(container, id, `http://container/internal/jobs/${id}`, { headers });
@@ -644,13 +823,16 @@ async function runContainer(env: Env, id: string): Promise<void> {
     ? (typeof last.stage_line === "string" && last.stage_line.trim() && last.stage_line !== "Storing the Performance…"
       ? last.stage_line
       : "Done")
-    : undefined;
+    : last.state === "gathered"
+      ? "Gathered."
+      : undefined;
   const updated = await stub.patch({
     state: last.state || "failed",
     stage: last.stage || last.state || "failed",
     percent: 100,
     error: shown,
     cost_usd: cost,
+    ...(Array.isArray(last.sounds) ? { sounds: last.sounds } : {}),
     ...(finishedLine ? { stage_line: finishedLine } : {}),
   });
   if (updated) {
@@ -732,6 +914,68 @@ async function containerFetch(container: DurableObjectStub<RenderContainer>, id:
     throw new Error(`container HTTP ${res.status} for ${url}`);
   }
   return res;
+}
+
+function audioType(ext: string | undefined): string {
+  const low = (ext || "").toLowerCase();
+  if (low === ".flac") return "audio/flac";
+  if (low === ".mp3") return "audio/mpeg";
+  if (low === ".wav" || low === ".wave") return "audio/wav";
+  if (low === ".ogg") return "audio/ogg";
+  if (low === ".aif" || low === ".aiff") return "audio/aiff";
+  return "application/octet-stream";
+}
+
+async function copyGather(env: Env, container: DurableObjectStub<RenderContainer>, id: string, headers: Record<string, string>): Promise<GatherDoc> {
+  const res = await containerFetch(container, id, `http://container/internal/jobs/${id}/collection`, { headers });
+  if (!res.ok) throw new Error("gather collection was not stored");
+  const raw = await res.arrayBuffer();
+  await env.PERFORMANCES.put(`gathers/${id}/collection.json`, raw, { httpMetadata: { contentType: "application/json" } });
+  const doc = JSON.parse(new TextDecoder().decode(raw)) as GatherDoc;
+  for (const file of doc.files || []) {
+    const sid = String(file.sid || "");
+    if (!/^[A-Za-z0-9._-]{1,80}$/.test(sid)) continue;
+    const audio = await containerFetch(container, id, `http://container/internal/jobs/${id}/audio/${sid}`, { headers });
+    if (!audio.ok) continue;
+    await env.PERFORMANCES.put(`gathers/${id}/audio/${sid}`, await audio.arrayBuffer(), {
+      httpMetadata: { contentType: audioType(file.ext) },
+    });
+  }
+  await env.PERFORMANCES.put(`gathers/${id}/meta.json`, JSON.stringify({ id, claim_token_sha256: doc.claim_hash || null }), {
+    httpMetadata: { contentType: "application/json" },
+  });
+  await env.PERFORMANCES.put(
+    `gathers/${id}/status.json`,
+    JSON.stringify({ id, state: "gathered", seed: doc.seed ?? null, sounds: doc.sounds || [], stage_line: "Gathered." }),
+    { httpMetadata: { contentType: "application/json" } },
+  );
+  return doc;
+}
+
+async function seedGatherCache(env: Env, container: DurableObjectStub<RenderContainer>, performId: string, gatherId: string, headers: Record<string, string>): Promise<void> {
+  const obj = await env.PERFORMANCES.get(`gathers/${gatherId}/collection.json`);
+  if (!obj) return;
+  const doc = (await obj.json()) as GatherDoc;
+  for (const file of doc.files || []) {
+    if (!file.sid || !file.url) continue;
+    const audio = await env.PERFORMANCES.get(`gathers/${gatherId}/audio/${file.sid}`);
+    if (!audio) continue;
+    const seedHeaders: Record<string, string> = {
+      ...headers,
+      "content-type": "application/octet-stream",
+      "x-audio-url": file.url,
+      "x-audio-ext": file.ext || "",
+    };
+    if (file.range_bytes != null) seedHeaders["x-audio-range"] = String(file.range_bytes);
+    const seeded = await containerFetch(container, performId, "http://container/internal/cache", {
+      method: "POST",
+      headers: seedHeaders,
+      body: await audio.arrayBuffer(),
+    });
+    if (!seeded.ok && seeded.status !== 204) {
+      console.error(JSON.stringify({ event: "gather_seed", id: performId, gather_id: gatherId, sid: file.sid, status: seeded.status }));
+    }
+  }
 }
 
 const READBACK_TRIES = 5;
@@ -848,19 +1092,22 @@ async function jobStatus(env: Env, id: string, base: string): Promise<Response> 
   if (!ID_RE.test(id)) return json({ error: "not found" }, 404);
   const job = await jobs(env, id).get();
   if (!job) {
+    const gatherStatus = id.startsWith("g-") ? await readJsonKey(env, `gathers/${id}/status.json`) : null;
     const meta = await readJsonKey(env, `performances/${id}/meta.json`);
-    const status = (await readJsonKey(env, `performances/${id}/status.json`)) || (await readJsonKey(env, `jobs/${id}/status.json`));
+    const status = gatherStatus || (await readJsonKey(env, `performances/${id}/status.json`)) || (await readJsonKey(env, `jobs/${id}/status.json`));
     if (!meta && !status) return json({ error: "not found" }, 404);
-    const stored = (status || {}) as { state?: string; error?: string | null; trimmed?: string | null; seed?: number | null; found_sounds?: unknown; stage_line?: string; cost_estimate?: unknown };
+    const stored = (status || {}) as { state?: string; error?: string | null; trimmed?: string | null; seed?: number | null; found_sounds?: unknown; sounds?: GatherSound[]; stage_line?: string; cost_estimate?: unknown };
     const state = String(stored.state || "done");
     const storedMeta = state === "done" ? (meta as Meta | null) : null;
-    return json(publicJob(id, state, state, state === "done" ? 100 : 0, stored.error || null, base, null, {
+    const ghost = Array.isArray(stored.sounds) ? ({ sounds: stored.sounds } as Job) : null;
+    const percent = state === "done" || state === "gathered" || state === "cancelled" ? 100 : 0;
+    return json(publicJob(id, state, state, percent, stored.error || null, base, null, {
       trimmed: stored.trimmed ?? null,
       seed: stored.seed ?? null,
       found_sounds: stored.found_sounds ?? [],
       stage_line: stored.stage_line,
       cost_estimate: stored.cost_estimate,
-    }, null, storedMeta));
+    }, ghost, storedMeta));
   }
   const pos = job.state === "queued" ? await budget(env).positionOf(id) : null;
   const extras = job.state === "done" ? await doneExtras(env, id) : undefined;
@@ -913,6 +1160,12 @@ function publicJob(
     found_sounds: fields.found_sounds,
     stage_line: fields.stage_line,
   };
+  if (id.startsWith("g-")) {
+    out.gather_id = id;
+    out.sounds = job?.sounds || [];
+  } else if (job?.sounds && job.sounds.length) {
+    out.sounds = job.sounds;
+  }
   if (state === "done") {
     if (extras?.cost_estimate) out.cost_estimate = extras.cost_estimate;
     const files: Record<string, string> = {
@@ -931,6 +1184,21 @@ function publicJob(
     out.files = files;
   }
   return out;
+}
+
+async function gatherAudio(env: Env, id: string, sid: string): Promise<Response> {
+  if (!ID_RE.test(id) || !/^[A-Za-z0-9._-]{1,80}$/.test(sid)) return json({ error: "not found" }, 404);
+  const obj = await env.PERFORMANCES.get(`gathers/${id}/audio/${sid}`);
+  if (!obj) return json({ error: "not found" }, 404);
+  const doc = (await readJsonKey(env, `gathers/${id}/collection.json`)) as GatherDoc | null;
+  const row = (doc?.files || []).find((file) => file.sid === sid);
+  return new Response(obj.body, {
+    headers: {
+      "content-type": audioType(row?.ext),
+      "cache-control": "public, max-age=3600",
+      "access-control-allow-origin": "*",
+    },
+  });
 }
 
 async function file(env: Env, id: string, name: string): Promise<Response> {
@@ -1120,9 +1388,14 @@ async function wipePerformance(env: Env, id: string): Promise<void> {
   const rec = (await readJsonKey(env, `performances/${id}/record.json`)) as { record_hash?: { value?: string } } | null;
   const hash = rec?.record_hash?.value;
   if (typeof hash === "string" && RECORD_HASH.test(hash)) await env.PERFORMANCES.delete(`aliases/sha256/${hash}`);
+  await deletePrefix(env, `performances/${id}/`);
+  await deletePrefix(env, `gathers/${id}/`);
+}
+
+async function deletePrefix(env: Env, prefix: string): Promise<void> {
   let cursor: string | undefined;
   do {
-    const page = await env.PERFORMANCES.list({ prefix: `performances/${id}/`, cursor, limit: 500 });
+    const page = await env.PERFORMANCES.list({ prefix, cursor, limit: 500 });
     const keys = page.objects.map((obj) => obj.key);
     if (keys.length) await env.PERFORMANCES.delete(keys);
     cursor = page.truncated ? page.cursor : undefined;

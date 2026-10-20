@@ -60,10 +60,36 @@ def text(url):
     with _fetch_lock:
         return _text.setdefault(url, row)
 
-def download(url, range_bytes=None, ext=None):
+def cache_path(url, range_bytes=None, ext=None):
+    """Local path for one URL. range_bytes is part of the key, including None."""
     key = hashlib.sha1(f'{url}|{range_bytes}'.encode()).hexdigest()[:20]
     ext = ext or os.path.splitext(url.split('?')[0])[1] or '.bin'
-    p = os.path.join(cache_dir(), key + ext.replace('%20', ''))
+    return os.path.join(cache_dir(), key + ext.replace('%20', ''))
+
+
+def seed_file(url, data: bytes, ext=None, range_bytes=None):
+    """Write bytes where download() will find them, so a later resolve skips the network."""
+    p = cache_path(url, range_bytes=range_bytes, ext=ext)
+    if os.path.exists(p) and os.path.getsize(p) > 0:
+        return p
+    tmp = f'{p}.part.{threading.get_ident()}'
+    try:
+        with open(tmp, 'wb') as fh:
+            fh.write(data)
+        with _fetch_lock:
+            if not os.path.exists(p):
+                os.replace(tmp, p)
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+    return p
+
+
+def download(url, range_bytes=None, ext=None):
+    p = cache_path(url, range_bytes=range_bytes, ext=ext)
     if os.path.exists(p):
         return p
     b, _ = http(url, range_bytes=range_bytes, timeout=600)

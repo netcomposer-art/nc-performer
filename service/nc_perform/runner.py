@@ -39,6 +39,8 @@ from ncperf.cancel import reset as reset_cancel
 from ncperf import cancel as job_cancel
 from ncperf.discover import plan_for
 from ncperf.fit import fit_plan
+import ncperf.gather as gather
+from ncperf.gather import load_collection, public_sounds, restore_cache, save_collection, wipe_gather
 from ncperf.progress import STAGE_LINES, merge_sounds, sounds_from_sources
 from .cancel import wipe_performance, write_cancelled_status
 from .planner import PRICE_SOURCE, cache_key, compute_cost, llm_cost, llm_price_card, wants_model
@@ -49,6 +51,8 @@ from .storage import Storage
 STAGES = ("queued", "planning", "fetching", "measuring", "rendering", "reverb", "mastering", "verifying", "storing", "done")
 PERCENT = {s: i * 10 for i, s in enumerate(STAGES)}
 PERCENT["done"] = 100
+PERCENT["gathering"] = 40
+PERCENT["gathered"] = 100
 _UNSET = object()
 
 
@@ -166,6 +170,7 @@ class Runner:
         if state == "done":
             return
         wipe_performance(self.storage, job_id)
+        wipe_gather(self.storage, job_id)
         write_cancelled_status(self.storage, job_id)
 
     def run_job(self, job_id: str) -> None:
@@ -246,16 +251,27 @@ class Runner:
         settings = self.settings
         job_id = job["id"]
         req = job["request"]
-        mark = ["planning", time.perf_counter()]
-        self._stage(job_id, "planning", stage_t, mark)
-
         if self.store.spend_today() >= settings.daily_hard_usd or self.store.flag("perform_enabled", "1" if settings.perform_enabled else "0") == "0":
             raise Reject("Perform is resting until tomorrow.", "resting")
+
+        if req.get("kind") == "gather":
+            self._gather_job(job, stage_t)
+            return
+
+        mark = ["planning", time.perf_counter()]
+        self._stage(job_id, "planning", stage_t, mark)
 
         comp = req["composition"]
         seed = int(req.get("seed") or 1)
         self._progress(job_id, seed=seed, trimmed=None)
         plan = req.get("plan")
+        if plan is None and req.get("gather_id"):
+            doc = load_collection(self.storage, req["gather_id"])
+            if not doc or not isinstance(doc.get("plan"), dict):
+                raise Reject("That Gather is not ready.", "rejected")
+            plan = doc["plan"]
+        if req.get("gather_id"):
+            restore_cache(self.storage, req["gather_id"])
         mode = "plan"
         os.environ["NC_SUPPLIERS_JSON"] = settings.suppliers_json
         os.environ["NC_PERFORMER"] = settings.instance_name
@@ -316,6 +332,77 @@ class Runner:
         if not self.store.mark_done(job_id, result=done):
             self._settle_cancelled(job_id)
 
+    def _gather_job(self, job: dict, stage_t: dict) -> None:
+        settings = self.settings
+        job_id = job["id"]
+        req = job["request"]
+        mark = ["gathering", time.perf_counter()]
+        self._stage(job_id, "gathering", stage_t, mark)
+        comp = req["composition"]
+        seed = int(req.get("seed") or 1)
+        instrument = (comp.get("instrument") or "").strip() or None
+        self._progress(job_id, seed=seed, trimmed=None)
+
+        def progress_cb(line, sound=None):
+            self._progress(job_id, stage_line=line, sound=sound, seed=seed)
+
+        try:
+            built = gather.build(
+                comp,
+                seed=seed,
+                instrument=instrument,
+                avoid_keys=req.get("avoid_keys"),
+                avoid_sample_ids=req.get("avoid_sample_ids"),
+                host_ok_fn=settings.host_allowed,
+                registry_url=settings.suppliers_json,
+                progress_cb=progress_cb,
+            )
+        except ValueError as exc:
+            raise Reject(str(exc)) from exc
+        plan = built["plan"]
+        suppliers = None
+        try:
+            suppliers = load_suppliers(settings)
+        except Exception as e:
+            if any((s or {}).get("kind") == "supplier" for s in (plan.get("sources") or {}).values()):
+                raise Reject(f"Could not read the Supplier registry: {e}") from e
+        fit_plan(
+            plan,
+            max_layers=settings.max_layers,
+            max_sources=settings.max_sources,
+            max_chords=settings.max_chords,
+            max_length_s=settings.max_length_s,
+            max_plan_bytes=settings.max_plan_bytes,
+        )
+        check_plan(plan, settings, suppliers)
+        base = settings.public_base_url.rstrip("/")
+        sounds = public_sounds(plan, job_id, base, built["files"])
+        trimmed = plan.get("trimmed")
+        trimmed = trimmed if isinstance(trimmed, str) and trimmed.strip() else None
+        doc = {
+            "id": job_id,
+            "seed": int(plan.get("seed") or seed),
+            "claim_hash": req.get("claim_hash"),
+            "composition": comp,
+            "plan": plan,
+            "sounds": sounds,
+            "picked_keys": built["picked_keys"],
+            "picked_sample_ids": built["picked_sample_ids"],
+            "excluded_gather_id": req.get("excluded_gather_id"),
+        }
+        save_collection(self.storage, job_id, doc, built["files"])
+        result = {
+            "seed": int(plan.get("seed") or seed),
+            "trimmed": trimmed,
+            "found_sounds": sounds_from_sources(plan.get("sources")),
+            "sounds": sounds,
+            "stage_line": STAGE_LINES["gathered"],
+            "gather_id": job_id,
+        }
+        self._guard(job_id)
+        if not self.store.mark_gathered(job_id, result):
+            self._settle_cancelled(job_id)
+
     def _interpret(self, comp: dict, seed: int, usage: dict, force_stub: bool = False, job_id: str | None = None) -> tuple[dict, str]:
         settings = self.settings
         text = (comp.get("composition") or "") + "\n" + (comp.get("performance") or "")
@@ -336,6 +423,8 @@ class Runner:
                 registry_url=settings.suppliers_json,
                 progress_cb=progress_cb if job_id else None,
             )
+            if isinstance(discovered, dict):
+                discovered.pop("gather_picks", None)
         except Exception as exc:
             discovered = None
             discover_error = str(exc)

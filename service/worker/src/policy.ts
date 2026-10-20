@@ -10,7 +10,7 @@ export function needsLlm(text: string): boolean {
   return LINE.test(text) || TRIPLET.test(text) || SECTIONS.test(text);
 }
 
-export function newId(prefix: "h" | "k" = "h"): string {
+export function newId(prefix: "h" | "k" | "g" = "h"): string {
   const bytes = new Uint8Array(8);
   crypto.getRandomValues(bytes);
   let n = 0n;
@@ -173,6 +173,8 @@ export function applyPerformHit(
 /** Short lines the Create page shows. A search replaces the stage line with "Finding …". */
 export const STAGE_LINES: Record<string, string> = {
   queued: "Queued",
+  gathering: "Gathering the sounds…",
+  gathered: "Gathered.",
   planning: "Reading the notes…",
   fetching: "Fetching the recordings…",
   measuring: "Checking each note's pitch…",

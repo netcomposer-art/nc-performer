@@ -7,6 +7,7 @@ import { needsLlm, newId, rejectPlan } from "./policy.ts";
 test("crockford ids and llm choice", () => {
   const id = newId("h");
   assert.match(id, /^h-[0-9abcdefghjkmnpqrstvwxyz]{12}$/);
+  assert.match(newId("g"), /^g-[0-9abcdefghjkmnpqrstvwxyz]{12}$/);
   assert.equal(needsLlm("1 min. Cm, Am, F. Clear and open."), false);
   assert.equal(needsLlm("A melody line in triplets across two sections."), true);
 });

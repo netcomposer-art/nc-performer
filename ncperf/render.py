@@ -1,9 +1,10 @@
 """RENDER: deterministic. plan.json in; FLAC + MP3 + uses log out. Same plan + same sources + same seed = same audio.
 Fetch -> license check -> measure pitch -> select by measurement -> place -> hacks -> mix -> master. No pitch-shifting anywhere."""
-import json, os, random, subprocess
+import json, os, random, subprocess, threading
 import numpy as np, soundfile as sf, pyloudnorm as pyln
 from scipy.signal import fftconvolve
 from . import fetch, pitch
+from .parallel import run_all
 from .util import SR, decode, fade, flatten, loop_unaltered, lp, hp, onset
 from . import util, dsp, reverb
 
@@ -16,6 +17,7 @@ class Renderer:
         self.bus = {}; self.uses = []; self.res = {}; self.meas = {}; self.rejected = []; self.sel = {}
         q = plan.get('quality', {}); util.Q.update(resampler=q.get('resampler', 'soxr'), stretch_engine=q.get('stretch_engine', 'auto'))
         util.USED['resampler'].clear(); util.USED['stretch'].clear(); self.reverb_info = None; self.ir_inputs = None; self.master_info = None
+        self._src_lock = threading.Lock()
         for ly in plan.get('layers') or []:
             if ly.get('stretch_to_s'):
                 raise RuntimeError('time-stretch is not allowed')
@@ -26,21 +28,45 @@ class Renderer:
     # ---------- sources ----------
     def source(self, sid):
         """Resolve (fetch + license check) once; for multi-note runs, cut the requested note by silence segmentation."""
-        if sid in self.res: return self.res[sid]
+        with self._src_lock:
+            if sid in self.res: return self.res[sid]
         s = self.P['sources'][sid]; r = fetch.resolve(s); r['id'] = sid
         y = decode(r['path']); r['offset_s'] = 0.0
         if 'segment' in s:
             segs = pitch.segment_run(y.mean(1), SR, s['segment'].get('drop_db', 40.0)); i = s['segment']['index']
             t0, t1 = segs[i]; r['segment'] = dict(index=i, t0=round(t0, 3), t1=round(t1, 3), of=len(segs)); r['offset_s'] = t0
             y = y[int(t0 * SR):int(t1 * SR)]
-        r['y'] = y; self.res[sid] = r
+        r['y'] = y
+        with self._src_lock:
+            if sid in self.res: return self.res[sid]
+            self.res[sid] = r
         self.log(f"  source {sid}: {r['license']['name']} \u00b7 {r['author']} \u00b7 {r['title'][:60]}")
         return r
+
+    def _warm(self):
+        """Decode the kept files together. Gather already checked their pitch."""
+        sids = [sid for sid in (self.P.get('sources') or {})]
+
+        def one(sid):
+            try:
+                self.source(sid)
+            except Exception as exc:
+                self.log(f"  source {sid}: {exc}")
+
+        if len(sids) <= 1:
+            for sid in sids:
+                one(sid)
+            return
+        run_all([lambda sid=sid: one(sid) for sid in sids], workers=min(8, len(sids)))
 
     def measured(self, sid, expect):
         if (sid, expect) not in self.meas:
             r = self.source(sid); s = self.P['sources'][sid]
-            m = pitch.measure_fft(r['y'], expect, hi=s.get('fft_hi_hz', 2000.0)) if s.get('pitch_method') == 'fft' else pitch.measure(r['y'], expect); m['accepted'] = pitch.accept(m, expect, self.P.get('pitch_tolerance_cents', 15.0))
+            checked = s.get('pitch_checked') and s.get('expect_midi') is not None and int(s.get('expect_midi')) == int(expect)
+            if checked:
+                m = {'accepted': True, 'cents': s.get('cents'), 'note': pitch.NOTE(int(expect)), 'checked': 'gather'}
+            else:
+                m = pitch.measure_fft(r['y'], expect, hi=s.get('fft_hi_hz', 2000.0)) if s.get('pitch_method') == 'fft' else pitch.measure(r['y'], expect); m['accepted'] = pitch.accept(m, expect, self.P.get('pitch_tolerance_cents', 15.0))
             self.meas[(sid, expect)] = m
             if not m['accepted']: self.rejected.append(dict(source=sid, expected=pitch.NOTE(expect), measured=m))
         return self.meas[(sid, expect)]
@@ -276,6 +302,8 @@ class Renderer:
 
     def run(self, name='performance'):
         os.makedirs(self.out, exist_ok=True)
+        if self.P.get('from_gather'):
+            self._warm()
         for ly in self.P['layers']:
             self.log(f"layer {ly['id']} ({ly['type']})"); getattr(self, 'L_' + ly['type'])(ly)
         out, before = self.mix(); fl, mp3, p1 = self.master(out, name)

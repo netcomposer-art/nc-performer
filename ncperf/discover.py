@@ -22,12 +22,14 @@ license, and a page.
 from __future__ import annotations
 
 import contextvars
+import hashlib
 import html as html_lib
 import json
 import os
 import random
 import re
 import threading
+import time
 import urllib.parse
 import urllib.request
 import zlib
@@ -212,12 +214,52 @@ def _instrument_label(blob: str, hint: str | None) -> str:
     return "texture"
 
 
+def _index_disk(url: str) -> str:
+    folder = os.path.join(fetch.cache_dir(), "indexes")
+    os.makedirs(folder, exist_ok=True)
+    name = hashlib.sha1(url.encode()).hexdigest()[:20] + ".json"
+    return os.path.join(folder, name)
+
+
+def _read_index_disk(url: str):
+    path = _index_disk(url)
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            doc = json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return None
+    return doc if isinstance(doc, list) else None
+
+
+def _write_index_disk(url: str, offerings: list) -> None:
+    path = _index_disk(url)
+    tmp = f"{path}.part.{threading.get_ident()}"
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(offerings, fh)
+        os.replace(tmp, path)
+    except OSError:
+        pass
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+
+
 def _mm_index(registry_url: str | None, host_ok_fn=None) -> list[dict]:
     url = registry_url or "https://netcomposer.art/suppliers.json"
     with _MM_LOCK:
         cached = _MM_CACHE.get(url)
     if cached is not None:
         return cached
+    disk = _read_index_disk(url)
+    if disk is not None:
+        with _MM_LOCK:
+            return _MM_CACHE.setdefault(url, disk)
     offerings = []
     try:
         reg = _json(url)
@@ -237,7 +279,10 @@ def _mm_index(registry_url: str | None, host_ok_fn=None) -> list[dict]:
         print(json.dumps({"event": "discover_origin", "origin": "musicmatter", "error": str(exc)[:200]}), flush=True)
         return []
     with _MM_LOCK:
-        return _MM_CACHE.setdefault(url, offerings)
+        stored = _MM_CACHE.setdefault(url, offerings)
+    if stored is offerings:
+        _write_index_disk(url, offerings)
+    return stored
 
 
 # A texture bed may be a pad or a field recording. A song, a cover, or a live
@@ -289,6 +334,8 @@ def _offering_symbol(off: dict) -> str | None:
             return spelled
     name = (off.get("audio") or off.get("manifest") or "").rsplit("/", 1)[-1]
     name = re.sub(r"\.(flac|nc\.json|wav|mp3|ogg)$", " ", name, flags=re.I).replace("_", " ")
+    # Catalog filenames write F# as Fsharp. The chord parser reads the sharp sign.
+    name = name.replace("sharp", "#").replace("flat", "b")
     found = [sym for sym, _bass in CH.find_full(name)]
     if not found:
         return None
@@ -582,7 +629,41 @@ def search_musicmatter(terms, hint, chords, seed, host_ok_fn=None, registry_url=
     out = []
     for (sym, inst, kind), group in buckets.items():
         group = sorted(group, key=lambda o: (0 if o.get("default_voicing") else 1, rng.random()))
-        for off in group[:2]:
+        # One-shot keeps two files. Gather also keeps a root and each inversion, so a
+        # written bass (Dm7/C) is in the pool when the note files did not finish.
+        # Main-catalog files come first. A filename like G7sharp9 still spells as G,
+        # and that must not take the inversion slot from the plain G voicing.
+        if _plan_until.get() is None:
+            kept = group[:2]
+        else:
+            group = sorted(group, key=lambda o: (
+                0 if ("00a_main" in (o.get("manifest") or "") or "00b_main" in (o.get("manifest") or "")) else 1,
+                0 if o.get("default_voicing") else 1,
+                rng.random(),
+            ))
+            kept = []
+            seen_inv = set()
+            for off in group:
+                path = f"{off.get('audio') or ''} {off.get('manifest') or ''}".lower()
+                if "inv3" in path:
+                    inv = "inv3"
+                elif "inv2" in path:
+                    inv = "inv2"
+                elif "inv1" in path:
+                    inv = "inv1"
+                elif "root" in path:
+                    inv = "root"
+                else:
+                    inv = "other"
+                if inv in seen_inv:
+                    continue
+                seen_inv.add(inv)
+                kept.append(off)
+                if len(kept) >= 4:
+                    break
+            if not kept:
+                kept = group[:2]
+        for off in kept:
             blob = " ".join(str(off.get(k) or "") for k in (
                 "instrument_name", "instrument", "collection", "chord", "root", "quality", "audio",
             ))
@@ -983,14 +1064,32 @@ def _voicing(sym: str) -> list[int]:
     return [60, 64, 67]
 
 
+_plan_until: contextvars.ContextVar[float | None] = contextvars.ContextVar("nc_plan_until", default=None)
+
+
+def arm_wall(seconds: float):
+    """Cap later file-reach checks to this many seconds from now. One-shot Perform does not arm it."""
+    return _plan_until.set(time.monotonic() + max(0.0, float(seconds)))
+
+
+def reset_wall(token) -> None:
+    _plan_until.reset(token)
+
+
 def _audio_reachable(cand: dict) -> bool:
     """Drop a file the renderer would not be allowed to download."""
     src = cand.get("source") or {}
     url = src.get("url") or ""
     if not url or src.get("kind") in ("freesound", "supplier"):
         return True
+    budget = 25.0
+    until = _plan_until.get()
+    if until is not None:
+        budget = min(budget, until - time.monotonic())
+        if budget <= 0.05:
+            return False
     try:
-        with deadline.limit(25):
+        with deadline.limit(budget):
             wait = deadline.socket_timeout(25)
             req = urllib.request.Request(url, headers={"User-Agent": UA, "Range": "bytes=0-2047"})
             with urllib.request.urlopen(req, timeout=wait) as r:
@@ -1074,7 +1173,39 @@ def _start_prefetch(src: dict):
     return thread, box
 
 
-def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_fn=None, searchers=None, registry_url=None, verify_live: bool = True, note_maps=None, progress_cb=None, origin_budget_s: float = 20, texture_budget_s: float = 20) -> dict:
+def _drop_avoided_notes(maps, blocked: set[str]):
+    """Copy note maps without samples whose id or url was kept by an earlier Gather."""
+    if not maps or not blocked:
+        return maps
+    out = []
+    for mp in maps:
+        copy = dict(mp)
+        notes = {}
+        for midi, sample in (mp.get("notes") or {}).items():
+            ident = str(sample.get("id") or "")
+            url = str(sample.get("url") or "")
+            if ident in blocked or url in blocked:
+                continue
+            notes[midi] = sample
+        copy["notes"] = notes
+        out.append(copy)
+    return out
+
+
+def _foreign_bass(sym: str, bass) -> bool:
+    """The slash bass is not a tone of this chord. Gather may play the chord anyway.
+
+    One-shot Perform does not arm the plan wall, so a mismatched bass still drops the file.
+    """
+    if bass is None or _plan_until.get() is None:
+        return False
+    tones = {int(n) % 12 for _name, notes in CH.voicings(sym) for n in notes}
+    if not tones:
+        return False
+    return int(bass) % 12 not in tones
+
+
+def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_fn=None, searchers=None, registry_url=None, verify_live: bool = True, note_maps=None, progress_cb=None, origin_budget_s: float = 20, texture_budget_s: float = 20, avoid_keys=None, avoid_sample_ids=None, note_budget_s: float | None = None) -> dict:
     """Build a plan from an even-handed search. Raises ValueError if nothing usable came back."""
     comp_text = comp.get("composition") or ""
     found = take.composition_chords(comp_text) or CH.find_full(
@@ -1140,7 +1271,14 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
     note_pool = None
     note_future = None
     if note_maps is None and verify_live:
-        note_pool, note_future = submit(notemap.ensure, syms)
+        # Copy the deadline into the note workers, then clear it on this thread
+        # so a later one-shot Perform in the same process is not capped.
+        budget_token = notemap.arm_budget(note_budget_s) if note_budget_s is not None else None
+        try:
+            note_pool, note_future = submit(notemap.ensure, syms, False, hint)
+        finally:
+            if budget_token is not None:
+                notemap.reset_budget(budget_token)
 
     groups: dict[str, list] = {}
     errors = {}
@@ -1201,6 +1339,10 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
             note_hit(hit, origin)
     for origin in ORIGINS:
         groups.setdefault(origin, [])
+    blocked_keys = {str(k) for k in (avoid_keys or []) if k}
+    if blocked_keys:
+        for origin in list(groups):
+            groups[origin] = [h for h in groups[origin] if str(h.get("key") or "") not in blocked_keys]
     print(json.dumps({
         "event": "discover",
         "terms": query,
@@ -1267,8 +1409,22 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
             if _texture_ok(cand) or (verify_live and kind == "freesound"):
                 textures.append(cand)
         random.Random(seed + 29).shuffle(textures)
+        tried_late = False
         for cand in textures:
-            got = accept(cand, None, None)
+            until = _plan_until.get()
+            late = until is not None and time.monotonic() >= until - 0.05
+            if late and tried_late:
+                break
+            if late:
+                # The supplier clock is spent. One live check, then stop. No 25 second hang.
+                tried_late = True
+                try:
+                    with deadline.limit(1.5):
+                        got = accept(cand, None, None)
+                except deadline.SearchTimeout:
+                    got = None
+            else:
+                got = accept(cand, None, None)
             if not got:
                 continue
             got["instrument"] = _instrument_label(got.get("text") or got.get("title") or "", None)
@@ -1288,6 +1444,7 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
     assembled: list[dict] = []
     used: dict[str, str] = {}
     sample_ids: dict[str, str] = {}
+    kept_picks: list[str] = []
 
     def sid_for(cand: dict, suffix: str) -> str:
         if cand["key"] in used:
@@ -1295,6 +1452,8 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
         sid = f"{cand['origin'][:2]}-{suffix}"
         used[cand["key"]] = sid
         sources[sid] = cand["source"]
+        if cand.get("key"):
+            kept_picks.append(str(cand["key"]))
         return sid
 
     def sid_for_sample(sample: dict) -> str:
@@ -1310,7 +1469,14 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
         for field in ("kind", "url", "id", "page", "title", "author", "license", "pitched", "expect_midi", "segment"):
             if sample.get(field) not in (None, ""):
                 keep[field] = sample[field]
+        if sample.get("cents") is not None:
+            keep["cents"] = sample["cents"]
+            keep["pitch_checked"] = True
         sources[sid] = keep
+        if sample.get("id"):
+            kept_picks.append(str(sample["id"]))
+        if sample.get("url"):
+            kept_picks.append(str(sample["url"]))
         tell(None, {
             "title": keep.get("title"),
             "supplier": progress.origin_label(keep.get("kind")),
@@ -1331,6 +1497,7 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
         library_meta = {}
         if note_maps is None:
             note_maps = []
+    note_maps = _drop_avoided_notes(note_maps or [], {str(s) for s in (avoid_sample_ids or []) if s})
     assembly = notemap.assemblies_for(syms, note_maps or [], _EXCLUDE)
 
     # A written bar or beat length is the clock. Otherwise a "second half" is a time boundary,
@@ -1443,6 +1610,8 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
                 continue
             sym, bass = symbols[i]
             got = accept(opt["cand"], sym, bass)
+            if not got and _foreign_bass(sym, bass):
+                got = accept(opt["cand"], sym, None)
             if not got:
                 dead[i].add(id(opt["cand"]))
                 return False
@@ -1519,6 +1688,8 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
             if not opt or opt.get("built") != "whole-chord file" or opt.get("accepted"):
                 continue
             got = accept(opt["cand"], symbols[i][0], symbols[i][1])
+            if not got and _foreign_bass(symbols[i][0], symbols[i][1]):
+                got = accept(opt["cand"], symbols[i][0], None)
             if not got:
                 member["opts"][i] = None
             else:
@@ -2025,6 +2196,7 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
         "sections": plan_sections,
         "chords": chords,
         "sources": sources,
+        "gather_picks": list(dict.fromkeys(kept_picks)),
         "banks": banks,
         "layers": layers,
         "master": {
@@ -2085,8 +2257,13 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
         plan["trimmed"] = slice_note
     fit_plan(plan)
     if prefetch_thread is not None:
-        prefetch_thread.join()
-        err = prefetch_box.get("error")
-        if isinstance(err, job_cancel.Cancelled):
-            raise err
+        until = _plan_until.get()
+        # Gather has already spent its search clock. Do not sit here for the bed file;
+        # the chosen-file download has its own short clock and finds a finished prefetch.
+        timeout = None if until is None else max(0.0, until - time.monotonic())
+        prefetch_thread.join(timeout=timeout)
+        if not prefetch_thread.is_alive():
+            err = prefetch_box.get("error")
+            if isinstance(err, job_cancel.Cancelled):
+                raise err
     return plan

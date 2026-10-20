@@ -3,6 +3,8 @@ from __future__ import annotations
 
 STAGE_LINES = {
     "queued": "Queued",
+    "gathering": "Gathering the sounds…",
+    "gathered": "Gathered.",
     "planning": "Reading the notes…",
     "fetching": "Fetching the recordings…",
     "measuring": "Checking each note's pitch…",
