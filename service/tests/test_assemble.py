@@ -15,7 +15,7 @@ import numpy as np
 import soundfile as sf
 
 sys.path.insert(0, os.path.dirname(__file__))
-from test_discover import COMP, _chords, _searchers  # noqa: E402
+from test_discover import COMP, _chords, _clip, _searchers  # noqa: E402
 from test_service import _api, _close, _settings  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -187,6 +187,103 @@ class RawPlanTest(unittest.TestCase):
         self.assertFalse(slow["done"])
         self.assertTrue(all(clip["built"] == "whole-chord file" for clip in plan["clips"]))
         self.assertTrue(all("Choir" in clip["title"] for clip in plan["clips"]))
+
+    def test_a_slash_bass_prefers_the_matching_voicing(self):
+        comp = dict(COMP, composition="4/4. quarter = 60. one chord per bar. C/E.")
+        root = _clip("musicmatter", "piano C root", "piano", "piano-C-root", kind="supplier", chord="C")
+        inv = _clip("musicmatter", "piano C inv", "piano", "piano-C-inv", kind="supplier", chord="C")
+        root["bass_pc"] = 0
+        inv["bass_pc"] = 4
+        plan = _plan(1, comp=comp, searchers=_searchers({"musicmatter": [root, inv]}))
+        clip = plan["clips"][0]
+        self.assertEqual(clip["built"], "whole-chord file")
+        self.assertEqual(clip["sids"], ["c0"])
+        self.assertIn("inv", clip["title"])
+        self.assertEqual(validate(plan), [])
+        self.assertNotIn("stretch_to_s", json.dumps(plan))
+
+    def test_a_slash_bass_stacks_an_indexed_bass_note(self):
+        comp = dict(COMP, composition="4/4. quarter = 60. one chord per bar. C/E.")
+        root = _clip("musicmatter", "piano C", "piano", "piano-C", kind="supplier", chord="C")
+        root["bass_pc"] = 0
+        note = {
+            "kind": "uiowa_mis",
+            "url": "https://theremin.music.uiowa.edu/Piano.mf.E3.aiff",
+            "title": "piano E3",
+            "author": "University of Iowa Electronic Music Studios (Lawrence Fritts, director)",
+            "license": "PD-equivalent",
+            "page": "https://theremin.music.uiowa.edu/MISpiano.html",
+            "midi": 52,
+            "expect_midi": 52,
+            "pitched": True,
+            "cents": 8.0,
+        }
+        maps = [{"id": "uiowa-piano", "origin": "uiowa", "instrument": "piano", "notes": {"52": note, "64": dict(note, midi=64, expect_midi=64, title="piano E4")}}]
+        plan = assemble.plan_raw(
+            comp, seed=1, searchers=_searchers({"musicmatter": [root]}), verify_live=False, note_maps=maps,
+        )
+        clip = plan["clips"][0]
+        self.assertEqual(clip["built"], "chord and bass note")
+        self.assertEqual(clip["sids"], ["c0", "c0b"])
+        bass = plan["sources"]["c0b"]
+        self.assertEqual(bass["kind"], "uiowa_mis")
+        self.assertEqual(bass["title"], "piano E3")
+        self.assertNotIn("cents", bass)
+        self.assertNotIn("reverb", plan["master"])
+        self.assertNotIn("stretch_to_s", json.dumps(plan))
+        self.assertEqual(validate(plan), [])
+        self.assertIn("piano E3", clip["credit"])
+
+    def test_a_missing_bass_keeps_the_plain_chord(self):
+        comp = dict(COMP, composition="8 sec. Dm7/C, G7/B, Am/C.")
+        rows = [
+            _clip("musicmatter", f"piano {sym}", "piano", f"p-{sym}", kind="supplier", chord=sym)
+            for sym in ("Dm7", "G7", "Am")
+        ]
+        plan = _plan(1, comp=comp, searchers=_searchers({"musicmatter": rows}))
+        self.assertEqual([clip["symbol"] for clip in plan["clips"]], ["Dm7", "G7", "Am"])
+        self.assertTrue(all(clip["built"] == "whole-chord file" for clip in plan["clips"]))
+        self.assertTrue(all(len(clip["sids"]) == 1 for clip in plan["clips"]))
+        self.assertEqual(validate(plan), [])
+
+    def test_the_disk_index_names_the_bass_and_a_slash_chord_plans(self):
+        from ncperf import discover
+
+        tmp = tempfile.mkdtemp(prefix="nc-bass-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        previous = os.environ.get("NC_CACHE")
+        os.environ["NC_CACHE"] = tmp
+        url = "https://example.test/suppliers-bass.json"
+        offerings = [
+            {
+                "audio": "https://audio.musicmatter.art/fullchords/D/00a_main_Dm7_1_root.flac",
+                "manifest": "https://musicmatter.art/sounds/fullchords-v4/D/00a_main_Dm7_1_root.nc.json",
+                "instrument_name": "Piano",
+            },
+            {
+                "audio": "https://audio.musicmatter.art/fullchords/D/00a_main_Dm7_4_inv3.flac",
+                "manifest": "https://musicmatter.art/sounds/fullchords-v4/D/00a_main_Dm7_4_inv3.nc.json",
+                "instrument_name": "Piano",
+            },
+        ]
+        discover._write_index_disk(url, offerings)
+        discover._MM_CACHE.pop(url, None)
+        comp = dict(COMP, composition="4/4. quarter = 60. one chord per bar. Dm7/C.")
+        try:
+            plan = assemble.plan_raw(
+                comp, seed=1, searchers={"openverse": lambda *_a: []}, verify_live=False, note_maps=[],
+                registry_url=url, gather_deadline_s=0.4, settle_s=0,
+            )
+        finally:
+            discover._MM_CACHE.pop(url, None)
+            if previous is None:
+                os.environ.pop("NC_CACHE", None)
+            else:
+                os.environ["NC_CACHE"] = previous
+        clip = plan["clips"][0]
+        self.assertEqual(clip["symbol"], "Dm7")
+        self.assertEqual(clip["built"], "whole-chord file")
+        self.assertIn("inv3", plan["sources"][clip["sids"][0]]["url"])
 
 
 class RawRenderTest(unittest.TestCase):

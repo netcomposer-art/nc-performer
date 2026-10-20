@@ -78,7 +78,7 @@ A row is checked again only when its fingerprint changes, `checker_version` chan
 
 The seed is the note index plus the musicmatter catalog already on disk (10,195 offerings). It did not download the audio. Counts: 10,334 rows, 8,977 ok, 1,357 rejected. By supplier: musicmatter 8,839 ok and 1,356 rejected (`wrong_chord`, a catalog file whose name is not a chord), University of Iowa 104 ok, Freesound 34 ok (piano, cello, and flute), Philharmonia 1 rejected (`bad_license`, the custom licence already recorded on the note index). No row was rejected for a missing credit, a wrong pitch, an unreachable file, silence, clipping, or length, because those checks need the audio and this seed did not fetch it. On this machine a 5-chord Gather with the disk index and an empty registry downloaded 5 manifests and finished in 0.232 s (hit rate 0). The same Gather with the registry loaded made no check download and finished in 0.042 s, hit rate 1.0 (5 of 5). Loading the 5.5 MB file took 0.035 s. A rejected lookup returned in under a millisecond and did not fetch. Queue wait and the R2 copy are not in these numbers.
 
-Gather, on this release, runs the supplier searches together and stops at 8 seconds (`GATHER_S`). Each supplier still has a 4 second budget. A chord with no live hit uses the musicmatter index already on disk, then indexed notes. If neither has that chord, Gather fails; it does not hang. It does not download the note libraries, does not measure pitch, and does not call the model. One-shot `POST /api/perform` is that Gather plus the raw assembly. Supplier indexes are cached on disk under `NC_CACHE/indexes`. Whole-chord files come first, including the inversion that matches a written bass. A slash bass that is not a tone of the chord still gets that chord. Indexed notes are stacked only for a chord that has no whole-chord file. A preview plays one clip the first time it is requested. The processed Gather (`processed` on the kit call, or `POST /api/perform-processed` when the flag is on) keeps the older 4 second origin and note budgets and can still search room tone.
+Gather, on this release, runs the supplier searches together and stops at 8 seconds (`GATHER_S`). Each supplier still has a 4 second budget. A chord with no live hit uses the musicmatter index already on disk, then indexed notes. If neither has that chord, Gather fails; it does not hang. It does not download the note libraries, does not measure pitch, and does not call the model. One-shot `POST /api/perform` is that Gather plus the raw assembly. Supplier indexes are cached on disk under `NC_CACHE/indexes`. Whole-chord files come first. A written slash bass prefers the inversion whose bass matches. When none does, the chord recording and one UIowa or other indexed bass note are sounded together, with no effects and no pitch-shift. When that note is not indexed, the chord is kept alone. A bass never drops the chord. Indexed notes are stacked on their own only for a chord that has no whole-chord file. A preview plays one clip the first time it is requested. The processed Gather (`processed` on the kit call, or `POST /api/perform-processed` when the flag is on) keeps the older 4 second origin and note budgets and can still search room tone.
 
 ### This release, BWV 846
 
@@ -121,7 +121,25 @@ Clocks on this machine. Queue wait and the R2 copy are not included, except the 
 
 Hosted container cold start was not measured here (no Cloudflare credentials). The Worker allows 300 seconds for the port, because a cold instance imports Dragonfly and the Python audio stack. `GET /api/warm` starts the shared container `nc-warm` when the Composition field is focused, and later jobs use that same instance. This process, already running, answers `{ok: true, warming: false}`. The Worker answers `{ok: true, warming: true}` and starts the container in the background. The ping is not a Perform.
 
-Known follow-up, not fixed here: BWV 846 seed 1 against the offline musicmatter index and the note index raises `No exact chord recording or native-pitch notes` for C, Dm7, G7, Am, D7, G, Cmaj7, Am7, Dbdim7, Dm, Bdim7, Fmaj7, C7, F#dim7, and G7sus4. Those symbols are listed in the disk index. A written bass is refused when the candidate has no matching `bass_pc`. The earlier 35-file take is the one in the table above.
+Slash bass, this machine, disk index and the checked-sounds registry already loaded. Queue wait, container start, and the R2 copy are not included. Every seed gathered and rendered. The prelude is 35 chords, 121.739 s. Thirty-three use a matching inversion. `F#dim7/G` and `G7/C` have no such voicing, so each is the chord file plus one UIowa piano bass note (G2, C3). Canon and blues have no slash bass.
+
+| Piece | Seed | Gather | Render | Ensemble |
+|---|---|---|---|---|
+| C major Prelude | 1 | 0.923 | 4.866 | piano |
+| C major Prelude | 2 | 0.820 | 2.798 | fat synth |
+| C major Prelude | 3 | 1.044 | 2.188 | piano |
+| C major Prelude | 4 | 1.031 | 3.930 | choir |
+| C major Prelude | 5 | 0.781 | 4.232 | synth arp |
+| Canon in D | 1 | 1.020 | 1.106 | piano |
+| Canon in D | 2 | 1.031 | 0.872 | piano |
+| Canon in D | 3 | 1.030 | 0.850 | piano |
+| Canon in D | 4 | 1.031 | 0.865 | piano |
+| Canon in D | 5 | 1.028 | 0.865 | piano |
+| 12-bar blues in A | 1 | 1.021 | 0.930 | piano |
+| 12-bar blues in A | 2 | 1.023 | 0.805 | piano |
+| 12-bar blues in A | 3 | 1.023 | 0.844 | piano |
+| 12-bar blues in A | 4 | 1.026 | 0.688 | piano |
+| 12-bar blues in A | 5 | 1.025 | 0.582 | piano |
 
 ### Canon in D, 10 seeds, no instrument named
 

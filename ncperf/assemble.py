@@ -4,6 +4,10 @@ A Gather finds an openly licensed recording that is that chord. Perform trims
 each clip to its slot, fades the edges, matches loudness, and guards the peak.
 Nothing else runs: no layers, no reverb, no room tone, no mastering, no
 time-stretch, and no pitch-shift.
+
+A written slash bass prefers the voicing whose bass matches. Otherwise the
+chord recording and one indexed bass note are sounded together. If that note
+is not in the index, the chord is kept on its own. A bass never drops the chord.
 """
 from __future__ import annotations
 
@@ -382,7 +386,7 @@ def _plan(
             + ", ".join(dict.fromkeys(missing))
             + ". A pitched clip in another key was not used."
         )
-    return _pack(comp, seq, slots, section_spec, chosen, seed, slice_note, prefer)
+    return _pack(comp, seq, slots, section_spec, chosen, seed, slice_note, prefer, maps)
 
 
 def _clock(comp_text, words, found, seed):
@@ -471,14 +475,14 @@ def _kept_out(cand: dict, blocked: set[str]) -> bool:
 
 
 def _accept(opt: dict, sym: str, bass, verify_live: bool):
+    """Credit the file. A slash bass is resolved later and does not drop the chord."""
+    del sym, bass
     if opt.get("built") != "whole-chord file":
         return opt
     if opt.get("accepted"):
         return opt
     cand = opt["cand"]
-    got = discover._ensure_credit(cand, verify_live, bass=bass)
-    if not got and discover._foreign_bass(sym, bass):
-        got = discover._ensure_credit(cand, verify_live, bass=None)
+    got = discover._ensure_credit(cand, verify_live, bass=None)
     if not got:
         return None
     if verify_live and (not discover._declared_on_page(got) or not discover._audio_reachable(got)):
@@ -561,6 +565,55 @@ def _option_groups(seq, pool, assembly, hint, seed, named) -> list:
     return option_groups
 
 
+def _heard_bass(opt) -> int | None:
+    if not opt or opt.get("built") != "whole-chord file":
+        return None
+    accepted = opt.get("accepted") or {}
+    cand = opt.get("cand") or {}
+    value = accepted.get("bass_pc", cand.get("bass_pc"))
+    if value is None:
+        return None
+    try:
+        return int(value) % 12
+    except (TypeError, ValueError):
+        return None
+
+
+def _place_bass(chosen, groups, seq, verify_live):
+    """Prefer a matching bass in the chosen instrument. Else mark a bass note.
+
+    The ensemble stays the one already chosen. A bass miss does not empty the chord.
+    """
+    for index, opt in enumerate(chosen):
+        if not opt or opt.get("built") != "whole-chord file":
+            continue
+        _sym, bass = seq[index]
+        if bass is None:
+            continue
+        bass = int(bass) % 12
+        if _heard_bass(opt) == bass:
+            continue
+        voice = (opt.get("origin"), opt.get("instrument"))
+        replacement = None
+        for row in groups[index]:
+            if row is opt or row.get("built") != "whole-chord file":
+                continue
+            if (row.get("origin"), row.get("instrument")) != voice:
+                continue
+            hinted = (row.get("cand") or {}).get("bass_pc")
+            if hinted is None or int(hinted) % 12 != bass:
+                continue
+            got = row if row.get("accepted") else _accept(row, _sym, None, verify_live)
+            if got and _heard_bass(got) == bass:
+                replacement = got
+                break
+        if replacement is not None:
+            chosen[index] = replacement
+        else:
+            opt["bass_note_pc"] = bass
+    return chosen
+
+
 def _choose_files(groups, seq, seed, prefer, verify_live, on_pick=None):
     dead = [set() for _ in groups]
     for salt in range(24):
@@ -605,6 +658,12 @@ def _choose_files(groups, seq, seed, prefer, verify_live, on_pick=None):
                     if on_pick:
                         on_pick(index, got)
         if not failed:
+            before = list(chosen)
+            chosen = _place_bass(chosen, groups, seq, verify_live)
+            if on_pick:
+                for index, opt in enumerate(chosen):
+                    if opt is not before[index]:
+                        on_pick(index, opt)
             return chosen
         for index in failed:
             dead[index].add(id(chosen[index]["cand"]))
@@ -616,7 +675,54 @@ def _credit(title, author, page, license_id) -> str:
     return f"“{title}” by {author} ({page}), {name}"
 
 
-def _pack(comp, seq, slots, section_spec, chosen, seed, slice_note, prefer) -> dict:
+def _indexed_bass(maps, pc: int) -> dict | None:
+    """Lowest native-pitch note of this pitch class. UIowa piano, then other UIowa, then the rest."""
+    pc = int(pc) % 12
+    best = None
+    for mp in maps or []:
+        origin = str(mp.get("origin") or "").lower()
+        ident = str(mp.get("id") or "").lower()
+        inst = str(mp.get("instrument") or "").lower()
+        uiowa = origin == "uiowa" or ident.startswith("uiowa")
+        if uiowa and "piano" in inst:
+            rank = 0
+        elif uiowa:
+            rank = 1
+        else:
+            rank = 2
+        for key, sample in (mp.get("notes") or {}).items():
+            if not isinstance(sample, dict):
+                continue
+            try:
+                midi = int(sample.get("midi") if sample.get("midi") is not None else key)
+            except (TypeError, ValueError):
+                continue
+            if midi % 12 != pc:
+                continue
+            if sample.get("kind") not in ("freesound", "uiowa_mis", "commons", "supplier"):
+                continue
+            if not all(str(sample.get(field) or "").strip() for field in ("title", "author", "license", "page")):
+                continue
+            expect = sample.get("expect_midi")
+            if expect is not None and int(expect) != midi:
+                continue
+            rank_key = (rank, midi)
+            if best is None or rank_key < best[0]:
+                best = (rank_key, sample)
+    return dict(best[1]) if best else None
+
+
+def _bass_source(sample: dict) -> dict:
+    """The note as recorded. No cents, so nothing downstream pitch-shifts it."""
+    keep = {}
+    for field in ("kind", "url", "id", "audio_url", "page", "title", "author", "license", "expect_midi", "onset_s", "length_s"):
+        if sample.get(field) not in (None, ""):
+            keep[field] = sample[field]
+    keep["pitched"] = True
+    return keep
+
+
+def _pack(comp, seq, slots, section_spec, chosen, seed, slice_note, prefer, maps=None) -> dict:
     sources = {}
     clips = []
     events = []
@@ -673,6 +779,22 @@ def _pack(comp, seq, slots, section_spec, chosen, seed, slice_note, prefer) -> d
             license_id = got.get("license") or ""
             credit = _credit(title, author, page, license_id)
             voicing = [int(n) for n in discover._voicing(sym)]
+            sample = _indexed_bass(maps, opt["bass_note_pc"]) if opt.get("bass_note_pc") is not None else None
+            if sample:
+                sid = f"c{index}b"
+                sources[sid] = _bass_source(sample)
+                sids.append(sid)
+                built = "chord and bass note"
+                credit = credit + "; " + _credit(
+                    sample.get("title") or "",
+                    sample.get("author") or "",
+                    sample.get("page") or "",
+                    sample.get("license") or "",
+                )
+                if sample.get("id"):
+                    picks.append(str(sample["id"]))
+                if sample.get("url"):
+                    picks.append(str(sample["url"]))
         voicing = [n for n in voicing if 21 <= int(n) <= 108] or [60]
         chords.append({
             "t": round(start, 3),
@@ -714,6 +836,11 @@ def _pack(comp, seq, slots, section_spec, chosen, seed, slice_note, prefer) -> d
     ]
     if slice_note:
         notes.append(slice_note)
+    if any(opt.get("bass_note_pc") is not None for opt in chosen if opt):
+        notes.append(
+            "A written bass with no matching voicing is the chord plus one indexed bass note, "
+            "sounded together, or the chord alone when that note is not indexed."
+        )
     if prefer:
         notes.append("The words asked for " + ", ".join(prefer) + ".")
     title = comp.get("title") or "Untitled"

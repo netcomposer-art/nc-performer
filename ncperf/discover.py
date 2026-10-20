@@ -349,6 +349,46 @@ def _offering_symbol(off: dict) -> str | None:
     return max(found, key=len)
 
 
+_BASS_STEMS: dict | None = None
+
+
+def _bass_stems() -> dict:
+    """Lowest note of each catalog voicing, keyed by the filename stem."""
+    global _BASS_STEMS
+    if _BASS_STEMS is None:
+        stems = {}
+        for rows in (CH.CAT.get("chords") or {}).values():
+            for row in rows or []:
+                if not isinstance(row, (list, tuple)) or len(row) < 2 or not row[1]:
+                    continue
+                stems[str(row[0]).rsplit("/", 1)[-1]] = int(min(row[1])) % 12
+        _BASS_STEMS = stems
+    return _BASS_STEMS
+
+
+def _offering_bass_pc(off: dict):
+    """Pitch class of the recorded bass, from the file's voicing. No network."""
+    if off.get("bass_pc") is not None:
+        try:
+            return int(off["bass_pc"]) % 12
+        except (TypeError, ValueError):
+            pass
+    audio = str(off.get("audio") or off.get("manifest") or "")
+    stem = re.sub(r"\.(flac|wav|aiff?|mp3|ogg|nc\.json)$", "", audio.rsplit("/", 1)[-1], flags=re.I)
+    bass = _bass_stems().get(stem)
+    if bass is None and re.search(r"(^|[_\-])root([_\-.]|$)", stem, re.I):
+        sym = _offering_symbol(off)
+        match = re.match(r"([A-G])(#|b)?", sym or "")
+        if match:
+            pc = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}[match.group(1)]
+            if match.group(2) == "#":
+                pc += 1
+            elif match.group(2) == "b":
+                pc -= 1
+            bass = pc % 12
+    return bass
+
+
 def _offering_instrument(off: dict) -> str:
     name = str(off.get("instrument_name") or "").strip().lower()
     if name:
@@ -744,6 +784,9 @@ def search_musicmatter(terms, hint, chords, seed, host_ok_fn=None, registry_url=
             cand["voicing_kind"] = kind
             cand["pitched"] = True
             cand["instrument"] = inst
+            bass_pc = _offering_bass_pc(off)
+            if bass_pc is not None:
+                cand["bass_pc"] = bass_pc
             out.append(cand)
     return out
 
