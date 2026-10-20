@@ -8,6 +8,7 @@ import {
   BURST_LIMIT,
   DAY_S,
   DEFAULT_LIMITS,
+  failureForPage,
   forPage,
   isInternalFailure,
   jobStatusFields,
@@ -20,7 +21,9 @@ import {
   testerPass,
   WINDOW_S,
   corsHeaders,
+  pageGatherState,
   publishedRegistryStats,
+  queuedGatherFields,
   registryPublicStats,
   siteverifyFields,
   siteverifyRequest,
@@ -140,6 +143,21 @@ test("a Performance can have 16 layers and not 17", () => {
   assert.equal(rejectPlan(plan), null);
   plan.layers.push({});
   assert.match(rejectPlan(plan) || "", /at most 16 layers/);
+});
+
+test("a Save copy rejection stays on the job and a proxy fault does not", () => {
+  const id = "h-abcdefghjkmn";
+  assert.equal(failureForPage(id, "The gathered file is missing or too large."), "The gathered file is missing or too large.");
+  assert.equal(failureForPage(id, "The take is missing or too large."), "The take is missing or too large.");
+  assert.equal(failureForPage(id, "could not copy gathers/g-abcdefghjkmn/audio/c0 (400)"), "could not copy gathers/g-abcdefghjkmn/audio/c0 (400)");
+  const hidden = failureForPage(id, "HTTP Error 520: Server Error");
+  assert.match(hidden, /Something went wrong while performing/);
+  assert.equal(hidden.includes("520"), false);
+  assert.match(failureForPage(id, "Traceback (most recent call last)"), /Something went wrong while performing/);
+  assert.equal(
+    failureForPage(id, "The take is missing or too large.\nTraceback (most recent call last)"),
+    "The take is missing or too large.",
+  );
 });
 
 test("a raw HTTP 520 is replaced and a license rejection is kept", () => {
@@ -306,6 +324,34 @@ test("a chord row keeps its position and preview, and a later pick replaces that
     { title: "Piano Cm", supplier: "Musicmatter", license: "CC-BY-SA-4.0", chord: 0, id: "c0", preview_url: "/api/jobs/g-0123456789ab/audio/c0", symbol: "Cm" },
     { title: "Choir F", supplier: "Musicmatter", license: "CC-BY-SA-4.0", chord: 1, id: "c1", preview_url: "/api/jobs/g-0123456789ab/audio/c1", symbol: "F" },
   ]);
+});
+
+test("a queued gather has state, and a finished gather is published as done", () => {
+  // create/perform.js postGather: empty sounds skip acceptGather; watch starts only when state is set.
+  function afterPost(body: { id?: string; gather_id?: string; state?: string; sounds?: unknown[] }) {
+    const sounds = Array.isArray(body.sounds) ? body.sounds : null;
+    if (sounds && sounds.length && (body.gather_id || body.id)) return "accepted";
+    if (body.id && body.state) return "watch";
+    return "fail";
+  }
+  const queued = { id: "g-0123456789ab", gather_id: "g-0123456789ab", ...queuedGatherFields() };
+  assert.equal(afterPost(queued), "watch");
+  const withoutState = { ...queued } as { id: string; gather_id: string; state?: string; sounds: [] };
+  delete withoutState.state;
+  assert.equal(afterPost(withoutState), "fail");
+  assert.equal(pageGatherState("g-0123456789ab", "gathered"), "done");
+  assert.equal(pageGatherState("g-0123456789ab", "gathering"), "gathering");
+  assert.equal(pageGatherState("h-0123456789ab", "done"), "done");
+  assert.equal(afterPost({
+    id: "g-0123456789ab",
+    gather_id: "g-0123456789ab",
+    state: pageGatherState("g-0123456789ab", "gathered"),
+    sounds: [{ id: "c0" }],
+  }), "accepted");
+  const worker = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
+  assert.match(worker, /queuedGatherFields\(\)/);
+  assert.match(worker, /pageGatherState\(id, state\)/);
+  assert.match(worker, /if \(state === "done"\)/);
 });
 
 test("a gathered chord keeps the fields the page assembles with", () => {

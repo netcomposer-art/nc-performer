@@ -1142,12 +1142,11 @@ def make_handler(app: App):
             key = self.headers.get("X-Gather-Key") or ""
             if not re.fullmatch(r"gathers/g-[0-9a-z]+/(collection\.json|meta\.json|status\.json|audio/[A-Za-z0-9._-]{1,80})", key):
                 raise Reject("X-Gather-Key is not a gathered file.")
-            n = int(self.headers.get("Content-Length") or 0)
-            if n <= 0 or n > 80 * 1024 * 1024:
-                raise Reject("The gathered file is missing or too large.")
-            data = self.rfile.read(n)
-            if len(data) != n:
-                raise Reject("The gathered file is incomplete.")
+            data = _copied_bytes(
+                self, 80 * 1024 * 1024,
+                "The gathered file is missing or too large.",
+                "The gathered file is incomplete.",
+            )
             app.storage.put(key, data, self.headers.get("Content-Type") or "application/octet-stream")
             self._send(204, b"")
 
@@ -1159,12 +1158,11 @@ def make_handler(app: App):
             if not re.fullmatch(r"h-[0-9a-z]+", job_id):
                 raise Reject("X-Take-Job is not a Performance id.")
             from ncperf.assembly import TAKE_AUDIO_MAX
-            n = int(self.headers.get("Content-Length") or 0)
-            if n <= 0 or n > TAKE_AUDIO_MAX:
-                raise Reject("The take is missing or too large.")
-            data = self.rfile.read(n)
-            if len(data) != n:
-                raise Reject("The take is incomplete.")
+            data = _copied_bytes(
+                self, TAKE_AUDIO_MAX,
+                "The take is missing or too large.",
+                "The take is incomplete.",
+            )
             app.storage.put(f"jobs/{job_id}/take-audio", data, self.headers.get("Content-Type") or "application/octet-stream")
             self._send(204, b"")
 
@@ -1231,6 +1229,78 @@ def _admin_ok(app: App, handler) -> bool:
         handler._send(401, {"error": "admin token required"})
         return False
     return True
+
+
+def _declared_length(handler) -> int:
+    """Byte length of one copied object.
+
+    The port proxy may omit Content-Length and send the body chunked, or it
+    may keep the bytes length-delimited while dropping that header. A positive
+    Content-Length wins. Otherwise the Worker's X-NC-Content-Length is the
+    count. Zero means the body was not framed.
+    """
+    def parse(name: str) -> int | None:
+        raw = handler.headers.get(name)
+        if raw in (None, ""):
+            return None
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return None
+
+    stated = parse("Content-Length")
+    hinted = parse("X-NC-Content-Length")
+    if stated is not None and stated > 0:
+        return stated
+    if hinted is not None and hinted > 0:
+        return hinted
+    return stated or 0
+
+
+def _read_chunked(rfile, limit: int, missing: str, incomplete: str) -> bytes:
+    out = bytearray()
+    while True:
+        line = rfile.readline(128)
+        if not line:
+            raise Reject(incomplete)
+        try:
+            size = int(line.split(b";", 1)[0].strip() or b"0", 16)
+        except ValueError as exc:
+            raise Reject(incomplete) from exc
+        if size < 0:
+            raise Reject(incomplete)
+        if size == 0:
+            while True:
+                extra = rfile.readline(1024)
+                if extra in (b"\r\n", b"\n", b""):
+                    break
+            break
+        if len(out) + size > limit:
+            raise Reject(missing)
+        block = rfile.read(size)
+        if len(block) != size:
+            raise Reject(incomplete)
+        out += block
+        delim = rfile.read(2)
+        if delim != b"\r\n":
+            raise Reject(incomplete)
+    return bytes(out)
+
+
+def _copied_bytes(handler, limit: int, missing: str, incomplete: str) -> bytes:
+    """The body of one Keep copy. A missing length is the caller's rejection."""
+    if "chunked" in (handler.headers.get("Transfer-Encoding") or "").lower():
+        data = _read_chunked(handler.rfile, limit, missing, incomplete)
+        if not data:
+            raise Reject(missing)
+        return data
+    n = _declared_length(handler)
+    if n <= 0 or n > limit:
+        raise Reject(missing)
+    data = handler.rfile.read(n)
+    if len(data) != n:
+        raise Reject(incomplete)
+    return data
 
 
 def _internal_ok(app: App, handler) -> bool:

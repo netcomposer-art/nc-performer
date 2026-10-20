@@ -911,6 +911,79 @@ class ServiceTest(unittest.TestCase):
         self.assertEqual(keys["keys"][0]["kid"], app.signer.key_id)
         self.assertEqual(keys["keys"][0]["crv"], "Ed25519")
 
+    def test_keep_copy_reads_the_byte_length(self):
+        """Save's container hop must accept a body whose Content-Length was dropped.
+
+        The Worker sends X-NC-Content-Length, and a chunked body, because the
+        port proxy does not always keep Content-Length. A body with neither
+        framing is the sentence the job error shows.
+        """
+        import http.client
+        tmp = tempfile.mkdtemp(prefix="nc-keep-copy-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        s = _settings(tmp, suppliers="http://127.0.0.1/suppliers.json", llm_base="", llm_model="")
+        s.queue_autostart = False
+        app, api = _api(s)
+        self.addCleanup(_close, api)
+        port = api.server_address[1]
+        gather_key = "gathers/g-abcdefghjkmn/collection.json"
+        payload = b'{"id":"g-abcdefghjkmn"}\n'
+        take = b"RIFFtake"
+        take_id = "h-abcdefghjkmn"
+
+        def raw(path, headers, body):
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            conn.putrequest("POST", path)
+            for name, value in headers.items():
+                conn.putheader(name, value)
+            conn.endheaders()
+            if body:
+                conn.send(body)
+            resp = conn.getresponse()
+            raw_body = resp.read()
+            status = resp.status
+            conn.close()
+            return status, raw_body
+
+        status, body = raw("/internal/gather-file", {
+            "X-Gather-Key": gather_key,
+            "Content-Type": "application/json",
+        }, None)
+        self.assertEqual(status, 400)
+        self.assertEqual(json.loads(body)["error"], "The gathered file is missing or too large.")
+
+        status, body = raw("/internal/gather-file", {
+            "X-Gather-Key": gather_key,
+            "Content-Type": "application/json",
+            "X-NC-Content-Length": str(len(payload)),
+        }, payload)
+        self.assertEqual(status, 204, body)
+        self.assertEqual(app.storage.get(gather_key), payload)
+
+        chunked = f"{len(payload):x}\r\n".encode() + payload + b"\r\n0\r\n\r\n"
+        status, body = raw("/internal/gather-file", {
+            "X-Gather-Key": gather_key,
+            "Content-Type": "application/json",
+            "Transfer-Encoding": "chunked",
+        }, chunked)
+        self.assertEqual(status, 204, body)
+        self.assertEqual(app.storage.get(gather_key), payload)
+
+        status, body = raw("/internal/take-audio", {
+            "X-Take-Job": take_id,
+            "Content-Type": "audio/wav",
+        }, None)
+        self.assertEqual(status, 400)
+        self.assertEqual(json.loads(body)["error"], "The take is missing or too large.")
+
+        status, body = raw("/internal/take-audio", {
+            "X-Take-Job": take_id,
+            "Content-Type": "audio/wav",
+            "Content-Length": str(len(take)),
+        }, take)
+        self.assertEqual(status, 204, body)
+        self.assertEqual(app.storage.get(f"jobs/{take_id}/take-audio"), take)
+
 
 def _settings(tmp, suppliers, llm_base, llm_model="grok-4.3") -> Settings:
     s = Settings()
