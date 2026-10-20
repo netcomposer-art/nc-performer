@@ -466,6 +466,11 @@ class AssembledStrikeTest(unittest.TestCase):
         self.assertTrue(all(0.9 <= hop < 2.0 for hop in hops))
         self.assertGreater(max(hops) - min(hops), 0.05)
         self.assertGreater(starts[-1] + 2.35, 11.5)
+        held = take.chord_overlaps(0.0, 24.0, "s", "role", 5, 2, 1.0, 0.0, False, continuous=True)
+        held_hops = [b - a for a, b in zip([e["t"] for e in held], [e["t"] for e in held][1:])]
+        self.assertTrue(held_hops)
+        self.assertTrue(all(hop <= 1.4 for hop in held_hops))
+        self.assertTrue(not _sustain_gaps(held, 24.0, take.SUSTAIN_AUDIBLE) or max(_sustain_gaps(held, 24.0, take.SUSTAIN_AUDIBLE)) <= 0.15)
         orderly = take.chord_overlaps(0.0, 12.0, "s", "role", 3, 1, 1.0, 0.0, True)
         oh = [b - a for a, b in zip([e["t"] for e in orderly], [e["t"] for e in orderly][1:])]
         self.assertTrue(oh)
@@ -512,6 +517,7 @@ class AssembledStrikeTest(unittest.TestCase):
         self.assertEqual(validate(plan), [])
 
     def test_ring_words_overlap_and_a_gap_is_only_for_space(self):
+        from ncperf import take
         pools = {"musicmatter": _chords("musicmatter", "choir")}
         ringing = dict(COMP, performance="Bright and open; let each chord ring into the next.")
         plan = discover.plan_for(ringing, seed=1, searchers=_searchers(pools), verify_live=False)
@@ -520,6 +526,10 @@ class AssembledStrikeTest(unittest.TestCase):
         self.assertGreater(events[0]["dur_s"], 4.2)
         self.assertGreater(events[0]["dur_s"], dur)
         self.assertLess(events[0]["t"], 0.1)
+        self.assertFalse(any(row.get("breath") for row in plan["source_mix"]["arrangement"]))
+        self.assertGreater(take.duration_cv([chord["dur"] for chord in plan["chords"]]), 0.18)
+        gaps = _sustain_gaps(events, plan["length_s"], take.SUSTAIN_AUDIBLE)
+        self.assertTrue(not gaps or max(gaps) <= 0.15)
         self.assertFalse(any(ly["id"] == "bed" for ly in plan["layers"]))
         self.assertGreaterEqual(plan["master"]["reverb"]["send_lu"], 3.0)
         self.assertEqual(plan["source_mix"]["predictability"]["mode"], "free")
@@ -774,6 +784,20 @@ class AssembledStrikeTest(unittest.TestCase):
         self.assertAlmostEqual(sum(chord["dur"] for chord in chords), 120.0, delta=0.05)
         self.assertEqual(plan["sections"][0]["end_s"], plan["sections"][1]["start_s"])
         self.assertAlmostEqual(plan["sections"][1]["start_s"], 60.0, delta=0.05)
+
+
+def _sustain_gaps(events, end: float, audible: float) -> list[float]:
+    """Silence inside [0, end] if each copy only sounds for `audible` seconds."""
+    spans = sorted((float(event["t"]), float(event["t"]) + audible) for event in events)
+    cursor = 0.0
+    gaps = []
+    for start, stop in spans:
+        if start > cursor + 1e-6:
+            gaps.append(start - cursor)
+        cursor = max(cursor, stop)
+    if end > cursor + 1e-6:
+        gaps.append(end - cursor)
+    return gaps
 
 
 def _fs(i: int) -> dict:

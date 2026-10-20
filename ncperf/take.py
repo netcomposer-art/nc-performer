@@ -20,6 +20,7 @@ _SPACE_BED = re.compile(
     re.I,
 )
 _GAP = re.compile(r"\b(space|air between|breath|pause between)\b", re.I)
+_RING = re.compile(r"\b(ring(?:ing|s)?|legato)\b|\binto the next\b", re.I)
 _DISTANCE = re.compile(r"\b(distance|distant|far away)\b", re.I)
 _SOFT = re.compile(r"ambient|soft|calm|slow|gentle|dark|no harsh", re.I)
 _EVEN = re.compile(r"\b(no swells|evenly lit|keep it even|steady|uniform)\b", re.I)
@@ -564,6 +565,7 @@ def phrase(words: str) -> dict:
     return {
         "bed": bool(_SPACE_BED.search(text)),
         "gap": bool(_GAP.search(text)),
+        "ring": bool(_RING.search(text)),
         "distance": bool(_DISTANCE.search(text)),
         "soft": bool(_SOFT.search(text)),
         "even": bool(_EVEN.search(text)),
@@ -998,15 +1000,23 @@ def predictability(rows: list[dict]) -> dict:
     }
 
 
-def chord_overlaps(chord_t: float, cover: float, sid: str, role: str, seed: int, index: int, gain: float, entry: float, orderly: bool) -> list[dict]:
+# A whole-chord file is about 4.4 s with audible energy to ~2.3 s. A ringing chord
+# assumes 2.0 s, so a restart still overlaps if the tail is a little shorter.
+SUSTAIN_AUDIBLE = 2.0
+
+
+def chord_overlaps(chord_t: float, cover: float, sid: str, role: str, seed: int, index: int, gain: float, entry: float, orderly: bool, continuous: bool = False) -> list[dict]:
     """Unaltered copies. A whole-chord file goes quiet after about two seconds, so the next copy starts before that.
 
     The file is not time-stretched. Orderly spacing is one hop. Free spacing changes from copy to copy.
+    `continuous` is a ring or legato chord: restarts stay close enough that the join is under 0.15 s,
+    and a last copy is placed so the written length stays covered.
     """
     rng = random.Random(seed * 1009 + index * 13)
     start = max(0.0, float(chord_t) + float(entry))
-    audible = 2.35
-    last = float(chord_t) + float(cover) - audible
+    audible = SUSTAIN_AUDIBLE if continuous else 2.35
+    target = float(chord_t) + float(cover)
+    last = target - audible
     if last < start:
         last = start
     events = []
@@ -1025,8 +1035,27 @@ def chord_overlaps(chord_t: float, cover: float, sid: str, role: str, seed: int,
             "flatten": False,
             "role": role,
         })
-        t += 1.55 if orderly else rng.choice([1.05, 1.28, 1.5, 1.72])
+        if continuous:
+            t += rng.choice([0.95, 1.1, 1.2, 1.35])
+        else:
+            t += 1.55 if orderly else rng.choice([1.05, 1.28, 1.5, 1.72])
         k += 1
+    if continuous and events and k < 48:
+        sound_end = events[-1]["t"] + audible
+        if sound_end < target - 0.12:
+            t_close = round(max(start, target - audible), 3)
+            if t_close > events[-1]["t"] + 0.15:
+                events.append({
+                    "t": t_close,
+                    "source": sid,
+                    "offset_s": 0.0,
+                    "dur_s": round(max(2.0, audible + 0.2), 3),
+                    "fade_in_s": 0.05,
+                    "fade_out_s": 0.3,
+                    "gain": round(gain * 0.9, 3),
+                    "flatten": False,
+                    "role": role,
+                })
     return events
 
 

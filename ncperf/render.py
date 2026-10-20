@@ -113,7 +113,15 @@ class Renderer:
                     else:
                         sounding = ly.get('last_note_s', 12.0) if last else ly.get('note_s', 9.0)
                     fade_out = float(pc['fade_out_s']) if pc.get('fade_out_s') else (ly.get('last_fade_out_s', 6.0) if last else ly.get('fade_out_s', 3.5))
-                    z, so = self.note(sid, sounding)
+                    if pc.get("sustain"):
+                        z, so = self.note(sid)
+                        if len(z) + int(0.05 * SR) < int(sounding * SR):
+                            # The recording is shorter than this lingering chord. Repeat it unaltered.
+                            z = loop_unaltered(z, sounding)
+                        else:
+                            z = z[:int(sounding * SR)]
+                    else:
+                        z, so = self.note(sid, sounding)
                     z = fade(z, 0.02, fade_out)
                     self.put(ly.get('bus', 'keys'), z, c['t'] + ly.get('offset_s', 0.4) + off + dt, g0 * gj * ly.get('gain', 1.0) * g_scale, sid, chord_index=i, midi=m,
                              source_offset_s=round(so, 3), time_stretch=1.0, role=ly.get('role', ly['id']))

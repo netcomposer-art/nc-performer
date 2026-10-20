@@ -1378,7 +1378,8 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
             section_cut = None
 
     mode = take.arrangement_mode(words, kn)
-    if mode == "free" and not pulse and not kn["gap"] and len(seq) >= 4:
+    # A ring or legato line has no deliberate silence. A breath there is a hole.
+    if mode == "free" and not pulse and not kn["gap"] and not kn["ring"] and len(seq) >= 4:
         breath_at = 1 + (int(seed) % (len(seq) - 2))
     long_piece = len(seq) >= 12
     required = [lead_words, partner_words] if partner_words else None
@@ -1625,6 +1626,7 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
                             "note_s": ring_i["note_s"],
                             "fade_out_s": ring_i["fade_out_s"],
                             "last_note_s": ring_i["last_note_s"],
+                            "sustain": bool(kn["ring"] and not kn["gap"]),
                         })
                     else:
                         spec = pads.setdefault(bank_id, {"chords": [], "instrument": opt.get("instrument"), "origin": opt.get("origin")})
@@ -1639,6 +1641,7 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
                         slot_t, ring_i["cover"], sid,
                         f"{picked['instrument']} ({picked['origin']}) {sym} {match}: {picked['title'][:80]}",
                         seed, global_i, 0.72 * gain, role["strikes_at"][0], mode == "orderly",
+                        continuous=bool(kn["ring"] and not kn["gap"]),
                     )
                     for ev in blob:
                         ev["chord_index"] = global_i
