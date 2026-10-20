@@ -7,6 +7,7 @@ measures as that note.
 
 Perform and Gather read the precomputed note index and do not download or
 measure these libraries. The live fill below is the offline refresh job.
+Library order is not a preference, and piano is not the default ensemble.
 """
 from __future__ import annotations
 
@@ -628,7 +629,11 @@ def ensure(symbols: list[str], refresh_status: bool = False, hint: str | None = 
 
 
 def _ensure_live(symbols: list[str], refresh_status: bool = False, hint: str | None = None) -> tuple[list[dict], dict]:
-    """Download and measure missing notes. The refresh job calls this, not Perform."""
+    """Download and measure missing notes. The refresh job calls this, not Perform.
+
+    ``hint`` does not choose a library. Piano is not measured ahead of the others.
+    """
+    del hint
     needed: set[int] = set()
     for sym in symbols:
         for _name, notes in CH.voicings(sym):
@@ -651,35 +656,11 @@ def _ensure_live(symbols: list[str], refresh_status: bool = False, hint: str | N
             _save(mp)
         return mp
 
-    def _wall_open() -> bool:
-        until = _until.get()
-        return until is None or until - time.monotonic() > 0.05
-
-    if _until.get() is not None and hint:
-        low = hint.lower()
-        hinted = [spec for spec in specs if low in (spec.get("instrument") or "").lower()]
-        others = [spec for spec in specs if spec not in hinted]
-        if hinted:
-            first = run_all(
-                [lambda spec=spec: fill(spec) for spec in hinted] + [lambda: library_status(refresh=refresh_status)],
-                workers=4,
-            )
-            maps = first[:-1]
-            status = first[-1]
-            if others and _wall_open():
-                maps = maps + run_all([lambda spec=spec: fill(spec) for spec in others], workers=4)
-        else:
-            results = run_all(
-                [lambda spec=spec: fill(spec) for spec in specs] + [lambda: library_status(refresh=refresh_status)],
-                workers=4,
-            )
-            maps, status = results[:-1], results[-1]
-    else:
-        results = run_all(
-            [lambda spec=spec: fill(spec) for spec in specs] + [lambda: library_status(refresh=refresh_status)],
-            workers=4,
-        )
-        maps, status = results[:-1], results[-1]
+    results = run_all(
+        [lambda spec=spec: fill(spec) for spec in specs] + [lambda: library_status(refresh=refresh_status)],
+        workers=4,
+    )
+    maps, status = results[:-1], results[-1]
     for mp in maps:
         print(json.dumps({
             "event": "note_map",

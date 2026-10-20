@@ -136,7 +136,7 @@ class DiscoverTest(unittest.TestCase):
         rows = plan["source_mix"]["per_chord"]
         # Choir covers only Cm. Piano covers every chord, so the take stays on piano.
         self.assertTrue(all(row["instrument"] == "piano" for row in rows))
-        self.assertTrue(all(row["match"] == "piano fallback" for row in rows))
+        self.assertTrue(all(row["match"] == "exact" for row in rows))
 
     def test_a_wrong_chord_does_not_fill_a_gap(self):
         pools = {"musicmatter": [_clip("musicmatter", "Choir A7", "choir", "a7", kind="supplier", chord="A7")]}
@@ -164,27 +164,40 @@ class DiscoverTest(unittest.TestCase):
         strikes = [row["origin"] for row in plan["source_mix"]["per_chord"]]
         self.assertEqual(set(strikes), {"musicmatter"})
 
-    def test_instrument_hint_prefers_that_timbre(self):
+    def test_the_prompt_names_the_ensemble_and_a_hint_does_not(self):
+        from ncperf import take
         pools = {
-            "musicmatter": _chords("musicmatter", "piano", prefix="p") + _chords("musicmatter", "choir", prefix="c"),
+            "musicmatter": (
+                _chords("musicmatter", "piano", prefix="p")
+                + _chords("musicmatter", "choir", prefix="c")
+                + _chords("musicmatter", "fat synth", prefix="f")
+                + _chords("musicmatter", "synth arp", prefix="a")
+            ),
             "wikimedia": _chords("wikimedia", "choir", kind="commons", prefix="w"),
+            "freesound": _chords("freesound", "choir", kind="freesound", prefix="fs"),
         }
-        pools["freesound"] = _chords("freesound", "choir", kind="freesound", prefix="fs")
-        plan = discover.plan_for(COMP, seed=4, instrument="choir", searchers=_searchers(pools), verify_live=False)
-        for row in plan["source_mix"]["per_chord"]:
-            self.assertEqual(row["instrument"], "choir")
-            self.assertNotEqual(row["match"], "piano fallback")
-            self.assertEqual(row["built"], "whole-chord file")
-        counts = Counter(row["origin"] for row in plan["source_mix"]["per_chord"])
-        self.assertEqual(len(counts), 1)
-        self.assertEqual(plan["source_mix"]["instrument_hint"], "choir")
-        self.assertIn("musicmatter", plan["source_mix"]["queried"])
-        origins = set()
-        for salt in range(1, 16):
-            other = discover.plan_for(COMP, seed=salt, instrument="choir", searchers=_searchers(pools), verify_live=False)
-            origins.add(other["source_mix"]["per_chord"][0]["origin"])
-            self.assertEqual(len({row["origin"] for row in other["source_mix"]["per_chord"]}), 1)
-        self.assertGreaterEqual(len(origins), 2)
+        families = []
+        for seed in range(1, 11):
+            plan = discover.plan_for(
+                COMP, seed=seed, instrument="Piano", searchers=_searchers(pools), verify_live=False,
+            )
+            rows = plan["source_mix"]["per_chord"]
+            insts = {row["instrument"] for row in rows}
+            self.assertEqual(len(insts), 1)
+            self.assertEqual(len({row["origin"] for row in rows}), 1)
+            self.assertTrue(all(row["symbol"] == chord["symbol"] for row, chord in zip(rows, plan["chords"])))
+            self.assertNotIn("stretch_to_s", json.dumps(plan))
+            families.append(take.family_of(next(iter(insts))))
+            self.assertEqual(plan["source_mix"]["instrument_hint"], "piano")
+        self.assertGreaterEqual(len(set(families)), 3)
+        self.assertLess(families.count("piano"), len(families))
+        self.assertLessEqual(families.count("piano"), max(families.count(name) for name in set(families) if name != "piano") + 2)
+        named = dict(COMP, performance="A choir, clear and open.")
+        for seed in range(1, 6):
+            plan = discover.plan_for(
+                named, seed=seed, instrument="Piano", searchers=_searchers(pools), verify_live=False,
+            )
+            self.assertTrue(all(row["instrument"] == "choir" for row in plan["source_mix"]["per_chord"]))
 
     def test_a_live_cover_is_not_texture(self):
         cover = _clip(

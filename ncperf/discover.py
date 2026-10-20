@@ -136,12 +136,15 @@ def excluded_terms(text: str) -> set[str]:
 
 
 def terms_for(comp: dict, instrument: str | None, seed: int) -> list[str]:
+    """Search words from the prompt. An instrument hint is not one of them.
+
+    The hint is not the ensemble and it does not steer the suppliers. When the
+    prompt names nothing, the seed rotates a palette that is not piano-first.
+    """
+    del instrument
     words = f"{comp.get('composition') or ''} {comp.get('performance') or ''}".lower()
     skip = excluded_terms(words)
     found = [w for w in LEXICON if w not in skip and re.search(rf"\b{re.escape(w)}\b", words)]
-    hint = (instrument or "").strip().lower()
-    if hint and hint not in found and hint not in skip:
-        found.insert(0, hint)
     if found:
         return found[:4]
     rng = random.Random(seed)
@@ -160,10 +163,10 @@ def _mentions(text: str, word: str | None) -> bool:
 
 
 def _fit(blob: str, terms: list[str], hint: str | None, chords: list[str]) -> int:
+    """How well a clip matches the prompt. The instrument hint adds nothing."""
+    del hint
     text = blob.lower()
     score = 0
-    if _mentions(text, hint):
-        score += 5
     for term in terms:
         if _mentions(text, term):
             score += 2
@@ -200,19 +203,22 @@ def _cand(origin: str, title: str, author: str, license_id: str, blob: str, sour
 
 
 def _instrument_label(blob: str, hint: str | None) -> str:
+    """Name the instrument the text actually says. A hint does not rename it.
+
+    Piano is not preferred when the text also names another instrument.
+    """
+    del hint
     text = blob.lower()
-    # A direct word (choir, synth) wins over a catalog alias such as full-chord-set.
-    if hint and re.search(rf"(?<![a-z0-9]){re.escape(hint)}(?![a-z0-9])", text):
-        return hint
-    for word in LEXICON:
-        if re.search(rf"(?<![a-z0-9]){re.escape(word)}(?![a-z0-9])", text):
-            return word
-    if _mentions(text, hint):
-        return hint
-    for word in LEXICON:
-        if _mentions(text, word):
-            return word
-    return "texture"
+    hits = [
+        word for word in LEXICON
+        if re.search(rf"(?<![a-z0-9]){re.escape(word)}(?![a-z0-9])", text)
+    ]
+    if not hits:
+        hits = [word for word in LEXICON if _mentions(text, word)]
+    if not hits:
+        return "texture"
+    specific = [word for word in hits if word not in ("piano", "rhodes")]
+    return specific[0] if specific else hits[0]
 
 
 def _index_disk(url: str) -> str:
@@ -364,6 +370,8 @@ def _offering_instrument(off: dict) -> str:
         return "fat synth"
     if "syntharp" in blob:
         return "synth arp"
+    # The original full-chord set has no instrument name. Those files are piano.
+    # A named choir, synth, or other instrument is labeled above and is not folded in here.
     return "piano"
 
 
@@ -583,23 +591,16 @@ def _ensure_credit(cand: dict, verify_live: bool, bass=None) -> dict | None:
 
 
 def _match_label(cand: dict) -> str:
-    if cand.get("instrument") == "piano":
-        return "piano fallback"
     if cand.get("voicing_kind") == "alt":
         return "alt voicing"
     return "exact"
 
 
 def _tier(cand: dict) -> int:
-    piano = cand.get("instrument") == "piano"
-    alt = cand.get("voicing_kind") == "alt"
-    if not piano and not alt:
-        return 0
-    if not piano and alt:
+    """An inversion ranks after the root voicing. Piano does not rank after the other families."""
+    if cand.get("voicing_kind") == "alt":
         return 1
-    if piano and not alt:
-        return 2
-    return 3
+    return 0
 
 
 def _strike_order(cands: list[dict], hint: str | None, seed: int, index: int, named: str | None) -> list[dict]:
@@ -610,10 +611,8 @@ def _strike_order(cands: list[dict], hint: str | None, seed: int, index: int, na
         named_pool = [c for c in pool if c.get("origin") == named]
         if named_pool:
             pool = named_pool
-    if hint == "piano":
-        pianos = [c for c in pool if c.get("instrument") == "piano"]
-        if pianos:
-            pool = pianos
+    # The instrument hint does not narrow this pool. Piano is one family among the rest.
+    del hint
     ordered: list[dict] = []
     for tier_n in range(4):
         tier = [c for c in pool if _tier(c) == tier_n]
@@ -623,12 +622,7 @@ def _strike_order(cands: list[dict], hint: str | None, seed: int, index: int, na
             start = (seed + index) % len(names)
             return names[start:] + names[:start]
 
-        if hint and hint != "piano":
-            hinted_inst = sorted({c.get("instrument") or "" for c in tier if _hint_ok(c.get("instrument") or "", hint)})
-            other_inst = sorted({c.get("instrument") or "" for c in tier if (c.get("instrument") or "") not in hinted_inst})
-            instruments = rotate(hinted_inst) + rotate(other_inst)
-        else:
-            instruments = rotate(sorted({c.get("instrument") or "" for c in tier}))
+        instruments = rotate(sorted({c.get("instrument") or "" for c in tier}))
         if not instruments:
             continue
         buckets = {inst: [c for c in tier if (c.get("instrument") or "") == inst] for inst in instruments}
@@ -1062,11 +1056,8 @@ def _select(groups: dict[str, list], order: list[str], n: int, hint: str | None,
             if len(chosen) >= n:
                 break
             add(cand)
-    if hint and not named and len(chosen) < n:
-        pool = [c for group in groups.values() for c in group if c["instrument"] == hint or hint in c["title"].lower()]
-        pool.sort(key=lambda c: (-c["fit"], c["origin"], c["title"]))
-        if pool:
-            add(pool[0])
+    # A timbre hint does not take the first slot.
+    del hint
     cap = n if named else max(1, n // 2)
     guard = 0
     while len(chosen) < n and guard < 8:
