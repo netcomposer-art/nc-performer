@@ -81,8 +81,12 @@ class Store:
             fields["request_json"] = json.dumps(fields.pop("request"))
         if "result" in fields:
             fields["result_json"] = json.dumps(fields.pop("result"))
-        cols = ", ".join(f"{k}=?" for k in fields)
         with self._lock:
+            row = self.db.execute("SELECT state FROM jobs WHERE id=?", (job_id,)).fetchone()
+            # Stop wins. A render thread still writing its stage must not put the row back.
+            if row and row["state"] == "cancelled":
+                fields = {"updated_at": fields["updated_at"], **({"cost_usd": fields["cost_usd"]} if "cost_usd" in fields else {})}
+            cols = ", ".join(f"{k}=?" for k in fields)
             self.db.execute(f"UPDATE jobs SET {cols} WHERE id=?", (*fields.values(), job_id))
             self.db.commit()
 
@@ -120,8 +124,48 @@ class Store:
 
     def running_count(self) -> int:
         return self.db.execute(
-            "SELECT COUNT(*) FROM jobs WHERE state NOT IN ('queued','done','failed','rejected')"
+            "SELECT COUNT(*) FROM jobs WHERE state NOT IN ('queued','done','failed','rejected','cancelled')"
         ).fetchone()[0]
+
+    def mark_cancelled(self, job_id: str, message: str) -> str | None:
+        """Set cancelled unless the job already finished. Returns the state left in the row."""
+        with self._lock:
+            row = self.db.execute("SELECT state, result_json FROM jobs WHERE id=?", (job_id,)).fetchone()
+            if not row:
+                return None
+            state = row["state"]
+            if state in ("done", "failed", "rejected", "cancelled"):
+                return state
+            result = json.loads(row["result_json"] or "null")
+            if not isinstance(result, dict):
+                result = {}
+            result["stage_line"] = message
+            self.db.execute(
+                """UPDATE jobs SET state=?, stage=?, percent=?, error=?, error_code=?, result_json=?, updated_at=?
+                   WHERE id=?""",
+                ("cancelled", "cancelled", 100, message, "cancelled", json.dumps(result), _now(), job_id),
+            )
+            self.db.commit()
+            return "cancelled"
+
+    def mark_done(self, job_id: str, **fields) -> bool:
+        """Finish a job. A cancel that won the race keeps the row cancelled and returns False."""
+        with self._lock:
+            row = self.db.execute("SELECT state FROM jobs WHERE id=?", (job_id,)).fetchone()
+            if not row or row["state"] == "cancelled":
+                return False
+            fields["state"] = "done"
+            fields["stage"] = fields.get("stage") or "done"
+            fields["percent"] = 100
+            fields["updated_at"] = _now()
+            if "request" in fields:
+                fields["request_json"] = json.dumps(fields.pop("request"))
+            if "result" in fields:
+                fields["result_json"] = json.dumps(fields.pop("result"))
+            cols = ", ".join(f"{k}=?" for k in fields)
+            self.db.execute(f"UPDATE jobs SET {cols} WHERE id=?", (*fields.values(), job_id))
+            self.db.commit()
+            return True
 
     def spend_today(self) -> float:
         row = self.db.execute("SELECT usd FROM budget WHERE day=?", (_day(),)).fetchone()

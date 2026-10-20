@@ -49,6 +49,7 @@
   <section id="status" hidden>
     <p id="stage" class="muted">Queued…</p>
     <progress id="bar" max="100" value="0"></progress>
+    <p class="row"><button id="stop" type="button" hidden>Stop</button></p>
     <p id="err" class="error" hidden></p>
   </section>
   <section id="done" hidden>
@@ -121,6 +122,8 @@ $("form").onsubmit = async (ev) => {
       claim = j.claim_token;
       sessionStorage.setItem("nc-claim:" + jobId, claim);
     }
+    $("stop").hidden = false;
+    $("stop").disabled = false;
     poll();
   } catch (e) {
     $("err").hidden = false;
@@ -134,11 +137,12 @@ async function poll() {
   const j = await r.json();
   $("stage").textContent = j.stage_line || j.stage || j.state;
   $("bar").value = j.percent || 0;
-  if (j.state === "done") { show(j); return; }
-  if (j.state === "failed" || j.state === "rejected") {
+  if (j.state === "done") { $("stop").hidden = true; show(j); return; }
+  if (j.state === "failed" || j.state === "rejected" || j.state === "cancelled") {
     $("err").hidden = false;
     $("err").textContent = j.error || j.state;
     $("go").disabled = false;
+    $("stop").hidden = true;
     return;
   }
   setTimeout(poll, 2000);
@@ -160,6 +164,29 @@ async function show(j) {
   $("full").textContent = JSON.stringify(rec, null, 1);
 }
 
+$("stop").onclick = async () => {
+  const token = sessionStorage.getItem("nc-claim:" + jobId) || claim;
+  $("stop").disabled = true;
+  try {
+    const r = await fetch(apiBase + "/api/jobs/" + jobId + "/cancel", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({claim_token: token})});
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || r.statusText);
+    $("stage").textContent = j.stage_line || j.state;
+    $("bar").value = j.percent || 0;
+    if (j.state === "cancelled" || j.state === "failed" || j.state === "rejected") {
+      $("err").hidden = false;
+      $("err").textContent = j.error || j.state;
+      $("go").disabled = false;
+      $("stop").hidden = true;
+    } else {
+      $("stop").hidden = true;
+    }
+  } catch (e) {
+    $("err").hidden = false;
+    $("err").textContent = e.message;
+    $("stop").disabled = false;
+  }
+};
 $("copy").onclick = () => navigator.clipboard.writeText(location.origin + apiBase + "/records/" + jobId);
 $("keep").onclick = async () => {
   const token = sessionStorage.getItem("nc-claim:" + jobId) || claim;

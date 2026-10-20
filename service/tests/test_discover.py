@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -327,6 +328,72 @@ class DiscoverTest(unittest.TestCase):
         self.assertTrue(LIC.allowed("PD-equivalent"))
         # Single notes are assembled from the pitch map, not returned as beds.
         self.assertEqual(discover.search_uiowa(["violin"], None, ["Ebsus2"], 1), [])
+
+    def test_room_tone_is_skipped_unless_the_words_ask_for_space(self):
+        from ncperf import deadline, take
+
+        self.assertFalse(take.phrase("let it breathe: some bars linger").get("bed"))
+        self.assertTrue(take.phrase("a little space and some room tone").get("bed"))
+        calls = []
+
+        def run(terms, *_rest):
+            calls.append(list(terms))
+            return []
+
+        fns = _searchers({"musicmatter": _chords("musicmatter", "choir")})
+        for origin in ("freesound", "openverse", "internet_archive", "wikimedia", "ccmixter"):
+            fns[origin] = run
+        lines = []
+        plan = discover.plan_for(
+            COMP, seed=5, searchers=fns, verify_live=False,
+            progress_cb=lambda line, _sound: lines.append(line),
+        )
+        self.assertEqual(validate(plan), [])
+        self.assertFalse(any("room tone" in " ".join(terms) for terms in calls))
+        self.assertFalse(any(line and "room tone" in line for line in lines))
+        self.assertTrue(any(line == "Checking recorded notes…" for line in lines))
+        self.assertIsNone(plan["source_mix"]["texture"])
+
+        def stall(terms, *_rest):
+            calls.append(list(terms))
+            if "room tone" in terms:
+                while True:
+                    deadline.check()
+                    time.sleep(0.01)
+            return []
+
+        calls.clear()
+        for origin in ("freesound", "openverse", "internet_archive", "wikimedia", "ccmixter"):
+            fns[origin] = stall
+        spaced = dict(COMP, performance="Clear and open, with room tone and a little space.")
+        started = time.perf_counter()
+        plan = discover.plan_for(
+            spaced, seed=5, searchers=fns, verify_live=False, texture_budget_s=0.25,
+        )
+        elapsed = time.perf_counter() - started
+        self.assertLess(elapsed, 3)
+        room = [terms for terms in calls if "room tone" in terms]
+        self.assertEqual(len(room), 1)
+        self.assertEqual(validate(plan), [])
+        self.assertIsNone(plan["source_mix"]["texture"])
+
+    def test_a_stalled_origin_is_skipped(self):
+        from ncperf import deadline
+
+        def stall(*_args):
+            while True:
+                deadline.check()
+                time.sleep(0.01)
+
+        fns = _searchers({"musicmatter": _chords("musicmatter", "choir")})
+        fns["wikimedia"] = stall
+        started = time.perf_counter()
+        plan = discover.plan_for(
+            COMP, seed=1, searchers=fns, verify_live=False, origin_budget_s=0.25,
+        )
+        self.assertLess(time.perf_counter() - started, 3)
+        self.assertEqual(validate(plan), [])
+        self.assertTrue(plan["layers"])
 
 
 def _note(origin, instrument, midi, pluck=False):

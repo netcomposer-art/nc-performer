@@ -43,6 +43,12 @@ AI planning runs only when the words ask for a line, triplets, or sections. Set 
 - `found_sounds`: `[{title, supplier, license}]`, filled as sources are actually found. Rows without a title, supplier, and license are left out. Nothing is invented.
 - `stage_line`: a short sentence for the current stage, such as `Finding a choir on Freesound…`.
 
+`done` is sent only after `preview.mp3`, `meta.json`, the record, and the other output files have been read back from storage. Until that read succeeds the status stays `storing` (`Storing the Performance…`), so the page does not request those files while they are still being copied.
+
+`POST /api/jobs/:id/cancel` with the job's `claim_token` (or the same secret as `keep_token`) stops a queued or running Perform. The container is destroyed, the queue slot is freed, and files under that id are removed. The status becomes `cancelled` with `error` and `stage_line` `Stopped.`. Calling it again is the same. A job that is already `done`, `failed`, or `rejected` is not changed and its files stay.
+
+A room-tone search runs only when the words ask for air or space, and that pass stops after 20 seconds. Each other source search stops after 20 seconds and is skipped. One recorded-note file is given 20 seconds; the rest of the library is still checked. While that check runs the line is `Checking recorded notes…`.
+
 The signed record still carries `performance.timeline` and `sounds_used[].spans` as kit 0.2.0 writes them.
 
 Freesound is queried through its official API when the Worker secret `FREESOUND_API_KEY` is set. If the secret is missing, or the API fails, the HTML search is used. The deploy workflow writes the secret only when it is non-empty.
@@ -58,9 +64,10 @@ Keep with a JSON `{claim_token}` body still keeps the original render. When the 
 | Method and path | What it does |
 |---|---|
 | `POST /api/perform` | Start a Performance. Body: `title`, `composer`, `composition`, `performance`, optional `plan`, `visibility` (`unlisted` or `public`), `seed`, `perform_again`, `turnstile_token`, `keep`. Returns `202` with `id`, `claim_token` (once), and `record_url`. |
-| `GET /api/jobs/:id` | Status. `state` moves through queued, planning, fetching, measuring, rendering, reverb, mastering, verifying, storing, then done, failed, or rejected. The body always includes `trimmed` (string or null), `seed`, `found_sounds`, and `stage_line`. |
+| `GET /api/jobs/:id` | Status. `state` moves through queued, planning, fetching, measuring, rendering, reverb, mastering, verifying, storing, then done, failed, rejected, or cancelled. The body always includes `trimmed` (string or null), `seed`, `found_sounds`, and `stage_line`. |
 | `GET /api/jobs/:id/events` | The same status as a stream. |
 | `GET /api/jobs/:id/files/:name` | FLAC, MP3, the dialed `kept.wav` (and `kept.mp3` when the mirror made one), record, plan, and the other stored files. Expired or taken-down audio is `410`. `flac` and `mp3` on the job stay the original render. |
+| `POST /api/jobs/:id/cancel` | Stop the Performance. JSON `{claim_token}` or `{keep_token}` (the same secret from `POST /api/perform`). Queued work is dropped. Running work is stopped, the slot is freed, and partial files are removed. The status is `200` with `state` `cancelled`, `stage` `cancelled`, `percent` `100`, `position` `null`, `error` `Stopped.`, and `stage_line` `Stopped.`. A second call returns that same status. `done`, `failed`, and `rejected` are left as they are and answer `200` with the current status (a finished job still has `files`). Missing token is `400` `{"error":"claim_token is required.","code":"rejected"}`. A wrong token is `403` `{"error":"claim_token does not match this Performance."}`. An unknown id is `404` `{"error":"not found"}`. |
 | `POST /api/jobs/:id/keep` | JSON `{claim_token}` keeps the original audio. Multipart `claim_token`, `dials`, and `audio` (WAV) stores the dialed file, sets `live_dials`, and answers `{ok, processed:true, dials, audio_url}`. The signed record is unchanged. |
 | `POST /api/jobs/:id/visibility` | Body `{claim_token, visibility}`. |
 | `GET /records/:id` | The HTML page. |

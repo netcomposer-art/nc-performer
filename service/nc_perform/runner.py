@@ -32,9 +32,15 @@ from .config import Settings
 from .ids import sha256_text
 from .jobs import Store
 from .limits import Reject, check_plan, load_suppliers
+from ncperf.cancel import MESSAGE as CANCELLED_MESSAGE
+from ncperf.cancel import bind as bind_cancel
+from ncperf.cancel import check as cancel_check
+from ncperf.cancel import reset as reset_cancel
+from ncperf import cancel as job_cancel
 from ncperf.discover import plan_for
 from ncperf.fit import fit_plan
 from ncperf.progress import STAGE_LINES, merge_sounds, sounds_from_sources
+from .cancel import wipe_performance, write_cancelled_status
 from .planner import PRICE_SOURCE, cache_key, compute_cost, llm_cost, llm_price_card, wants_model
 from .sign import Signer, apply_signature
 from .storage import Storage
@@ -112,6 +118,7 @@ class Runner:
         self.storage = storage
         self.signer = signer
         self._stop = threading.Event()
+        self._cancel_events: dict[str, threading.Event] = {}
 
     def stop(self):
         self._stop.set()
@@ -137,22 +144,51 @@ class Runner:
             n += 1
         return n
 
+    def request_cancel(self, job_id: str) -> None:
+        """Wake a running render. The row is marked cancelled separately."""
+        self._event_for(job_id).set()
+
+    def _event_for(self, job_id: str) -> threading.Event:
+        event = self._cancel_events.get(job_id)
+        if event is None:
+            event = threading.Event()
+            self._cancel_events[job_id] = event
+        return event
+
+    def _guard(self, job_id: str) -> None:
+        cancel_check()
+        job = self.store.get(job_id)
+        if job and job.get("state") == "cancelled":
+            raise job_cancel.Cancelled(CANCELLED_MESSAGE)
+
+    def _settle_cancelled(self, job_id: str) -> None:
+        state = self.store.mark_cancelled(job_id, CANCELLED_MESSAGE)
+        if state == "done":
+            return
+        wipe_performance(self.storage, job_id)
+        write_cancelled_status(self.storage, job_id)
+
     def run_job(self, job_id: str) -> None:
         job = self.store.get(job_id)
-        if not job:
+        if not job or job.get("state") in ("cancelled", "done", "failed", "rejected"):
             return
+        token = bind_cancel(self._event_for(job_id))
         t0 = time.perf_counter()
         ru0 = resource.getrusage(resource.RUSAGE_SELF)
         stage_t = {}
         usage = {}
         try:
-            self._run(job, stage_t, usage)
-        except Reject as e:
-            self._fail(job_id, "rejected", e.code, str(e))
-        except Exception as e:
-            traceback.print_exc()
-            self._fail(job_id, "failed", "error", str(e) or e.__class__.__name__)
+            try:
+                self._run(job, stage_t, usage)
+            except job_cancel.Cancelled:
+                self._settle_cancelled(job_id)
+            except Reject as e:
+                self._fail(job_id, "rejected", e.code, str(e))
+            except Exception as e:
+                traceback.print_exc()
+                self._fail(job_id, "failed", "error", str(e) or e.__class__.__name__)
         finally:
+            reset_cancel(token)
             wall = time.perf_counter() - t0
             ru1 = resource.getrusage(resource.RUSAGE_SELF)
             cpu = max(0.0, (ru1.ru_utime + ru1.ru_stime) - (ru0.ru_utime + ru0.ru_stime))
@@ -177,6 +213,7 @@ class Runner:
             }, ensure_ascii=False), flush=True)
 
     def _stage(self, job_id: str, stage: str, stage_t: dict, mark: list):
+        self._guard(job_id)
         now = time.perf_counter()
         if mark:
             stage_t[mark[0]] = stage_t.get(mark[0], 0) + (now - mark[1])
@@ -264,6 +301,7 @@ class Runner:
             out = self._render(job_id, plan, comp, req, stage_t, mark)
         self._stage(job_id, "storing", stage_t, mark)
         self._store_outputs(job_id, out, req, mode, usage)
+        self._guard(job_id)
         self._stage(job_id, "done", stage_t, mark)
         done = self._snapshot(job_id)
         done.update({
@@ -275,7 +313,8 @@ class Runner:
         })
         trimmed = plan.get("trimmed")
         done["trimmed"] = trimmed if isinstance(trimmed, str) and trimmed.strip() else None
-        self.store.update(job_id, state="done", stage="done", percent=100, result=done)
+        if not self.store.mark_done(job_id, result=done):
+            self._settle_cancelled(job_id)
 
     def _interpret(self, comp: dict, seed: int, usage: dict, force_stub: bool = False, job_id: str | None = None) -> tuple[dict, str]:
         settings = self.settings
@@ -459,6 +498,10 @@ class Runner:
         }
 
     def _fail(self, job_id: str, state: str, code: str, message: str) -> None:
+        current = self.store.get(job_id)
+        if current and current.get("state") == "cancelled":
+            self._settle_cancelled(job_id)
+            return
         self.store.update(job_id, state=state, stage=state, percent=100, error=message, error_code=code)
         body = json.dumps({"id": job_id, "state": state, "error": message, "error_code": code, "at": _utc()}).encode()
         try:

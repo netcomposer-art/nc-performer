@@ -35,6 +35,8 @@ import {
   tooLargeMessage,
   type LiveDials,
 } from "./keep";
+import { CANCELLED_MESSAGE, cancelToken, queueErrorIsCancel } from "./cancel";
+import { REQUIRED_OUTPUTS, containerPageUpdate, missingOutputs, readableBytes } from "./outputs";
 import { applyPerformHit, BURST_MESSAGE, claimToken, forPage, isInternalFailure, jobStatusFields, newId, PER_10MIN, PER_DAY, proxyHosts, publicInternalError, rejectPlan, wordsTooLong, type FoundSound } from "./policy";
 
 // @cloudflare/containers 0.3.7 looks up this exact export on ctx.exports when
@@ -65,16 +67,7 @@ const ALLOWED_HOSTS = [
   "api.x.ai",
 ];
 
-const FILES = [
-  "performance.flac",
-  "preview.mp3",
-  "record.json",
-  "plan.json",
-  "uses.json",
-  "composition.md",
-  "meta.json",
-  "status.json",
-];
+const FILES = [...REQUIRED_OUTPUTS];
 
 const FILE_TYPES: Record<string, string> = {
   "performance.flac": "audio/flac",
@@ -171,9 +164,35 @@ export class JobDO extends DurableObject<Env> {
   async patch(fields: Partial<Job>): Promise<Job | null> {
     const job = await this.get();
     if (!job) return null;
+    const finished = job.state === "done" || job.state === "failed" || job.state === "rejected" || job.state === "cancelled";
+    if (finished && fields.state && fields.state !== job.state) {
+      const next = { ...job };
+      if (typeof fields.cost_usd === "number") next.cost_usd = fields.cost_usd;
+      await this.ctx.storage.put("job", next);
+      return next;
+    }
     const next = { ...job, ...fields };
     await this.ctx.storage.put("job", next);
     return next;
+  }
+
+  /** One step, so a poll cannot land between the read and the write. */
+  async cancel(message: string): Promise<{ job: Job | null; stopped: boolean }> {
+    const job = await this.get();
+    if (!job) return { job: null, stopped: false };
+    if (job.state === "done" || job.state === "failed" || job.state === "rejected") return { job, stopped: false };
+    if (job.state === "cancelled") return { job, stopped: true };
+    const next: Job = {
+      ...job,
+      state: "cancelled",
+      stage: "cancelled",
+      percent: 100,
+      error: message,
+      error_code: "cancelled",
+      stage_line: message,
+    };
+    await this.ctx.storage.put("job", next);
+    return { job: next, stopped: true };
   }
 }
 
@@ -346,6 +365,17 @@ export default {
         await runContainer(env, id);
         msg.ack();
       } catch (err) {
+        const current = await jobs(env, id).get();
+        if (queueErrorIsCancel(current?.state)) {
+          await wipePerformance(env, id);
+          await writeCancelledStatus(env, id);
+          msg.ack();
+          continue;
+        }
+        if (current && (current.state === "done" || current.state === "failed" || current.state === "rejected")) {
+          msg.ack();
+          continue;
+        }
         const error = logInternal(id, err);
         await jobs(env, id).patch({ state: "failed", stage: "failed", percent: 100, error, error_code: "container" });
         msg.retry();
@@ -386,6 +416,8 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (request.method === "GET" && m) return file(env, m[1], m[2]);
   m = path.match(/^\/api\/jobs\/([hk]-[0-9a-z]+)\/events$/);
   if (request.method === "GET" && m) return events(env, m[1], base);
+  m = path.match(/^\/api\/jobs\/([hk]-[0-9a-z]+)\/cancel$/);
+  if (request.method === "POST" && m) return cancelJob(request, env, m[1], base);
   m = path.match(/^\/api\/jobs\/([hk]-[0-9a-z]+)\/(keep|visibility)$/);
   if (request.method === "POST" && m) return metaPost(request, env, m[1], m[2]);
   m = path.match(/^\/api\/verify\/([hk]-[0-9a-z]+)$/);
@@ -519,8 +551,14 @@ async function runContainer(env: Env, id: string): Promise<void> {
   const stub = jobs(env, id);
   const job = await stub.get();
   if (!job) throw new Error(`unknown job ${id}`);
+  if (job.state === "cancelled") {
+    await wipePerformance(env, id);
+    await writeCancelledStatus(env, id);
+    return;
+  }
   if (job.state === "done" || job.state === "failed" || job.state === "rejected") return;
   await budget(env).dequeue(id);
+  if (await abandonIfCancelled(env, id)) return;
   const container = getContainer(env.RENDER, id);
   const requested = JSON.parse(job.request_json) as { public_base?: string };
   const base = (env.NC_PUBLIC_BASE_URL || requested.public_base || "").replace(/\/$/, "");
@@ -562,40 +600,58 @@ async function runContainer(env: Env, id: string): Promise<void> {
     return publicInternalError(id);
   };
   for (let i = 0; i < 300; i++) {
+    if (await abandonIfCancelled(env, id)) return;
     await sleep(2000);
+    if (await abandonIfCancelled(env, id)) return;
     const res = await containerFetch(container, id, `http://container/internal/jobs/${id}`, { headers });
     if (!res.ok) continue;
     last = await res.json();
+    const page = containerPageUpdate(last);
     const patch: Partial<Job> = {
-      state: last.state || job.state,
-      stage: last.stage || job.stage,
-      percent: Number(last.percent || 0),
+      state: page.state,
+      stage: page.stage,
+      percent: page.percent,
       error: pageError(last.error),
     };
     if (last.seed != null && Number.isFinite(Number(last.seed))) patch.seed = Number(last.seed);
     if ("trimmed" in last) patch.trimmed = typeof last.trimmed === "string" && last.trimmed.trim() ? last.trimmed : null;
     if (Array.isArray(last.found_sounds)) patch.found_sounds = last.found_sounds;
-    if (typeof last.stage_line === "string" && last.stage_line.trim()) patch.stage_line = last.stage_line;
+    if (page.stage_line) patch.stage_line = page.stage_line;
+    if (await abandonIfCancelled(env, id)) return;
     await stub.patch(patch);
     if (last.state === "done" || last.state === "failed" || last.state === "rejected") break;
   }
+  if (await abandonIfCancelled(env, id)) return;
   if (last.state === "done") {
     await sleep(400);
+    if (await abandonIfCancelled(env, id)) return;
     const again = await containerFetch(container, id, `http://container/internal/jobs/${id}`, { headers });
     if (again.ok) last = await again.json();
-    await copyOutputs(env, container, id, headers);
+    if (last.state === "done") {
+      if (await abandonIfCancelled(env, id)) return;
+      await copyOutputs(env, container, id, headers);
+      if (await abandonIfCancelled(env, id)) return;
+      await confirmStored(env, id);
+    }
   } else if (last.state !== "failed" && last.state !== "rejected") {
     throw new Error("container did not finish within 10 minutes");
   }
+  if (await abandonIfCancelled(env, id)) return;
   const cost = Number(last.cost_usd || 0);
   const shown = pageError(last.error);
   await budget(env).addSpend(cost);
+  const finishedLine = last.state === "done"
+    ? (typeof last.stage_line === "string" && last.stage_line.trim() && last.stage_line !== "Storing the Performance…"
+      ? last.stage_line
+      : "Done")
+    : undefined;
   const updated = await stub.patch({
     state: last.state || "failed",
     stage: last.stage || last.state || "failed",
     percent: 100,
     error: shown,
     cost_usd: cost,
+    ...(finishedLine ? { stage_line: finishedLine } : {}),
   });
   if (updated) {
     await budget(env).note({
@@ -678,12 +734,56 @@ async function containerFetch(container: DurableObjectStub<RenderContainer>, id:
   return res;
 }
 
+const READBACK_TRIES = 5;
+const READBACK_WAIT_MS = 200;
+
+/** Read each output back from R2. done is not published until this returns. */
+async function confirmStored(env: Env, id: string): Promise<void> {
+  let missing: string[] = [...REQUIRED_OUTPUTS];
+  for (let attempt = 0; attempt < READBACK_TRIES; attempt++) {
+    const readable: string[] = [];
+    for (const name of REQUIRED_OUTPUTS) {
+      try {
+        // One byte, not the whole FLAC. A missing or empty object fails the read-back.
+        const obj = await env.PERFORMANCES.get(`performances/${id}/${name}`, { range: { offset: 0, length: 1 } });
+        if (await objectHasBytes(obj)) readable.push(name);
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        console.error(JSON.stringify({ event: "readback", id, name, detail }));
+      }
+    }
+    missing = missingOutputs(readable);
+    if (!missing.length) return;
+    if (attempt + 1 < READBACK_TRIES) await sleep(READBACK_WAIT_MS);
+  }
+  throw new Error(`Stored files were not readable: ${missing.join(", ")}`);
+}
+
+async function objectHasBytes(obj: R2ObjectBody | null): Promise<boolean> {
+  if (!obj || obj.size <= 0 || !obj.body) return false;
+  let first = 0;
+  const reader = obj.body.getReader();
+  try {
+    const { value, done } = await reader.read();
+    if (!done && value) first = value.byteLength;
+  } catch {
+    return false;
+  } finally {
+    try {
+      await reader.cancel();
+    } catch {
+      /* the first byte was enough */
+    }
+  }
+  return readableBytes(obj.size, first);
+}
+
 async function copyOutputs(env: Env, container: DurableObjectStub<RenderContainer>, id: string, headers: Record<string, string>): Promise<void> {
   const signer = id.startsWith("h-") ? await getSigner(env) : null;
   let recordBytes: Uint8Array<ArrayBuffer> | null = null;
   for (const name of FILES) {
     const res = await containerFetch(container, id, `http://container/internal/jobs/${id}/files/${name}`, { headers });
-    // A missing file is normal (uses.json is optional). A 5xx already threw above.
+    // A missing file is left for confirmStored to reject. A 5xx already threw above.
     if (!res.ok) continue;
     let bytes = new Uint8Array(await res.arrayBuffer());
     if (name === "record.json") {
@@ -936,7 +1036,7 @@ async function events(env: Env, id: string, base: string): Promise<Response> {
           controller.enqueue(encoder.encode(`data: ${line}\n\n`));
           last = line;
         }
-        if (job.state === "done" || job.state === "failed" || job.state === "rejected") break;
+        if (job.state === "done" || job.state === "failed" || job.state === "rejected" || job.state === "cancelled") break;
         await sleep(1000);
       }
       controller.close();
@@ -949,6 +1049,98 @@ async function events(env: Env, id: string, base: string): Promise<Response> {
       "Access-Control-Allow-Origin": "*",
     },
   });
+}
+
+async function cancelJob(request: Request, env: Env, id: string, base: string): Promise<Response> {
+  const stub = jobs(env, id);
+  const job = await stub.get();
+  if (!job) return json({ error: "not found" }, 404);
+  let body: unknown;
+  try {
+    body = await readJson(request);
+  } catch {
+    return json({ error: "Body must be JSON.", code: "rejected" }, 400);
+  }
+  const token = cancelToken(body);
+  if (!token) return json({ error: "claim_token is required.", code: "rejected" }, 400);
+  let stored = job.claim_hash;
+  if (!stored) {
+    const meta = (await readJsonKey(env, `performances/${id}/meta.json`)) as { claim_token_sha256?: string } | null;
+    stored = meta?.claim_token_sha256 || null;
+  }
+  if (!(await claimMatches(stored, token))) {
+    return json({ error: "claim_token does not match this Performance." }, 403);
+  }
+  const result = await stub.cancel(CANCELLED_MESSAGE);
+  if (!result.job) return json({ error: "not found" }, 404);
+  if (!result.stopped) {
+    const current = result.job;
+    const pos = current.state === "queued" ? await budget(env).positionOf(id) : null;
+    const extras = current.state === "done" ? await doneExtras(env, id) : undefined;
+    const doneMeta = current.state === "done" ? ((await readJsonKey(env, `performances/${id}/meta.json`)) as Meta | null) : null;
+    return json(publicJob(id, current.state, current.stage, current.percent, current.error, base, pos, extras, current, doneMeta));
+  }
+  await budget(env).dequeue(id);
+  try {
+    await getContainer(env.RENDER, id).destroy();
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    console.error(JSON.stringify({ event: "cancel_container", id, detail }));
+  }
+  await wipePerformance(env, id);
+  await writeCancelledStatus(env, id);
+  const fresh = (await stub.get()) || result.job;
+  try {
+    await budget(env).note({
+      id,
+      state: "cancelled",
+      cost_usd: fresh.cost_usd || 0,
+      ip_hash: fresh.ip_hash,
+      error_code: "cancelled",
+      created_at: fresh.created_at,
+    });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    console.error(JSON.stringify({ event: "cancel_note", id, detail }));
+  }
+  return json(publicJob(id, fresh.state, fresh.stage, fresh.percent, fresh.error, base, null, undefined, fresh));
+}
+
+async function abandonIfCancelled(env: Env, id: string): Promise<boolean> {
+  const job = await jobs(env, id).get();
+  if (job && job.state !== "cancelled") return false;
+  await wipePerformance(env, id);
+  await writeCancelledStatus(env, id);
+  return true;
+}
+
+const RECORD_HASH = /^[0-9a-f]{64}$/;
+
+async function wipePerformance(env: Env, id: string): Promise<void> {
+  const rec = (await readJsonKey(env, `performances/${id}/record.json`)) as { record_hash?: { value?: string } } | null;
+  const hash = rec?.record_hash?.value;
+  if (typeof hash === "string" && RECORD_HASH.test(hash)) await env.PERFORMANCES.delete(`aliases/sha256/${hash}`);
+  let cursor: string | undefined;
+  do {
+    const page = await env.PERFORMANCES.list({ prefix: `performances/${id}/`, cursor, limit: 500 });
+    const keys = page.objects.map((obj) => obj.key);
+    if (keys.length) await env.PERFORMANCES.delete(keys);
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+}
+
+async function writeCancelledStatus(env: Env, id: string): Promise<void> {
+  await env.PERFORMANCES.put(
+    `jobs/${id}/status.json`,
+    JSON.stringify({
+      id,
+      state: "cancelled",
+      error: CANCELLED_MESSAGE,
+      stage_line: CANCELLED_MESSAGE,
+      at: isoNow(),
+    }),
+    { httpMetadata: { contentType: "application/json" } },
+  );
 }
 
 async function metaPost(request: Request, env: Env, id: string, action: string): Promise<Response> {

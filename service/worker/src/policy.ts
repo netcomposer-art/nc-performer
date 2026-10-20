@@ -184,6 +184,7 @@ export const STAGE_LINES: Record<string, string> = {
   done: "Done",
   failed: "Something went wrong.",
   rejected: "This Performance was refused.",
+  cancelled: "Stopped.",
 };
 
 export type FoundSound = { title: string; supplier: string; license: string };

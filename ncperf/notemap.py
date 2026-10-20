@@ -15,6 +15,7 @@ import urllib.parse
 import urllib.request
 
 from . import chords as CH
+from . import deadline
 from . import fetch
 from . import licenses as LIC
 from . import pitch
@@ -22,6 +23,8 @@ from .util import SR, decode
 
 UA = "nc-performer-kit/0.1 (+https://netcomposer.art/agents/)"
 MAP_VERSION = 1
+# One page or one note file. The whole piano library is not capped at this.
+NOTE_HTTP_S = 20
 UIOWA_AUTHOR = "University of Iowa Electronic Music Studios (Lawrence Fritts, director)"
 UIOWA_LICENSE = "PD-equivalent"
 PHILHARMONIA_PAGE = "https://philharmonia.co.uk/resources/sound-samples/"
@@ -107,9 +110,7 @@ def _save(mp: dict) -> None:
 
 
 def _get(url: str, timeout: int = 40) -> bytes:
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return r.read()
+    return deadline.read_url(url, timeout, {"User-Agent": UA})
 
 
 def _blocked(exc: BaseException) -> bool:
@@ -189,7 +190,8 @@ def _measure_uiowa_file(spec: dict, mp: dict, url: str, needed: set[int]) -> Non
     if not span:
         return
     print(json.dumps({"event": "note_file", "id": spec["id"], "url": url.rsplit("/", 1)[-1]}), flush=True)
-    resolved = fetch.resolve({"kind": "uiowa_mis", "url": url, "page": spec["page"]})
+    with deadline.limit(NOTE_HTTP_S):
+        resolved = fetch.resolve({"kind": "uiowa_mis", "url": url, "page": spec["page"]})
     y = decode(resolved["path"])
     if span[0] == span[1]:
         meas = _measure_slice(y, span[0])
@@ -229,7 +231,11 @@ def _fill_uiowa(spec: dict, mp: dict, needed: set[int]) -> None:
     if not missing:
         return
     try:
-        files = _uiowa_files(spec["page"])
+        with deadline.limit(NOTE_HTTP_S):
+            files = _uiowa_files(spec["page"])
+    except deadline.SearchTimeout:
+        mp.setdefault("errors", []).append("timed out reading the note page")
+        return
     except Exception as exc:
         mp.setdefault("errors", []).append(str(exc)[:180])
         return
@@ -248,6 +254,9 @@ def _fill_uiowa(spec: dict, mp: dict, needed: set[int]) -> None:
             used.add(url)
             try:
                 _measure_uiowa_file(spec, mp, url, needed)
+            except deadline.SearchTimeout:
+                mp.setdefault("errors", []).append(f"timed out: {url.rsplit('/', 1)[-1]}")
+                continue
             except Exception as exc:
                 mp.setdefault("errors", []).append(str(exc)[:180])
                 if _blocked(exc):
@@ -267,8 +276,12 @@ def _fill_freesound(spec: dict, mp: dict, needed: set[int]) -> None:
         sid = str(cand["id"])
         print(json.dumps({"event": "note_file", "id": spec["id"], "freesound": sid, "midi": midi}), flush=True)
         try:
-            _get(f"https://freesound.org/s/{sid}/")
-            resolved = fetch.resolve({"kind": "freesound", "id": sid})
+            with deadline.limit(NOTE_HTTP_S):
+                _get(f"https://freesound.org/s/{sid}/")
+                resolved = fetch.resolve({"kind": "freesound", "id": sid})
+        except deadline.SearchTimeout:
+            mp.setdefault("errors", []).append(f"{sid}: timed out")
+            continue
         except Exception as exc:
             mp.setdefault("errors", []).append(f"{sid}: {str(exc)[:140]}")
             if _blocked(exc):
@@ -422,8 +435,12 @@ def library_status(refresh: bool = False) -> dict:
     text = ""
     live = False
     try:
-        text = _get(PHILHARMONIA_PAGE).decode("utf-8", "replace")
+        with deadline.limit(NOTE_HTTP_S):
+            text = _get(PHILHARMONIA_PAGE).decode("utf-8", "replace")
         live = True
+    except deadline.SearchTimeout:
+        text = ""
+        err = "timed out"
     except Exception as exc:
         text = ""
         err = str(exc)[:160]

@@ -14,6 +14,7 @@ STAGE_LINES = {
     "done": "Done",
     "failed": "Something went wrong.",
     "rejected": "This Performance was refused.",
+    "cancelled": "Stopped.",
 }
 
 _ORIGIN = {
@@ -33,6 +34,9 @@ _ORIGIN = {
 def origin_label(name: str | None) -> str:
     key = (name or "").strip().lower()
     return _ORIGIN.get(key, name or "")
+
+
+NOTE_LINE = "Checking recorded notes…"
 
 
 def finding_line(origin: str, words: list[str] | None, texture: bool = False) -> str:
