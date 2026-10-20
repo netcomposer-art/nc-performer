@@ -76,9 +76,16 @@ class Renderer:
     def L_chord_notes(self, ly):
         C = self.chords(); last_i = len(C) - 1
         for pc in ly['per_chord']:
-            i = pc['chord']; c = C[i]; last = (i == last_i); notes = c['voicing']
+            i = pc['chord']; c = C[i]; last = (i == last_i); notes = list(c['voicing'])
+            if pc.get('midi'):
+                allowed = {int(m) for m in c['voicing']}
+                picked = [int(m) for m in pc['midi'] if int(m) in allowed]
+                if picked:
+                    notes = picked
+            g_scale = float(pc.get('gain') or 1.0)
+            style = pc.get('style') or ly.get('style', 'strike')
             for k, off in enumerate(pc.get('strikes_at', [0.0])):
-                if ly.get('style', 'strike') == 'roll':
+                if style == 'roll':
                     lo, hi = ly.get('spread_s', [0.15, 0.45]); sp = self.rng.uniform(lo, hi); dts = [j * sp / max(1, len(notes) - 1) for j in range(len(notes))]
                 else: dts = sorted(self.rng.uniform(0, ly.get('jitter_s', 0.05)) for _ in notes)
                 g0 = ly.get('first_gain', 0.85) if k == 0 else ly.get('restrike_gain', 0.5)
@@ -89,7 +96,7 @@ class Renderer:
                     if sid is None: continue
                     z, so = self.note(sid, ly.get('last_note_s', 12.0) if last else ly.get('note_s', 9.0))
                     z = fade(z, 0.02, ly.get('last_fade_out_s', 6.0) if last else ly.get('fade_out_s', 3.5))
-                    self.put(ly.get('bus', 'keys'), z, c['t'] + ly.get('offset_s', 0.4) + off + dt, g0 * gj * ly.get('gain', 1.0), sid, chord_index=i, midi=m,
+                    self.put(ly.get('bus', 'keys'), z, c['t'] + ly.get('offset_s', 0.4) + off + dt, g0 * gj * ly.get('gain', 1.0) * g_scale, sid, chord_index=i, midi=m,
                              source_offset_s=round(so, 3), time_stretch=1.0, role=ly.get('role', ly['id']))
 
     def L_chord_pad(self, ly):

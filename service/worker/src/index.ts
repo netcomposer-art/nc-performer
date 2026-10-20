@@ -15,7 +15,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { Container, ContainerProxy, getContainer } from "@cloudflare/containers";
 import pageHtml from "../../web/index.html";
-import { applyPerformHit, BURST_MESSAGE, claimToken, forPage, isInternalFailure, newId, PER_10MIN, PER_DAY, proxyHosts, publicInternalError, rejectPlan, wordsTooLong } from "./policy";
+import { applyPerformHit, BURST_MESSAGE, claimToken, forPage, isInternalFailure, jobStatusFields, newId, PER_10MIN, PER_DAY, proxyHosts, publicInternalError, rejectPlan, wordsTooLong, type FoundSound } from "./policy";
 
 // @cloudflare/containers 0.3.7 looks up this exact export on ctx.exports when
 // allowedHosts is set. It is a WorkerEntrypoint, not a Durable Object, so it
@@ -92,6 +92,8 @@ export interface Env {
   XAI_API_KEY?: string;
   NC_LLM_BASE_URL?: string;
   NC_LLM_API_KEY?: string;
+  NC_LLM_EVERY_PERFORM?: string;
+  FREESOUND_API_KEY?: string;
   TURNSTILE_SECRET_KEY?: string;
   TURNSTILE_VERIFY_URL?: string;
   NC_SIGNING_KEY?: string;
@@ -113,6 +115,10 @@ type Job = {
   claim_hash: string | null;
   cost_usd: number;
   created_at: string;
+  seed?: number | null;
+  trimmed?: string | null;
+  found_sounds?: FoundSound[];
+  stage_line?: string;
 };
 
 export class RenderContainer extends Container<Env> {
@@ -379,7 +385,15 @@ async function config(env: Env): Promise<Response> {
     instance: env.NC_INSTANCE_NAME,
     perform_enabled: on,
     llm: Boolean(env.XAI_API_KEY || env.NC_LLM_BASE_URL),
-    llm_model: env.NC_LLM_MODEL || null,
+    llm_model: env.NC_LLM_MODEL || "grok-4.3",
+    llm_price: {
+      model: env.NC_LLM_MODEL || "grok-4.3",
+      usd_per_million: { in: 1.25, cached: 0.2, out: 2.5 },
+      source: "https://docs.x.ai/docs/models",
+      every_perform: /^(1|true|yes|on)$/i.test(env.NC_LLM_EVERY_PERFORM || ""),
+      formula:
+        "fresh prompt tokens times the input price, plus cached prompt tokens times the cached price, plus completion tokens times the output price",
+    },
   });
 }
 
@@ -418,9 +432,10 @@ async function perform(request: Request, env: Env, base: string): Promise<Respon
   if (visibility !== "unlisted" && visibility !== "public") {
     return json({ error: "visibility must be unlisted or public.", code: "rejected" }, 400);
   }
-  let seed = 1;
-  if (body.perform_again) seed = crypto.getRandomValues(new Uint32Array(1))[0] % 2147483646 || 1;
-  else if (body.seed != null) seed = Number(body.seed) || 1;
+  const randomSeed = () => crypto.getRandomValues(new Uint32Array(1))[0] % 2147483646 || 1;
+  let seed: number;
+  if (body.perform_again || body.seed == null) seed = randomSeed();
+  else seed = Number(body.seed) || 1;
   const token = claimToken();
   const id = newId("h");
   const created = isoNow();
@@ -448,6 +463,10 @@ async function perform(request: Request, env: Env, base: string): Promise<Respon
     claim_hash: req.claim_hash,
     cost_usd: 0,
     created_at: created,
+    seed,
+    trimmed: null,
+    found_sounds: [],
+    stage_line: "Queued",
   };
   await jobs(env, id).create(job);
   const placed = await b.enqueue(id, created, 50);
@@ -499,7 +518,17 @@ async function runContainer(env: Env, id: string): Promise<void> {
   if (!started.ok && started.status !== 202) {
     throw new Error(`container rejected the job (${started.status})`);
   }
-  let last: { state?: string; stage?: string; percent?: number; error?: string | null; cost_usd?: number } = {};
+  let last: {
+    state?: string;
+    stage?: string;
+    percent?: number;
+    error?: string | null;
+    cost_usd?: number;
+    seed?: number | null;
+    trimmed?: string | null;
+    found_sounds?: FoundSound[];
+    stage_line?: string;
+  } = {};
   let loggedFault = false;
   const pageError = (error: string | null | undefined): string | null => {
     const text = error || null;
@@ -515,12 +544,17 @@ async function runContainer(env: Env, id: string): Promise<void> {
     const res = await containerFetch(container, id, `http://container/internal/jobs/${id}`, { headers });
     if (!res.ok) continue;
     last = await res.json();
-    await stub.patch({
+    const patch: Partial<Job> = {
       state: last.state || job.state,
       stage: last.stage || job.stage,
       percent: Number(last.percent || 0),
       error: pageError(last.error),
-    });
+    };
+    if (last.seed != null && Number.isFinite(Number(last.seed))) patch.seed = Number(last.seed);
+    if ("trimmed" in last) patch.trimmed = typeof last.trimmed === "string" && last.trimmed.trim() ? last.trimmed : null;
+    if (Array.isArray(last.found_sounds)) patch.found_sounds = last.found_sounds;
+    if (typeof last.stage_line === "string" && last.stage_line.trim()) patch.stage_line = last.stage_line;
+    await stub.patch(patch);
     if (last.state === "done" || last.state === "failed" || last.state === "rejected") break;
   }
   if (last.state === "done") {
@@ -554,7 +588,16 @@ async function runContainer(env: Env, id: string): Promise<void> {
   if (last.state === "failed" || last.state === "rejected") {
     await env.PERFORMANCES.put(
       `jobs/${id}/status.json`,
-      JSON.stringify({ id, state: last.state, error: shown, at: isoNow() }),
+      JSON.stringify({
+        id,
+        state: last.state,
+        error: shown,
+        at: isoNow(),
+        seed: last.seed ?? null,
+        trimmed: typeof last.trimmed === "string" && last.trimmed.trim() ? last.trimmed : null,
+        found_sounds: Array.isArray(last.found_sounds) ? last.found_sounds : [],
+        stage_line: last.stage_line || "Something went wrong.",
+      }),
       { httpMetadata: { contentType: "application/json" } },
     );
   }
@@ -574,6 +617,8 @@ function containerEnv(env: Env, base: string): Record<string, string> {
   if (env.XAI_API_KEY) out.XAI_API_KEY = env.XAI_API_KEY;
   if (env.NC_LLM_BASE_URL) out.NC_LLM_BASE_URL = env.NC_LLM_BASE_URL;
   if (env.NC_LLM_API_KEY) out.NC_LLM_API_KEY = env.NC_LLM_API_KEY;
+  if (env.NC_LLM_EVERY_PERFORM) out.NC_LLM_EVERY_PERFORM = env.NC_LLM_EVERY_PERFORM;
+  if (env.FREESOUND_API_KEY) out.FREESOUND_API_KEY = env.FREESOUND_API_KEY;
   if (env.NC_SIGNING_KEY) out.NC_SIGNING_KEY = env.NC_SIGNING_KEY;
   if (env.NC_INTERNAL_TOKEN) out.NC_INTERNAL_TOKEN = env.NC_INTERNAL_TOKEN;
   // Exact names only. Python suffix-matches these. Globs belong to ContainerProxy.
@@ -669,6 +714,14 @@ async function putOnce(env: Env, key: string, bytes: Uint8Array, contentType: st
   }
 }
 
+type StatusExtras = {
+  trimmed?: string | null;
+  cost_estimate?: unknown;
+  seed?: number | null;
+  found_sounds?: unknown;
+  stage_line?: string;
+};
+
 async function jobStatus(env: Env, id: string, base: string): Promise<Response> {
   if (!ID_RE.test(id)) return json({ error: "not found" }, 404);
   const job = await jobs(env, id).get();
@@ -676,39 +729,67 @@ async function jobStatus(env: Env, id: string, base: string): Promise<Response> 
     const meta = await readJsonKey(env, `performances/${id}/meta.json`);
     const status = (await readJsonKey(env, `performances/${id}/status.json`)) || (await readJsonKey(env, `jobs/${id}/status.json`));
     if (!meta && !status) return json({ error: "not found" }, 404);
-    const stored = status as { state?: string; error?: string | null } | null;
-    const state = String(stored?.state || "done");
-    return json(publicJob(id, state, state, state === "done" ? 100 : 0, stored?.error || null, base, null));
+    const stored = (status || {}) as { state?: string; error?: string | null; trimmed?: string | null; seed?: number | null; found_sounds?: unknown; stage_line?: string; cost_estimate?: unknown };
+    const state = String(stored.state || "done");
+    return json(publicJob(id, state, state, state === "done" ? 100 : 0, stored.error || null, base, null, {
+      trimmed: stored.trimmed ?? null,
+      seed: stored.seed ?? null,
+      found_sounds: stored.found_sounds ?? [],
+      stage_line: stored.stage_line,
+      cost_estimate: stored.cost_estimate,
+    }));
   }
   const pos = job.state === "queued" ? await budget(env).positionOf(id) : null;
-  return json(publicJob(id, job.state, job.stage, job.percent, job.error, base, pos));
+  const extras = job.state === "done" ? await doneExtras(env, id) : undefined;
+  return json(publicJob(id, job.state, job.stage, job.percent, job.error, base, pos, extras, job));
 }
 
-function publicJob(id: string, state: string, stage: string, percent: number, error: string | null, base: string, position: number | null) {
-  const lines: Record<string, string> = {
-    queued: "Queued" + (position ? ` (position ${position})` : ""),
-    planning: "Planning the Performance…",
-    fetching: "Fetching sounds, licenses checked…",
-    measuring: "Measuring pitch…",
-    rendering: "Rendering layers…",
-    reverb: "Reverb hack…",
-    mastering: "Mastering to -17 LUFS…",
-    verifying: "Checking the record…",
-    storing: "Storing the Performance…",
-    done: "Done",
-    failed: "Failed",
-    rejected: "Rejected",
+async function doneExtras(env: Env, id: string): Promise<StatusExtras | undefined> {
+  const status = (await readJsonKey(env, `performances/${id}/status.json`)) || (await readJsonKey(env, `jobs/${id}/status.json`));
+  if (!status) return undefined;
+  const out: StatusExtras = {
+    trimmed: typeof status.trimmed === "string" && status.trimmed.trim() ? status.trimmed : null,
   };
+  if (typeof status.seed === "number") out.seed = status.seed;
+  if (Array.isArray(status.found_sounds)) out.found_sounds = status.found_sounds;
+  if (typeof status.stage_line === "string") out.stage_line = status.stage_line;
+  if (status.cost_estimate) out.cost_estimate = status.cost_estimate;
+  return out;
+}
+
+function publicJob(
+  id: string,
+  state: string,
+  stage: string,
+  percent: number,
+  error: string | null,
+  base: string,
+  position: number | null,
+  extras?: StatusExtras,
+  job?: Job | null,
+) {
+  const fields = jobStatusFields({
+    stage,
+    position,
+    seed: extras && extras.seed != null ? extras.seed : job?.seed,
+    trimmed: extras && "trimmed" in extras ? extras.trimmed : job?.trimmed,
+    found_sounds: extras && extras.found_sounds != null ? extras.found_sounds : job?.found_sounds,
+    stage_line: extras?.stage_line || job?.stage_line,
+  });
   const out: Record<string, unknown> = {
     id,
     state,
     stage,
-    stage_line: lines[stage] || stage,
     percent: percent || 0,
     position,
     error: forPage(id, error),
+    seed: fields.seed,
+    trimmed: fields.trimmed,
+    found_sounds: fields.found_sounds,
+    stage_line: fields.stage_line,
   };
   if (state === "done") {
+    if (extras?.cost_estimate) out.cost_estimate = extras.cost_estimate;
     out.files = {
       flac: `${base}/api/jobs/${id}/files/performance.flac`,
       mp3: `${base}/api/jobs/${id}/files/preview.mp3`,
@@ -816,7 +897,8 @@ async function events(env: Env, id: string, base: string): Promise<Response> {
       for (let i = 0; i < 600; i++) {
         const job = await jobs(env, id).get();
         if (!job) break;
-        const pub = publicJob(id, job.state, job.stage, job.percent, job.error, base, null);
+        const extras = job.state === "done" ? await doneExtras(env, id) : undefined;
+        const pub = publicJob(id, job.state, job.stage, job.percent, job.error, base, null, extras, job);
         const line = JSON.stringify(pub);
         if (line !== last) {
           controller.enqueue(encoder.encode(`data: ${line}\n\n`));

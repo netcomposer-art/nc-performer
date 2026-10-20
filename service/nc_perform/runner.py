@@ -34,7 +34,8 @@ from .jobs import Store
 from .limits import Reject, check_plan, load_suppliers
 from ncperf.discover import plan_for
 from ncperf.fit import fit_plan
-from .planner import cache_key, compute_cost, llm_cost, needs_llm
+from ncperf.progress import STAGE_LINES, merge_sounds, sounds_from_sources
+from .planner import PRICE_SOURCE, cache_key, compute_cost, llm_cost, llm_price_card, wants_model
 from .sign import Signer, apply_signature
 from .storage import Storage
 
@@ -42,6 +43,7 @@ from .storage import Storage
 STAGES = ("queued", "planning", "fetching", "measuring", "rendering", "reverb", "mastering", "verifying", "storing", "done")
 PERCENT = {s: i * 10 for i, s in enumerate(STAGES)}
 PERCENT["done"] = 100
+_UNSET = object()
 
 
 def _utc() -> str:
@@ -179,7 +181,29 @@ class Runner:
         if mark:
             stage_t[mark[0]] = stage_t.get(mark[0], 0) + (now - mark[1])
         mark[:] = [stage, now]
-        self.store.update(job_id, state=stage, stage=stage, percent=PERCENT.get(stage, 0))
+        self._progress(job_id, stage=stage, stage_line=STAGE_LINES.get(stage, stage))
+
+    def _snapshot(self, job_id: str) -> dict:
+        job = self.store.get(job_id) or {}
+        result = job.get("result")
+        return dict(result) if isinstance(result, dict) else {}
+
+    def _progress(self, job_id: str, *, stage: str | None = None, stage_line: str | None = None, sound: dict | None = None, sounds: list | None = None, seed=None, trimmed=_UNSET) -> None:
+        result = self._snapshot(job_id)
+        if stage_line:
+            result["stage_line"] = stage_line
+        if seed is not None:
+            result["seed"] = int(seed)
+        if trimmed is not _UNSET:
+            result["trimmed"] = trimmed if isinstance(trimmed, str) and trimmed.strip() else None
+        if sound or sounds:
+            result["found_sounds"] = merge_sounds(result.get("found_sounds"), ([sound] if sound else []) + list(sounds or []))
+        fields = {"result": result}
+        if stage:
+            fields["state"] = stage
+            fields["stage"] = stage
+            fields["percent"] = PERCENT.get(stage, 0)
+        self.store.update(job_id, **fields)
 
     def _run(self, job: dict, stage_t: dict, usage: dict) -> None:
         settings = self.settings
@@ -193,6 +217,7 @@ class Runner:
 
         comp = req["composition"]
         seed = int(req.get("seed") or 1)
+        self._progress(job_id, seed=seed, trimmed=None)
         plan = req.get("plan")
         mode = "plan"
         os.environ["NC_SUPPLIERS_JSON"] = settings.suppliers_json
@@ -205,7 +230,9 @@ class Runner:
         with egress_guard(settings):
             suppliers = None
             if plan is None:
-                plan, mode = self._interpret(comp, seed, usage, force_stub=bool(req.get("force_stub")))
+                plan, mode = self._interpret(
+                    comp, seed, usage, force_stub=bool(req.get("force_stub")), job_id=job_id,
+                )
             # Supplier manifests are checked against the live registry. A failure
             # here is a rejection, before any audio is written.
             try:
@@ -226,30 +253,49 @@ class Runner:
                 max_plan_bytes=settings.max_plan_bytes,
             )
             check_plan(plan, settings, suppliers)
+            trimmed = plan.get("trimmed")
+            self._progress(
+                job_id,
+                seed=int(plan.get("seed") or seed),
+                trimmed=trimmed if isinstance(trimmed, str) and trimmed.strip() else None,
+                sounds=sounds_from_sources(plan.get("sources")),
+            )
             self._stage(job_id, "fetching", stage_t, mark)
             out = self._render(job_id, plan, comp, req, stage_t, mark)
         self._stage(job_id, "storing", stage_t, mark)
-        self._store_outputs(job_id, out, req, mode)
+        self._store_outputs(job_id, out, req, mode, usage)
         self._stage(job_id, "done", stage_t, mark)
-        self.store.update(job_id, state="done", stage="done", percent=100, result={
+        done = self._snapshot(job_id)
+        done.update({
             "record_url": f"{settings.public_base_url}/records/{job_id}.json",
             "page_url": f"{settings.public_base_url}/records/{job_id}",
             "interpreter": mode,
+            "seed": int(plan.get("seed") or seed),
+            "stage_line": STAGE_LINES["done"],
         })
+        trimmed = plan.get("trimmed")
+        done["trimmed"] = trimmed if isinstance(trimmed, str) and trimmed.strip() else None
+        self.store.update(job_id, state="done", stage="done", percent=100, result=done)
 
-    def _interpret(self, comp: dict, seed: int, usage: dict, force_stub: bool = False) -> tuple[dict, str]:
+    def _interpret(self, comp: dict, seed: int, usage: dict, force_stub: bool = False, job_id: str | None = None) -> tuple[dict, str]:
         settings = self.settings
         text = (comp.get("composition") or "") + "\n" + (comp.get("performance") or "")
         instrument = (comp.get("instrument") or "").strip() or None
         if instrument:
             text += "\ninstrument: " + instrument
-        want = needs_llm(text) and not force_stub
+        want = wants_model(text, settings) and not force_stub
         soft = self.store.spend_today() >= settings.daily_soft_usd
         discovered = None
+
+        def progress_cb(line, sound=None):
+            if job_id:
+                self._progress(job_id, stage_line=line, sound=sound, seed=seed)
+
         try:
             discovered = plan_for(
                 comp, seed=seed, instrument=instrument, host_ok_fn=settings.host_allowed,
                 registry_url=settings.suppliers_json,
+                progress_cb=progress_cb if job_id else None,
             )
         except Exception as exc:
             discovered = None
@@ -336,7 +382,7 @@ class Runner:
         finally:
             shutil.rmtree(work, ignore_errors=True)
 
-    def _store_outputs(self, job_id: str, files: dict, req: dict, mode: str) -> None:
+    def _store_outputs(self, job_id: str, files: dict, req: dict, mode: str, usage: dict | None = None) -> None:
         base = f"performances/{job_id}/"
         types = {
             "performance.flac": "audio/flac",
@@ -360,6 +406,34 @@ class Runner:
         meta = self._meta(job_id, req)
         self.storage.put(base + "meta.json", json.dumps(meta, indent=1).encode(), "application/json")
         status = {"id": job_id, "state": "done", "interpreter": mode, "at": _utc()}
+        try:
+            plan_doc = json.loads(files.get("plan.json") or b"{}")
+        except Exception:
+            plan_doc = {}
+        trimmed = plan_doc.get("trimmed")
+        snap = self._snapshot(job_id)
+        seed = plan_doc.get("seed", (req or {}).get("seed"))
+        try:
+            seed = int(seed) if seed is not None else None
+        except (TypeError, ValueError):
+            seed = None
+        status["trimmed"] = trimmed if isinstance(trimmed, str) and trimmed.strip() else None
+        status["seed"] = seed
+        status["found_sounds"] = merge_sounds(snap.get("found_sounds"), sounds_from_sources(plan_doc.get("sources")))
+        status["stage_line"] = STAGE_LINES["done"]
+        card = llm_price_card(self.settings)
+        spent = usage or {}
+        status["cost_estimate"] = {
+            "model": spent.get("model") or card["model"],
+            "usd_per_million": card["usd_per_million"],
+            "source": PRICE_SOURCE,
+            "formula": card["formula"],
+            "every_perform": card["every_perform"],
+        }
+        if spent.get("tokens"):
+            status["cost_estimate"]["tokens"] = spent.get("tokens")
+        if spent.get("usd") is not None and mode in ("llm", "llm-cache"):
+            status["cost_estimate"]["usd"] = spent.get("usd")
         self.storage.put(base + "status.json", json.dumps(status, indent=1).encode(), "application/json")
 
     def _meta(self, job_id: str, req: dict) -> dict:

@@ -22,6 +22,7 @@ from .config import Settings, load
 from .ids import ID_RE, claim_token, new_id, sha256_text
 from .jobs import Store
 from .limits import Reject, check_words
+from .planner import llm_price_card
 from .runner import Runner, claim_matches, store_kit_submission
 from .sign import Signer
 from .storage import Storage, open_storage
@@ -194,6 +195,7 @@ def make_handler(app: App):
                     "perform_enabled": app.perform_enabled(),
                     "llm": bool(s.llm_configured),
                     "llm_model": s.llm_model or None,
+                    "llm_price": llm_price_card(s),
                 })
                 return
             if path == "/.well-known/nc-record-keys.json":
@@ -271,13 +273,7 @@ def make_handler(app: App):
                 raise Reject("visibility must be unlisted or public.")
             # Same words and the same seed reuse a cached plan. "Perform again"
             # changes the seed on purpose so the next plan is new.
-            if body.get("perform_again"):
-                import secrets as _secrets
-                seed = _secrets.randbelow(2**31 - 1) or 1
-            elif body.get("seed") is None:
-                seed = 1
-            else:
-                seed = body.get("seed")
+            seed = choose_seed(body)
             token = claim_token()
             job_id = new_id("h")
             req = {
@@ -317,9 +313,9 @@ def make_handler(app: App):
                 if not meta and not status:
                     return self._send(404, {"error": "not found"})
                 state = (status or {}).get("state") or "done"
-                return self._send(200, _public_job(job_id, state, state, 100 if state == "done" else 0, None, app))
+                return self._send(200, _public_job(job_id, state, state, 100 if state == "done" else 0, (status or {}).get("error"), app, status=status))
             pos = app.store.position(job_id) if job["state"] == "queued" else None
-            self._send(200, _public_job(job_id, job["state"], job["stage"], job["percent"], job.get("error"), app, pos))
+            self._send(200, _public_job(job_id, job["state"], job["stage"], job["percent"], job.get("error"), app, pos, job=job))
 
         def _file(self, job_id, name):
             if not re.fullmatch(r"[A-Za-z0-9._-]{1,80}", name):
@@ -407,9 +403,10 @@ def make_handler(app: App):
                 job = app.store.get(job_id)
                 if not job:
                     break
-                snap = (job["state"], job["stage"], job["percent"])
+                view = _public_job(job_id, job["state"], job["stage"], job["percent"], job.get("error"), app, job=job)
+                snap = (job["state"], job["stage"], job["percent"], view.get("stage_line"), len(view.get("found_sounds") or []), view.get("trimmed"))
                 if snap != last:
-                    payload = json.dumps(_public_job(job_id, job["state"], job["stage"], job["percent"], job.get("error"), app))
+                    payload = json.dumps(view)
                     self.wfile.write(f"data: {payload}\n\n".encode())
                     self.wfile.flush()
                     last = snap
@@ -577,10 +574,16 @@ def make_handler(app: App):
                 job = app.store.get(m.group(1))
                 if not job:
                     return self._send(404, {"error": "not found"})
+                from ncperf.progress import public_fields
+                fields = public_fields(job, stage=job.get("stage"))
                 return self._send(200, {
                     "id": job["id"], "state": job["state"], "stage": job["stage"],
                     "percent": job["percent"], "error": job.get("error"),
                     "cost_usd": job.get("cost_usd") or 0,
+                    "seed": fields["seed"],
+                    "trimmed": fields["trimmed"],
+                    "found_sounds": fields["found_sounds"],
+                    "stage_line": fields["stage_line"],
                 })
             m = re.fullmatch(r"/internal/jobs/([hk]-[0-9a-z]+)/files/([a-z0-9._-]+)", path)
             if m:
@@ -645,6 +648,21 @@ def _composition(body: dict) -> dict:
     return comp
 
 
+def choose_seed(body: dict) -> int:
+    """An omitted seed is random, so the first take is not always seed 1.
+
+    perform_again also picks a new seed. An explicit seed is kept.
+    """
+    import secrets
+
+    if body.get("perform_again") or body.get("seed") is None:
+        return secrets.randbelow(2**31 - 1) or 1
+    try:
+        return int(body.get("seed")) or 1
+    except (TypeError, ValueError):
+        return 1
+
+
 def _instrument(raw) -> str:
     text = str(raw or "").strip()
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 ._-]{0,39}", text):
@@ -652,32 +670,29 @@ def _instrument(raw) -> str:
     return text
 
 
-def _public_job(job_id, state, stage, percent, error, app: App, position=None) -> dict:
-    lines = {
-        "queued": "Queued" + (f" (position {position})" if position else ""),
-        "planning": "Planning the Performance…",
-        "fetching": "Fetching sounds, licenses checked…",
-        "measuring": "Measuring pitch…",
-        "rendering": "Rendering layers…",
-        "reverb": "Reverb hack…",
-        "mastering": "Mastering to -17 LUFS…",
-        "verifying": "Checking the record…",
-        "storing": "Storing the Performance…",
-        "done": "Done",
-        "failed": "Failed",
-        "rejected": "Rejected",
-    }
+def _public_job(job_id, state, stage, percent, error, app: App, position=None, job=None, status=None) -> dict:
+    from ncperf.progress import public_fields
+
+    if status is None and state == "done":
+        status = _read_json(app.storage, f"performances/{job_id}/status.json") or _read_json(app.storage, f"jobs/{job_id}/status.json") or {}
+    fields = public_fields(job, status if isinstance(status, dict) else None, stage=stage, position=position)
     out = {
         "id": job_id,
         "state": state,
         "stage": stage,
-        "stage_line": lines.get(stage, stage),
         "percent": percent or 0,
         "position": position,
         "error": error,
+        "seed": fields["seed"],
+        "trimmed": fields["trimmed"],
+        "found_sounds": fields["found_sounds"],
+        "stage_line": fields["stage_line"],
     }
     if state == "done":
         base = app.settings.public_base_url
+        stored = status if isinstance(status, dict) else {}
+        if stored.get("cost_estimate"):
+            out["cost_estimate"] = stored["cost_estimate"]
         out["files"] = {
             "flac": f"{base}/api/jobs/{job_id}/files/performance.flac",
             "mp3": f"{base}/api/jobs/{job_id}/files/preview.mp3",

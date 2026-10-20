@@ -93,6 +93,22 @@ class ServiceTest(unittest.TestCase):
         self.assertTrue(needs_llm("8 seconds. Cm. A melody line in triplets across two sections."))
         self.assertTrue(needs_llm("Verse then chorus, two sections."))
         self.assertFalse(needs_llm("online chords, Cm Am F, slow"))
+        from nc_perform.api import choose_seed
+        from nc_perform.planner import llm_price_card, wants_model
+        self.assertEqual(choose_seed({"seed": 7}), 7)
+        self.assertGreaterEqual(choose_seed({}), 1)
+        bare = Settings()
+        self.assertFalse(bare.llm_every_perform)
+        self.assertFalse(wants_model("1 min. Cm, F, G.", bare))
+        bare.llm_every_perform = True
+        self.assertTrue(wants_model("1 min. Cm, F, G.", bare))
+        card = llm_price_card(Settings())
+        self.assertEqual(card["model"], "grok-4.3")
+        self.assertEqual(card["usd_per_million"]["in"], 1.25)
+        self.assertEqual(card["usd_per_million"]["cached"], 0.2)
+        self.assertEqual(card["usd_per_million"]["out"], 2.5)
+        self.assertIn("docs.x.ai", card["source"])
+        self.assertFalse(card["every_perform"])
 
     def test_signing_roundtrip(self):
         signer = Signer.from_text("base64:" + __import__("base64").b64encode(os.urandom(32)).decode())
@@ -529,6 +545,11 @@ class ServiceTest(unittest.TestCase):
         with urllib.request.urlopen(api + "/api/jobs/" + created["id"], timeout=10) as r:
             job = json.loads(r.read())
         self.assertEqual(job["state"], "done", job.get("error"))
+        self.assertEqual(job["seed"], 7)
+        self.assertIsNone(job["trimmed"])
+        self.assertIsInstance(job["found_sounds"], list)
+        self.assertTrue(job.get("stage_line"))
+        self.assertTrue(all(row.get("title") and row.get("supplier") and row.get("license") for row in job["found_sounds"]))
         with urllib.request.urlopen(api + "/records/" + created["id"] + ".json", timeout=10) as r:
             rec = json.loads(r.read())
             self.assertIn("noindex", r.headers.get("X-Robots-Tag", ""))
@@ -536,6 +557,9 @@ class ServiceTest(unittest.TestCase):
         self.assertEqual(rec["performance"]["license_out"]["id"], "CC-BY-SA-4.0")
         self.assertFalse(rec["performance"]["rule_set"]["pitch_shift"])
         self.assertTrue(all(not snd.get("pitch_shift") for snd in rec["sounds_used"]))
+        self.assertGreaterEqual(len(rec["performance"]["timeline"]), 1)
+        self.assertTrue(all("spans" in snd for snd in rec["sounds_used"]))
+        self.assertTrue(any(snd["spans"] for snd in rec["sounds_used"]))
         self.assertEqual(rec["performance"]["composition_ref"]["composer"]["display_name"], "anonymous")
         self.assertEqual(rec["signature"]["status"], "SIGNED")
         self.assertEqual(rec["signature"]["algorithm"], "Ed25519")
