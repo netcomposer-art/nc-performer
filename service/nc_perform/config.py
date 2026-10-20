@@ -103,6 +103,7 @@ class Settings:
     allowed_hosts: tuple[str, ...] = DEFAULT_HOSTS
     perform_enabled: bool = True
     admin_token: str = ""
+    tester_token: str = ""
     internal_token: str = ""
     ip_hash_salt: str = "nc-perform"
     s3_endpoint: str = ""
@@ -152,6 +153,22 @@ class Settings:
 def _host_of(url: str) -> str:
     from urllib.parse import urlparse
     return (urlparse(url).hostname or "").lower()
+
+
+def tester_pass(header: str | None, secret: str | None) -> bool:
+    """True when X-NC-Tester matches NC_TESTER_TOKEN.
+
+    An empty secret never matches. Both sides are hashed before the compare so
+    a short header cannot skip it, and the token is not returned or logged.
+    """
+    import hashlib
+    import hmac
+
+    token = (secret or "").strip()
+    got = (header or "").strip()
+    if not token or not got:
+        return False
+    return hmac.compare_digest(hashlib.sha256(got.encode()).digest(), hashlib.sha256(token.encode()).digest())
 
 
 def load() -> Settings:
@@ -205,6 +222,7 @@ def load() -> Settings:
         allowed_hosts=_csv("NC_ALLOWED_HOSTS", DEFAULT_HOSTS),
         perform_enabled=enabled,
         admin_token=os.environ.get("NC_ADMIN_TOKEN", ""),
+        tester_token=os.environ.get("NC_TESTER_TOKEN", "").strip(),
         internal_token=os.environ.get("NC_INTERNAL_TOKEN", ""),
         ip_hash_salt=os.environ.get("NC_IP_HASH_SALT", "nc-perform"),
         s3_endpoint=os.environ.get("NC_S3_ENDPOINT", "").rstrip("/"),

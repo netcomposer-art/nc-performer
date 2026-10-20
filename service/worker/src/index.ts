@@ -37,7 +37,7 @@ import {
 } from "./keep";
 import { CANCELLED_MESSAGE, cancelToken, queueErrorIsCancel } from "./cancel";
 import { REQUIRED_OUTPUTS, containerPageUpdate, missingOutputs, readableBytes } from "./outputs";
-import { applyPerformHit, BURST_MESSAGE, claimToken, forPage, isInternalFailure, jobStatusFields, newId, PER_10MIN, PER_DAY, proxyHosts, publicInternalError, rejectPlan, wordsTooLong, type FoundSound } from "./policy";
+import { applyPerformHit, burstBlock, claimToken, forPage, isInternalFailure, jobStatusFields, newId, PER_10MIN, PER_DAY, proxyHosts, publicInternalError, rejectPlan, testerPass, wordsTooLong, type FoundSound, type RateBlock } from "./policy";
 
 // @cloudflare/containers 0.3.7 looks up this exact export on ctx.exports when
 // allowedHosts is set. It is a WorkerEntrypoint, not a Durable Object, so it
@@ -114,6 +114,7 @@ export interface Env {
   TURNSTILE_VERIFY_URL?: string;
   NC_SIGNING_KEY?: string;
   NC_ADMIN_TOKEN?: string;
+  NC_TESTER_TOKEN?: string;
   NC_INTERNAL_TOKEN?: string;
   NC_PUBLIC_BASE_URL?: string;
   NC_IP_HASH_SALT?: string;
@@ -136,6 +137,7 @@ type Job = {
   found_sounds?: FoundSound[];
   sounds?: GatherSound[];
   stage_line?: string;
+  tester?: boolean;
 };
 
 type GatherSound = {
@@ -230,6 +232,7 @@ export class BudgetDO extends DurableObject<Env> {
       "CREATE TABLE IF NOT EXISTS budget (day TEXT PRIMARY KEY, usd REAL NOT NULL)",
       "CREATE TABLE IF NOT EXISTS day_hits (ip TEXT, day TEXT, n INTEGER NOT NULL, PRIMARY KEY (ip, day))",
       "CREATE TABLE IF NOT EXISTS win_hits (ip TEXT PRIMARY KEY, start REAL NOT NULL, n INTEGER NOT NULL)",
+      "CREATE TABLE IF NOT EXISTS ip_hits (ip TEXT, ts REAL)",
       "CREATE TABLE IF NOT EXISTS queued (id TEXT PRIMARY KEY, created TEXT NOT NULL)",
       "CREATE TABLE IF NOT EXISTS flags (k TEXT PRIMARY KEY, v TEXT NOT NULL)",
       "CREATE TABLE IF NOT EXISTS seen (id TEXT PRIMARY KEY, state TEXT, cost_usd REAL, ip_hash TEXT, error_code TEXT, created_at TEXT)",
@@ -269,35 +272,18 @@ export class BudgetDO extends DurableObject<Env> {
   }
 
   /**
-   * 3 Performs per 10 minutes and 10 per day for one network.
-   * Checked together so a daily rejection does not consume the 10-minute window.
+   * 3 Performs per 10 minutes and 10 per rolling 24 hours for one network.
+   * Checked together so a rejection does not consume either window.
    */
-  async hit(ip: string, per10min = PER_10MIN, perDay = PER_DAY): Promise<string | null> {
+  async hit(ip: string, per10min = PER_10MIN, perDay = PER_DAY): Promise<RateBlock | null> {
     const now = Date.now() / 1000;
-    const today = day();
-    const winRows = this.ctx.storage.sql.exec("SELECT start, n FROM win_hits WHERE ip = ?", ip).toArray();
-    const dayRows = this.ctx.storage.sql.exec("SELECT day, n FROM day_hits WHERE ip = ? AND day = ?", ip, today).toArray();
-    const decision = applyPerformHit(
-      now,
-      today,
-      winRows.length ? { start: Number(winRows[0].start), n: Number(winRows[0].n) } : null,
-      dayRows.length ? { day: String(dayRows[0].day), n: Number(dayRows[0].n) } : null,
-      per10min,
-      perDay,
-    );
-    if (decision.error) return decision.error;
-    this.ctx.storage.sql.exec(
-      "INSERT INTO win_hits (ip, start, n) VALUES (?, ?, ?) ON CONFLICT(ip) DO UPDATE SET start = excluded.start, n = excluded.n",
-      ip,
-      decision.window.start,
-      decision.window.n,
-    );
-    this.ctx.storage.sql.exec(
-      "INSERT INTO day_hits (ip, day, n) VALUES (?, ?, ?) ON CONFLICT(ip, day) DO UPDATE SET n = excluded.n",
-      ip,
-      decision.dayHit.day,
-      decision.dayHit.n,
-    );
+    this.ctx.storage.sql.exec("DELETE FROM ip_hits WHERE ts < ?", now - 86400);
+    const rows = this.ctx.storage.sql.exec("SELECT ts FROM ip_hits WHERE ip = ? AND ts >= ?", ip, now - 86400).toArray();
+    const decision = applyPerformHit(now, rows.map((row) => Number(row.ts)), per10min, perDay);
+    if (decision.error) {
+      return { error: decision.error, retry_after_s: decision.retry_after_s || 1, retry_at: decision.retry_at || "" };
+    }
+    this.ctx.storage.sql.exec("INSERT INTO ip_hits (ip, ts) VALUES (?, ?)", ip, now);
     return null;
   }
 
@@ -368,7 +354,7 @@ export default {
       status: 204,
       headers: {
         "access-control-allow-origin": "*",
-        "access-control-allow-headers": "Content-Type, Authorization",
+        "access-control-allow-headers": "Content-Type, Authorization, X-NC-Tester",
         "access-control-allow-methods": "GET, POST, OPTIONS",
       },
     });
@@ -522,8 +508,9 @@ async function gather(request: Request, env: Env, base: string): Promise<Respons
     avoidSamples = Array.isArray(previous.picked_sample_ids) ? previous.picked_sample_ids : [];
   }
   const ipHash = await sha256Text(`${env.NC_IP_HASH_SALT || "nc-perform"}:${ip}`);
-  const limited = await rateLimit(env, ipHash);
-  if (limited) return json({ error: limited, code: "rate" }, 429);
+  const tester = await testerPass(request.headers.get("X-NC-Tester"), env.NC_TESTER_TOKEN);
+  const limited = await rateLimit(env, ipHash, tester);
+  if (limited) return rateJson(limited);
   const randomSeed = () => crypto.getRandomValues(new Uint32Array(1))[0] % 2147483646 || 1;
   const seed = body.seed == null ? randomSeed() : (Number(body.seed) || 1);
   const token = claimToken();
@@ -541,6 +528,7 @@ async function gather(request: Request, env: Env, base: string): Promise<Respons
     avoid_sample_ids: avoidSamples,
     excluded_gather_id: excluded,
     force_stub: spend >= 3,
+    tester,
   };
   const job: Job = {
     id,
@@ -559,6 +547,7 @@ async function gather(request: Request, env: Env, base: string): Promise<Respons
     found_sounds: [],
     sounds: [],
     stage_line: "Queued",
+    tester,
   };
   await jobs(env, id).create(job);
   const placed = await b.enqueue(id, created, 50);
@@ -643,8 +632,9 @@ async function perform(request: Request, env: Env, base: string): Promise<Respon
     if (planErr) return json({ error: planErr, code: "rejected" }, 400);
   }
   const ipHash = await sha256Text(`${env.NC_IP_HASH_SALT || "nc-perform"}:${ip}`);
-  const limited = await rateLimit(env, ipHash);
-  if (limited) return json({ error: limited, code: "rate" }, 429);
+  const tester = await testerPass(request.headers.get("X-NC-Tester"), env.NC_TESTER_TOKEN);
+  const limited = await rateLimit(env, ipHash, tester);
+  if (limited) return rateJson(limited);
   const visibility = body.visibility || "unlisted";
   if (visibility !== "unlisted" && visibility !== "public") {
     return json({ error: "visibility must be unlisted or public.", code: "rejected" }, 400);
@@ -668,7 +658,9 @@ async function perform(request: Request, env: Env, base: string): Promise<Respon
     claim_hash: await sha256Text(token),
     public_base: base,
     // The container still decides discovery vs model from the words. This flag skips the model when the soft budget is spent.
+    // A tester pass does not change it, and it does not change the $5 rest either.
     force_stub: spend >= 3,
+    tester,
   };
   const job: Job = {
     id,
@@ -686,6 +678,7 @@ async function perform(request: Request, env: Env, base: string): Promise<Respon
     trimmed: null,
     found_sounds: [],
     stage_line: "Queued",
+    tester,
   };
   await jobs(env, id).create(job);
   const placed = await b.enqueue(id, created, 50);
@@ -864,6 +857,7 @@ async function runContainer(env: Env, id: string): Promise<void> {
         trimmed: typeof last.trimmed === "string" && last.trimmed.trim() ? last.trimmed : null,
         found_sounds: Array.isArray(last.found_sounds) ? last.found_sounds : [],
         stage_line: last.stage_line || "Something went wrong.",
+        ...(job.tester ? { tester: true } : {}),
       }),
       { httpMetadata: { contentType: "application/json" } },
     );
@@ -965,9 +959,17 @@ async function copyGather(env: Env, container: DurableObjectStub<RenderContainer
   await env.PERFORMANCES.put(`gathers/${id}/meta.json`, JSON.stringify({ id, claim_token_sha256: doc.claim_hash || null }), {
     httpMetadata: { contentType: "application/json" },
   });
+  const storedJob = await jobs(env, id).get();
   await env.PERFORMANCES.put(
     `gathers/${id}/status.json`,
-    JSON.stringify({ id, state: "gathered", seed: doc.seed ?? null, sounds: doc.sounds || [], stage_line: "Gathered." }),
+    JSON.stringify({
+      id,
+      state: "gathered",
+      seed: doc.seed ?? null,
+      sounds: doc.sounds || [],
+      stage_line: "Gathered.",
+      ...(storedJob?.tester ? { tester: true } : {}),
+    }),
     { httpMetadata: { contentType: "application/json" } },
   );
   return doc;
@@ -1107,6 +1109,7 @@ type StatusExtras = {
   seed?: number | null;
   found_sounds?: unknown;
   stage_line?: string;
+  tester?: boolean;
 };
 
 async function jobStatus(env: Env, id: string, base: string): Promise<Response> {
@@ -1117,7 +1120,7 @@ async function jobStatus(env: Env, id: string, base: string): Promise<Response> 
     const meta = await readJsonKey(env, `performances/${id}/meta.json`);
     const status = gatherStatus || (await readJsonKey(env, `performances/${id}/status.json`)) || (await readJsonKey(env, `jobs/${id}/status.json`));
     if (!meta && !status) return json({ error: "not found" }, 404);
-    const stored = (status || {}) as { state?: string; error?: string | null; trimmed?: string | null; seed?: number | null; found_sounds?: unknown; sounds?: GatherSound[]; stage_line?: string; cost_estimate?: unknown };
+    const stored = (status || {}) as { state?: string; error?: string | null; trimmed?: string | null; seed?: number | null; found_sounds?: unknown; sounds?: GatherSound[]; stage_line?: string; cost_estimate?: unknown; tester?: boolean };
     const state = String(stored.state || "done");
     const storedMeta = state === "done" ? (meta as Meta | null) : null;
     const ghost = Array.isArray(stored.sounds) ? ({ sounds: stored.sounds } as Job) : null;
@@ -1128,6 +1131,7 @@ async function jobStatus(env: Env, id: string, base: string): Promise<Response> 
       found_sounds: stored.found_sounds ?? [],
       stage_line: stored.stage_line,
       cost_estimate: stored.cost_estimate,
+      tester: stored.tester === true,
     }, ghost, storedMeta));
   }
   const pos = job.state === "queued" ? await budget(env).positionOf(id) : null;
@@ -1146,6 +1150,7 @@ async function doneExtras(env: Env, id: string): Promise<StatusExtras | undefine
   if (Array.isArray(status.found_sounds)) out.found_sounds = status.found_sounds;
   if (typeof status.stage_line === "string") out.stage_line = status.stage_line;
   if (status.cost_estimate) out.cost_estimate = status.cost_estimate;
+  if (status.tester === true) out.tester = true;
   return out;
 }
 
@@ -1168,6 +1173,7 @@ function publicJob(
     trimmed: extras && "trimmed" in extras ? extras.trimmed : job?.trimmed,
     found_sounds: extras && extras.found_sounds != null ? extras.found_sounds : job?.found_sounds,
     stage_line: extras?.stage_line || job?.stage_line,
+    tester: job?.tester === true || extras?.tester === true,
   });
   const out: Record<string, unknown> = {
     id,
@@ -1180,6 +1186,7 @@ function publicJob(
     trimmed: fields.trimmed,
     found_sounds: fields.found_sounds,
     stage_line: fields.stage_line,
+    tester: fields.tester,
   };
   if (id.startsWith("g-")) {
     out.gather_id = id;
@@ -1735,17 +1742,23 @@ async function turnstile(env: Env, token: unknown, ip: string): Promise<boolean>
   return Boolean(data.success);
 }
 
-async function rateLimit(env: Env, ipHash: string): Promise<string | null> {
+async function rateLimit(env: Env, ipHash: string, tester: boolean): Promise<RateBlock | null> {
   // Binding period is 10 seconds (Wrangler allows only 10 or 60). It stops a
-  // burst before those requests touch the counters below. The 10-minute and
-  // daily caps always run in BudgetDO, including when the binding is absent.
+  // burst before those requests touch the counters below. A tester pass skips
+  // only the 10-minute and daily counters. The burst, Turnstile, size limits,
+  // and the $3/$5 caps still apply. The token is not logged.
   try {
     const result = await env.PERFORM_RATE.limit({ key: ipHash });
-    if (!result.success) return BURST_MESSAGE;
+    if (!result.success) return burstBlock(Date.now() / 1000);
   } catch {
     // Local tests have no binding. The Durable Object still enforces both windows.
   }
+  if (tester) return null;
   return budget(env).hit(ipHash);
+}
+
+function rateJson(block: RateBlock): Response {
+  return json({ error: block.error, code: "rate", retry_after_s: block.retry_after_s, retry_at: block.retry_at }, 429);
 }
 
 function instrumentProblem(raw: unknown): string | null {
@@ -1967,7 +1980,7 @@ function json(data: unknown, status = 200, extra?: Record<string, string>): Resp
   const headers = new Headers(extra);
   headers.set("content-type", "application/json; charset=utf-8");
   headers.set("access-control-allow-origin", "*");
-  headers.set("access-control-allow-headers", "Content-Type, Authorization");
+  headers.set("access-control-allow-headers", "Content-Type, Authorization, X-NC-Tester");
   headers.set("access-control-allow-methods", "GET, POST, OPTIONS");
   if (!headers.has("cache-control")) headers.set("cache-control", "no-store");
   const body = typeof data === "string" ? data : JSON.stringify(data);

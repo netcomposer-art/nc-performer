@@ -92,12 +92,63 @@ export const BURST_PERIOD_S = 10;
 export const BURST_MESSAGE =
   "Too many Performs from this network in a few seconds. Wait a moment and try again.";
 
-export function windowMessage(limit: number): string {
-  return `Too many Performs from this network (${limit} every 10 minutes). Try again in a few minutes.`;
+export const DAY_S = 86400;
+
+export type RateBlock = { error: string; retry_after_s: number; retry_at: string };
+
+export type RateDecision = {
+  error: string | null;
+  retry_after_s: number | null;
+  retry_at: string | null;
+  hits: number[];
+};
+
+/** UTC clock for the fallback sentence. The page should format retry_at locally. */
+export function clockUtc(unix: number): string {
+  const shown = new Date(Math.ceil(unix) * 1000);
+  if (shown.getUTCSeconds() !== 0 || shown.getUTCMilliseconds() !== 0) {
+    shown.setUTCSeconds(0, 0);
+    shown.setUTCMinutes(shown.getUTCMinutes() + 1);
+  }
+  let hour = shown.getUTCHours();
+  const minute = String(shown.getUTCMinutes()).padStart(2, "0");
+  const ampm = hour < 12 ? "AM" : "PM";
+  hour = hour % 12 || 12;
+  return `${hour}:${minute} ${ampm} UTC`;
 }
 
-export function dayMessage(limit: number): string {
-  return `Daily limit reached (${limit} Performs from this network). It resets tomorrow.`;
+export function retryAtIso(unix: number): string {
+  return new Date(unix * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+export function windowMessage(limit: number, when: string): string {
+  return `Too many Performs from this network (${limit} every 10 minutes). Try again after ${when}.`;
+}
+
+export function dayMessage(limit: number, when: string): string {
+  return `Daily limit reached (${limit} Performs from this network). Try again after ${when}.`;
+}
+
+export function burstBlock(now: number): RateBlock {
+  return { error: BURST_MESSAGE, retry_after_s: BURST_PERIOD_S, retry_at: retryAtIso(now + BURST_PERIOD_S) };
+}
+
+/**
+ * True when X-NC-Tester matches NC_TESTER_TOKEN. An empty secret never matches.
+ * Both sides are hashed first so the compare does not stop on length. The token
+ * is not returned.
+ */
+export async function testerPass(header: string | null | undefined, secret: string | null | undefined): Promise<boolean> {
+  const token = (secret || "").trim();
+  const got = (header || "").trim();
+  if (!token || !got) return false;
+  const encode = new TextEncoder();
+  const a = new Uint8Array(await crypto.subtle.digest("SHA-256", encode.encode(got)));
+  const b = new Uint8Array(await crypto.subtle.digest("SHA-256", encode.encode(token)));
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+  return diff === 0;
 }
 
 /** Shown for Worker faults. The real error is logged; the id is how to find it. */
@@ -136,37 +187,36 @@ export function forPage(id: string | null, error: string | null): string | null 
   return isInternalFailure(error) ? publicInternalError(id) : error;
 }
 
-export type Counter = { start: number; n: number };
-export type DayCounter = { day: string; n: number };
-
 /**
- * One Perform against the 10-minute and daily windows.
- * Both caps are checked before either count increases, so a rejection
- * does not consume the other window. `now` is unix seconds.
- * The 10-minute window is fixed from its first hit and lasts WINDOW_S.
+ * One Perform against the rolling 10-minute and 24-hour windows.
+ * Both caps are checked before a hit is added, so a rejection does not
+ * consume either window. `now` and `hits` are unix seconds.
+ * The next free slot is the oldest hit in that window plus the window length.
  */
 export function applyPerformHit(
   now: number,
-  day: string,
-  window: Counter | null,
-  dayHit: DayCounter | null,
+  hits: readonly number[] | null,
   per10min = PER_10MIN,
   perDay = PER_DAY,
-): { error: string | null; window: Counter; dayHit: DayCounter } {
-  const open = window != null && now - window.start < WINDOW_S;
-  const start = open ? window.start : now;
-  const winN = open ? window.n : 0;
-  const dayN = dayHit != null && dayHit.day === day ? dayHit.n : 0;
-  if (winN >= per10min) {
-    return { error: windowMessage(per10min), window: { start, n: winN }, dayHit: { day, n: dayN } };
+): RateDecision {
+  const kept = (hits || []).filter((ts) => ts >= now - DAY_S).sort((a, b) => a - b);
+  const win = kept.filter((ts) => ts >= now - WINDOW_S);
+  if (win.length >= per10min) {
+    return blocked(now, win[0] + WINDOW_S, windowMessage(per10min, clockUtc(win[0] + WINDOW_S)), kept);
   }
-  if (dayN >= perDay) {
-    return { error: dayMessage(perDay), window: { start, n: winN }, dayHit: { day, n: dayN } };
+  if (kept.length >= perDay) {
+    return blocked(now, kept[0] + DAY_S, dayMessage(perDay, clockUtc(kept[0] + DAY_S)), kept);
   }
+  return { error: null, retry_after_s: null, retry_at: null, hits: [...kept, now] };
+}
+
+function blocked(now: number, freeAt: number, error: string, hits: number[]): RateDecision {
+  const at = Math.max(freeAt, now);
   return {
-    error: null,
-    window: { start, n: winN + 1 },
-    dayHit: { day, n: dayN + 1 },
+    error,
+    retry_after_s: Math.max(1, Math.ceil(at - now)),
+    retry_at: retryAtIso(at),
+    hits,
   };
 }
 
@@ -217,7 +267,8 @@ export function jobStatusFields(input: {
   trimmed?: unknown;
   found_sounds?: unknown;
   stage_line?: unknown;
-}): { seed: number | null; trimmed: string | null; found_sounds: FoundSound[]; stage_line: string } {
+  tester?: unknown;
+}): { seed: number | null; trimmed: string | null; found_sounds: FoundSound[]; stage_line: string; tester: boolean } {
   let seed: number | null = null;
   if (typeof input.seed === "number" && Number.isFinite(input.seed)) seed = input.seed;
   else if (typeof input.seed === "string" && input.seed.trim() && Number.isFinite(Number(input.seed))) seed = Number(input.seed);
@@ -225,5 +276,5 @@ export function jobStatusFields(input: {
   const stage = input.stage || "";
   let line = typeof input.stage_line === "string" && input.stage_line.trim() ? input.stage_line.trim() : STAGE_LINES[stage] || stage || STAGE_LINES.planning;
   if (stage === "queued" && input.position) line = `Queued (position ${input.position})`;
-  return { seed, trimmed, found_sounds: foundSounds(input.found_sounds), stage_line: line };
+  return { seed, trimmed, found_sounds: foundSounds(input.found_sounds), stage_line: line, tester: input.tester === true };
 }

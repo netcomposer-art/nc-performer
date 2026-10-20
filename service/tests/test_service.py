@@ -8,12 +8,14 @@ own SQLite queue, pumped on this thread so the test does not race a worker.
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import os
 import shutil
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.parse
@@ -27,7 +29,9 @@ sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "service"))
 
 from ncperf.schema import validate
-from nc_perform.config import Settings, load
+from nc_perform.config import Settings, load, tester_pass
+from nc_perform.jobs import Store
+from nc_perform.runner import Runner
 from nc_perform.ids import ID_RE, new_id
 from nc_perform.limits import Reject, check_plan
 from nc_perform.planner import needs_llm
@@ -376,6 +380,178 @@ class ServiceTest(unittest.TestCase):
         except urllib.error.HTTPError as e:
             self.assertEqual(e.code, 503)
             self.assertIn("resting", e.read().decode())
+
+    def test_rolling_day_names_when_the_next_slot_frees(self):
+        tmp = tempfile.mkdtemp(prefix="nc-rate-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        store = Store(os.path.join(tmp, "jobs.sqlite"))
+        now = time.time()
+        oldest = now - 2 * 3600
+        for i in range(10):
+            store.db.execute("INSERT INTO ip_hits (ip_hash, ts) VALUES (?, ?)", ("ip", oldest + i * 60))
+        store.db.commit()
+        block = store.hit("ip", 100, 10)
+        self.assertIsNotNone(block)
+        self.assertIn("Daily limit reached (10 Performs from this network).", block.error)
+        self.assertNotIn("tomorrow", block.error)
+        self.assertRegex(block.error, r"Try again after \d{1,2}:\d{2} [AP]M UTC\.")
+        self.assertGreater(block.retry_after_s, 20 * 3600)
+        self.assertAlmostEqual(block.retry_after_s, oldest + 86400 - time.time(), delta=2)
+        self.assertRegex(block.retry_at, r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+        self.assertEqual(store.db.execute("SELECT COUNT(*) c FROM ip_hits WHERE ip_hash='ip'").fetchone()["c"], 10)
+        fresh = "other"
+        for i in range(3):
+            store.db.execute("INSERT INTO ip_hits (ip_hash, ts) VALUES (?, ?)", (fresh, now - 20 + i))
+        store.db.commit()
+        window = store.hit(fresh, 3, 10)
+        self.assertIn("3 every 10 minutes", window.error)
+        self.assertRegex(window.error, r"Try again after \d{1,2}:\d{2} [AP]M UTC\.")
+        self.assertGreater(window.retry_after_s, 500)
+        self.assertEqual(store.db.execute("SELECT COUNT(*) c FROM ip_hits WHERE ip_hash=?", (fresh,)).fetchone()["c"], 3)
+
+    def test_tester_pass_skips_network_limits_not_the_cost_cap(self):
+        secret = "tester-secret-value"
+        self.assertTrue(tester_pass(secret, secret))
+        self.assertTrue(tester_pass("  " + secret + "  ", secret))
+        self.assertFalse(tester_pass("wrong-token", secret))
+        self.assertFalse(tester_pass(None, secret))
+        self.assertFalse(tester_pass("", secret))
+        self.assertFalse(tester_pass(secret, ""))
+        self.assertFalse(tester_pass(secret, None))
+        self.assertFalse(tester_pass("admin-secret", secret))
+        self.assertNotIn("tester_token", inspect.getsource(Runner._run))
+        self.assertNotIn("X-NC-Tester", inspect.getsource(Runner._interpret))
+        self.assertIn("daily_soft_usd", inspect.getsource(Runner._interpret))
+        self.assertIn("daily_hard_usd", inspect.getsource(Runner._run))
+
+        tmp = tempfile.mkdtemp(prefix="nc-tester-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        s = _settings(tmp, suppliers="http://127.0.0.1/suppliers.json", llm_base="", llm_model="")
+        s.turnstile_secret = "1x0000000000000000000000000000000AA"
+        s.rate_per_10min = 5
+        s.rate_per_ip_day = 1
+        s.queue_autostart = False
+        s.tester_token = secret
+        s.admin_token = "admin-secret"
+        app, httpd = _api(s)
+        self.addCleanup(_close, httpd)
+        port = httpd.server_address[1]
+        base = f"http://127.0.0.1:{port}"
+
+        def post(path, header=None, turnstile="XXXX.DUMMY.TOKEN.XXXX", composition="1 min. Cm."):
+            payload = {"composition": composition, "performance": "soft", "title": "Gate"}
+            if turnstile is not None:
+                payload["turnstile_token"] = turnstile
+            headers = {"Content-Type": "application/json"}
+            if header is not None:
+                headers["X-NC-Tester"] = header
+            req = urllib.request.Request(base + path, json.dumps(payload).encode(), headers)
+            try:
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    return r.status, json.loads(r.read())
+            except urllib.error.HTTPError as e:
+                return e.code, json.loads(e.read())
+
+        code, body = post("/api/perform", header=secret, turnstile=None)
+        self.assertEqual(code, 403)
+        self.assertEqual(body["code"], "turnstile")
+        code, body = post("/api/perform", header=secret, composition="x" * 5000)
+        self.assertEqual(code, 400)
+        self.assertNotIn(secret, json.dumps(body))
+
+        code, body = post("/api/perform")
+        self.assertEqual(code, 202, body)
+        self.assertFalse(body.get("tester"))
+        job_id = body["id"]
+        with urllib.request.urlopen(base + "/api/jobs/" + job_id, timeout=10) as r:
+            job = json.loads(r.read())
+        self.assertFalse(job["tester"])
+        self.assertNotIn(secret, json.dumps(job))
+
+        code, body = post("/api/perform", header="wrong-token")
+        self.assertEqual(code, 429)
+        self.assertEqual(body["code"], "rate")
+        self.assertIn("Daily limit reached (1 Performs from this network).", body["error"])
+        self.assertNotIn("tomorrow", body["error"])
+        self.assertRegex(body["error"], r"Try again after \d{1,2}:\d{2} [AP]M UTC\.")
+        self.assertIsInstance(body["retry_after_s"], int)
+        self.assertGreater(body["retry_after_s"], 0)
+        self.assertRegex(body["retry_at"], r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+        self.assertNotIn(secret, json.dumps(body))
+        code, missing = post("/api/perform")
+        self.assertEqual(code, 429)
+        self.assertEqual(missing["code"], "rate")
+        code, admin = post("/api/perform", header="admin-secret")
+        self.assertEqual(code, 429)
+
+        code, body = post("/api/perform", header=secret)
+        self.assertEqual(code, 202, body)
+        self.assertNotIn(secret, json.dumps(body))
+        with urllib.request.urlopen(base + "/api/jobs/" + body["id"], timeout=10) as r:
+            passed = json.loads(r.read())
+        self.assertTrue(passed["tester"])
+        self.assertNotIn(secret, json.dumps(passed))
+        stored = app.store.get(body["id"])
+        self.assertTrue(stored["request"]["tester"])
+        self.assertNotIn(secret, json.dumps(stored["request"]))
+        code, again = post("/api/perform", header=secret)
+        self.assertEqual(code, 202, again)
+        self.assertEqual(app.store.db.execute("SELECT COUNT(*) c FROM ip_hits").fetchone()["c"], 1)
+
+        code, gathered = post("/api/gather")
+        self.assertEqual(code, 429)
+        self.assertIn("Daily limit reached", gathered["error"])
+        app.runner.run_job = lambda job_id: None
+        code, gathered = post("/api/gather", header=secret)
+        self.assertNotEqual(code, 429)
+        self.assertNotIn(secret, json.dumps(gathered))
+        gather_id = gathered.get("gather_id") or gathered.get("id")
+        self.assertTrue(str(gather_id).startswith("g-"))
+        with urllib.request.urlopen(base + "/api/jobs/" + gather_id, timeout=10) as r:
+            gjob = json.loads(r.read())
+        self.assertTrue(gjob["tester"])
+        self.assertNotIn(secret, json.dumps(gjob))
+        self.assertEqual(app.store.db.execute("SELECT COUNT(*) c FROM ip_hits").fetchone()["c"], 1)
+
+        hard = _settings(tmp + "-hard", suppliers="http://127.0.0.1/suppliers.json", llm_base="", llm_model="")
+        hard.queue_autostart = False
+        hard.tester_token = secret
+        hard.daily_hard_usd = 5
+        hard.daily_soft_usd = 3
+        app_hard, httpd_hard = _api(hard)
+        app_hard.store.add_spend(5)
+        self.addCleanup(_close, httpd_hard)
+        hard_base = f"http://127.0.0.1:{httpd_hard.server_address[1]}"
+        req = urllib.request.Request(
+            hard_base + "/api/perform",
+            json.dumps({"composition": "1 min. Cm.", "performance": "soft", "title": "Gate"}).encode(),
+            {"Content-Type": "application/json", "X-NC-Tester": secret},
+        )
+        try:
+            urllib.request.urlopen(req, timeout=10)
+            self.fail("expected 503")
+        except urllib.error.HTTPError as e:
+            raw = e.read().decode()
+            self.assertEqual(e.code, 503)
+            self.assertIn("resting", raw)
+            self.assertNotIn(secret, raw)
+        self.assertEqual(app_hard.store.db.execute("SELECT COUNT(*) c FROM ip_hits").fetchone()["c"], 0)
+
+        soft = _settings(tmp + "-soft", suppliers="http://127.0.0.1/suppliers.json", llm_base="", llm_model="")
+        soft.queue_autostart = False
+        soft.tester_token = secret
+        soft.daily_hard_usd = 5
+        soft.daily_soft_usd = 3
+        app_soft, httpd_soft = _api(soft)
+        app_soft.store.add_spend(4)
+        self.addCleanup(_close, httpd_soft)
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{httpd_soft.server_address[1]}/api/perform",
+            json.dumps({"composition": "1 min. Cm.", "performance": "soft", "title": "Gate"}).encode(),
+            {"Content-Type": "application/json", "X-NC-Tester": secret},
+        )
+        with urllib.request.urlopen(req, timeout=10) as r:
+            self.assertEqual(r.status, 202)
 
     def test_e2e_perform_through_the_kit(self):
         tmp = tempfile.mkdtemp(prefix="nc-e2e-")

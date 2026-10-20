@@ -58,6 +58,7 @@ jobs:
           TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
           NC_SIGNING_KEY: ${{ secrets.NC_SIGNING_KEY }}
           NC_ADMIN_TOKEN: ${{ secrets.NC_ADMIN_TOKEN }}
+          NC_TESTER_TOKEN: ${{ secrets.NC_TESTER_TOKEN }}
         run: |
           set -euo pipefail
           put() {
@@ -76,3 +77,4 @@ jobs:
           put TURNSTILE_SECRET_KEY "${TURNSTILE_SECRET_KEY}"
           put NC_SIGNING_KEY "${NC_SIGNING_KEY}"
           put NC_ADMIN_TOKEN "${NC_ADMIN_TOKEN}"
+          put NC_TESTER_TOKEN "${NC_TESTER_TOKEN}"

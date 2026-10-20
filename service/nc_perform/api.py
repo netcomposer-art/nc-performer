@@ -19,7 +19,7 @@ from ncperf import record as R
 
 from . import keep as K
 from . import pages
-from .config import Settings, load
+from .config import Settings, load, tester_pass
 from .ids import ID_RE, claim_token, new_id, sha256_text
 from .jobs import Store
 from .limits import Reject, check_words
@@ -125,7 +125,7 @@ def make_handler(app: App):
 
         def _cors(self):
             self.send_header("Access-Control-Allow-Origin", "*")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-NC-Tester")
             self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 
         def _send(self, status, body, content_type="application/json", extra=None):
@@ -159,6 +159,27 @@ def make_handler(app: App):
         def _ip_hash(self) -> str:
             import hashlib
             return hashlib.sha256(f"{app.settings.ip_hash_salt}:{self._ip()}".encode()).hexdigest()
+
+        def _rate_block_or_tester(self) -> tuple[bool, bool]:
+            """(allowed, tester). A matching X-NC-Tester skips the 10-minute and daily counters.
+
+            Turnstile, size limits, and the daily cost caps are checked by the caller.
+            The header value is not stored.
+            """
+            tester = tester_pass(self.headers.get("X-NC-Tester"), app.settings.tester_token)
+            if tester:
+                return True, True
+            s = app.settings
+            block = app.store.hit(self._ip_hash(), s.rate_per_10min, s.rate_per_ip_day)
+            if not block:
+                return True, False
+            self._send(429, {
+                "error": block.error,
+                "code": "rate",
+                "retry_after_s": block.retry_after_s,
+                "retry_at": block.retry_at,
+            })
+            return False, False
 
         def do_OPTIONS(self):
             self._send(204, b"")
@@ -299,9 +320,9 @@ def make_handler(app: App):
                 avoid_samples = previous.get("picked_sample_ids") or []
             else:
                 excluded = None
-            limit = app.store.hit(self._ip_hash(), s.rate_per_10min, s.rate_per_ip_day)
-            if limit:
-                return self._send(429, {"error": limit, "code": "rate"})
+            allowed, tester = self._rate_block_or_tester()
+            if not allowed:
+                return
             if app.store.queued_count() >= s.max_queue or app.store.running_count() >= s.max_concurrency:
                 return self._send(503, {"error": "Busy, try in a minute.", "code": "busy"})
             seed = choose_seed(body)
@@ -316,6 +337,7 @@ def make_handler(app: App):
                 "avoid_keys": avoid_keys,
                 "avoid_sample_ids": avoid_samples,
                 "excluded_gather_id": excluded,
+                "tester": tester,
             }
             app.store.create({
                 "id": job_id,
@@ -364,9 +386,9 @@ def make_handler(app: App):
                 gather_id = None
             if plan is not None and not isinstance(plan, dict):
                 raise Reject("plan must be a JSON object.")
-            limit = app.store.hit(self._ip_hash(), s.rate_per_10min, s.rate_per_ip_day)
-            if limit:
-                return self._send(429, {"error": limit, "code": "rate"})
+            allowed, tester = self._rate_block_or_tester()
+            if not allowed:
+                return
             if app.store.queued_count() >= s.max_queue:
                 return self._send(503, {"error": "Busy, try in a minute.", "code": "busy"})
             visibility = body.get("visibility") or "unlisted"
@@ -387,6 +409,7 @@ def make_handler(app: App):
                 "seed": int(seed),
                 "keep": bool(body.get("keep")),
                 "claim_hash": sha256_text(token),
+                "tester": tester,
             }
             app.store.create({
                 "id": job_id,
@@ -997,6 +1020,13 @@ def _perform_gather(app: App, body: dict):
     return {"gather_id": gather_id, "plan": plan, "composition": comp, "seed": seed}
 
 
+def _was_tester(job, status) -> bool:
+    req = (job or {}).get("request") if isinstance((job or {}).get("request"), dict) else {}
+    if req.get("tester") is True:
+        return True
+    return isinstance(status, dict) and status.get("tester") is True
+
+
 def _public_job(job_id, state, stage, percent, error, app: App, position=None, job=None, status=None) -> dict:
     from ncperf.progress import public_fields
 
@@ -1014,6 +1044,7 @@ def _public_job(job_id, state, stage, percent, error, app: App, position=None, j
         "trimmed": fields["trimmed"],
         "found_sounds": fields["found_sounds"],
         "stage_line": fields["stage_line"],
+        "tester": _was_tester(job, status if isinstance(status, dict) else None),
     }
     sounds = None
     result = (job or {}).get("result") if isinstance((job or {}).get("result"), dict) else {}

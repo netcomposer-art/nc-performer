@@ -202,10 +202,12 @@ class Runner:
             self.store.add_spend(cost)
             self.store.update(job_id, cost_usd=round(cost, 6))
             row = self.store.get(job_id) or {}
+            req_row = row.get("request") if isinstance(row.get("request"), dict) else {}
             print(json.dumps({
                 "event": "job",
                 "id": job_id,
                 "ip_hash": row.get("ip_hash"),
+                "tester": req_row.get("tester") is True,
                 "outcome": row.get("state"),
                 "error_code": row.get("error_code"),
                 "stage_s": {k: round(v, 3) for k, v in stage_t.items()},
@@ -549,6 +551,8 @@ class Runner:
         status["seed"] = seed
         status["found_sounds"] = merge_sounds(snap.get("found_sounds"), sounds_from_sources(plan_doc.get("sources")))
         status["stage_line"] = STAGE_LINES["done"]
+        if (req or {}).get("tester") is True:
+            status["tester"] = True
         card = llm_price_card(self.settings)
         spent = usage or {}
         status["cost_estimate"] = {
@@ -592,7 +596,12 @@ class Runner:
             self._settle_cancelled(job_id)
             return
         self.store.update(job_id, state=state, stage=state, percent=100, error=message, error_code=code)
-        body = json.dumps({"id": job_id, "state": state, "error": message, "error_code": code, "at": _utc()}).encode()
+        failed = self.store.get(job_id) or {}
+        failed_req = failed.get("request") if isinstance(failed.get("request"), dict) else {}
+        note = {"id": job_id, "state": state, "error": message, "error_code": code, "at": _utc()}
+        if failed_req.get("tester") is True:
+            note["tester"] = True
+        body = json.dumps(note).encode()
         try:
             self.storage.put(f"jobs/{job_id}/status.json", body, "application/json")
         except Exception:
