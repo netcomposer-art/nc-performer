@@ -169,3 +169,58 @@ export function applyPerformHit(
     dayHit: { day, n: dayN + 1 },
   };
 }
+
+/** Short lines the Create page shows. A search replaces the stage line with "Finding …". */
+export const STAGE_LINES: Record<string, string> = {
+  queued: "Queued",
+  planning: "Reading the notes…",
+  fetching: "Fetching the recordings…",
+  measuring: "Checking each note's pitch…",
+  rendering: "Playing the chords…",
+  reverb: "Adding the room…",
+  mastering: "Setting the loudness…",
+  verifying: "Checking the record…",
+  storing: "Storing the Performance…",
+  done: "Done",
+  failed: "Something went wrong.",
+  rejected: "This Performance was refused.",
+};
+
+export type FoundSound = { title: string; supplier: string; license: string };
+
+export function foundSounds(rows: unknown): FoundSound[] {
+  if (!Array.isArray(rows)) return [];
+  const out: FoundSound[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    if (!row || typeof row !== "object") continue;
+    const item = row as Record<string, unknown>;
+    const title = String(item.title || "").trim();
+    const supplier = String(item.supplier || "").trim();
+    const license = String(item.license || "").trim();
+    if (!title || !supplier || !license) continue;
+    const key = `${title}\0${supplier}\0${license}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ title, supplier, license });
+  }
+  return out;
+}
+
+export function jobStatusFields(input: {
+  stage?: string | null;
+  position?: number | null;
+  seed?: unknown;
+  trimmed?: unknown;
+  found_sounds?: unknown;
+  stage_line?: unknown;
+}): { seed: number | null; trimmed: string | null; found_sounds: FoundSound[]; stage_line: string } {
+  let seed: number | null = null;
+  if (typeof input.seed === "number" && Number.isFinite(input.seed)) seed = input.seed;
+  else if (typeof input.seed === "string" && input.seed.trim() && Number.isFinite(Number(input.seed))) seed = Number(input.seed);
+  const trimmed = typeof input.trimmed === "string" && input.trimmed.trim() ? input.trimmed.trim() : null;
+  const stage = input.stage || "";
+  let line = typeof input.stage_line === "string" && input.stage_line.trim() ? input.stage_line.trim() : STAGE_LINES[stage] || stage || STAGE_LINES.planning;
+  if (stage === "queued" && input.position) line = `Queued (position ${input.position})`;
+  return { seed, trimmed, found_sounds: foundSounds(input.found_sounds), stage_line: line };
+}

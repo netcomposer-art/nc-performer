@@ -54,6 +54,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+          FREESOUND_API_KEY: ${{ secrets.FREESOUND_API_KEY }}
           TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
           NC_SIGNING_KEY: ${{ secrets.NC_SIGNING_KEY }}
           NC_ADMIN_TOKEN: ${{ secrets.NC_ADMIN_TOKEN }}
@@ -71,6 +72,7 @@ jobs:
             echo "Set Worker secret ${name}."
           }
           put XAI_API_KEY "${XAI_API_KEY}"
+          put FREESOUND_API_KEY "${FREESOUND_API_KEY}"
           put TURNSTILE_SECRET_KEY "${TURNSTILE_SECRET_KEY}"
           put NC_SIGNING_KEY "${NC_SIGNING_KEY}"
           put NC_ADMIN_TOKEN "${NC_ADMIN_TOKEN}"

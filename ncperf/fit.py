@@ -89,6 +89,12 @@ def fit_plan(
         for note in notes:
             if note not in existing:
                 existing.append(note)
+        text = " ".join(notes)
+        prior = plan.get("trimmed")
+        if not prior:
+            plan["trimmed"] = text
+        elif text not in str(prior):
+            plan["trimmed"] = str(prior).rstrip() + " " + text
     return notes
 
 

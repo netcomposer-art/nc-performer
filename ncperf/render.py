@@ -63,10 +63,22 @@ class Renderer:
         if dur: z = z[:int(dur * SR)]
         return z, (so if self.P['sources'][sid].get('segment') is None else r['offset_s'])
 
+    def _lead(self, ly, i, default):
+        table = ly.get('lead_by_chord') or {}
+        if str(i) in table:
+            return float(table[str(i)])
+        return float(ly.get('lead_s', default))
+
     def put(self, bus, z, t0, g, sid, **meta):
+        if t0 < 0:
+            drop = int(round(-t0 * SR))
+            if drop >= len(z):
+                return
+            z = z[drop:]
+            t0 = 0.0
         if bus not in self.bus: self.bus[bus] = np.zeros((self.L, 2))
         i = int(round(t0 * SR)); n = min(len(z), self.L - i)
-        if n > 0: self.bus[bus][i:i + n] += z[:n] * g
+        if n > 0 and i < self.L: self.bus[bus][i:i + n] += z[:n] * g
         m = self.meas.get((sid, meta.get('midi'))) if meta.get('midi') is not None else None
         self.uses.append(dict(key=sid, layer=bus, at_s=round(t0, 3), len_s=round(len(z) / SR, 3), gain_db=round(20 * np.log10(max(g, 1e-9)), 2), pitch_shift=False, **meta))
 
@@ -76,9 +88,16 @@ class Renderer:
     def L_chord_notes(self, ly):
         C = self.chords(); last_i = len(C) - 1
         for pc in ly['per_chord']:
-            i = pc['chord']; c = C[i]; last = (i == last_i); notes = c['voicing']
+            i = pc['chord']; c = C[i]; last = (i == last_i); notes = list(c['voicing'])
+            if pc.get('midi'):
+                allowed = {int(m) for m in c['voicing']}
+                picked = [int(m) for m in pc['midi'] if int(m) in allowed]
+                if picked:
+                    notes = picked
+            g_scale = float(pc.get('gain') or 1.0)
+            style = pc.get('style') or ly.get('style', 'strike')
             for k, off in enumerate(pc.get('strikes_at', [0.0])):
-                if ly.get('style', 'strike') == 'roll':
+                if style == 'roll':
                     lo, hi = ly.get('spread_s', [0.15, 0.45]); sp = self.rng.uniform(lo, hi); dts = [j * sp / max(1, len(notes) - 1) for j in range(len(notes))]
                 else: dts = sorted(self.rng.uniform(0, ly.get('jitter_s', 0.05)) for _ in notes)
                 g0 = ly.get('first_gain', 0.85) if k == 0 else ly.get('restrike_gain', 0.5)
@@ -87,9 +106,24 @@ class Renderer:
                     sid = self.pick(bank, m) if bank else None
                     gj = self.rng.uniform(*ly.get('gain_jitter', [0.8, 1.0]))
                     if sid is None: continue
-                    z, so = self.note(sid, ly.get('last_note_s', 12.0) if last else ly.get('note_s', 9.0))
-                    z = fade(z, 0.02, ly.get('last_fade_out_s', 6.0) if last else ly.get('fade_out_s', 3.5))
-                    self.put(ly.get('bus', 'keys'), z, c['t'] + ly.get('offset_s', 0.4) + off + dt, g0 * gj * ly.get('gain', 1.0), sid, chord_index=i, midi=m,
+                    if last and pc.get('last_note_s'):
+                        sounding = float(pc['last_note_s'])
+                    elif pc.get('note_s'):
+                        sounding = float(pc['note_s'])
+                    else:
+                        sounding = ly.get('last_note_s', 12.0) if last else ly.get('note_s', 9.0)
+                    fade_out = float(pc['fade_out_s']) if pc.get('fade_out_s') else (ly.get('last_fade_out_s', 6.0) if last else ly.get('fade_out_s', 3.5))
+                    if pc.get("sustain"):
+                        z, so = self.note(sid)
+                        if len(z) + int(0.05 * SR) < int(sounding * SR):
+                            # The recording is shorter than this lingering chord. Repeat it unaltered.
+                            z = loop_unaltered(z, sounding)
+                        else:
+                            z = z[:int(sounding * SR)]
+                    else:
+                        z, so = self.note(sid, sounding)
+                    z = fade(z, 0.02, fade_out)
+                    self.put(ly.get('bus', 'keys'), z, c['t'] + ly.get('offset_s', 0.4) + off + dt, g0 * gj * ly.get('gain', 1.0) * g_scale, sid, chord_index=i, midi=m,
                              source_offset_s=round(so, 3), time_stretch=1.0, role=ly.get('role', ly['id']))
 
     def L_chord_pad(self, ly):
@@ -105,7 +139,8 @@ class Renderer:
                 z, so = self.note(sid, b + 0.2); seg = z[int(a * SR):int(b * SR)]
                 zz = loop_unaltered(seg, plen)
                 zz = fade(zz[:int(plen * SR)], ly.get('fade_in_s', 3.0) if i else ly.get('first_fade_in_s', 4.5), ly.get('last_fade_out_s', 8.0) if last else ly.get('fade_out_s', 4.5))
-                t0 = max(0.0, c['t'] - ly.get('lead_s', 1.5)) if i else 0.0
+                lead = self._lead(ly, i, 1.5)
+                t0 = max(0.0, c['t'] - lead) if i else 0.0
                 self.put(ly.get('bus', 'pad'), zz, t0, ly.get('gain_total', 0.7) / np.sqrt(len(c['voicing'])), sid, chord_index=i, midi=m, source_offset_s=round(so + a, 3),
                          source_len_s=round(b - a, 3), time_stretch=1.0, role=ly.get('role', ly['id']) + f' ({bank})')
 
@@ -119,7 +154,8 @@ class Renderer:
                 z, so = self.note(sid); a = ly.get('trim_start_s', 0.3); seg = z[int(a * SR):int((len(z) / SR - ly.get('trim_end_s', 0.4)) * SR)]
                 zz = fade(loop_unaltered(seg, plen)[:int(plen * SR)], ly.get('fade_in_s', 2.5), ly.get('last_fade_out_s', 8.0) if last else ly.get('fade_out_s', 4.0))
                 g = ly.get('gain_low', ly.get('gain', 0.4)) if m < 48 else ly.get('gain', 0.4)
-                self.put(ly.get('bus', 'pad'), zz, max(0.0, c['t'] - ly.get('lead_s', 1.0)) if i else ly.get('first_t_s', 0.0), g, sid, chord_index=i, midi=m,
+                lead = self._lead(ly, i, 1.0)
+                self.put(ly.get('bus', 'pad'), zz, max(0.0, c['t'] - lead) if i else ly.get('first_t_s', 0.0), g, sid, chord_index=i, midi=m,
                          source_offset_s=round(so + a, 3), source_len_s=round(len(seg) / SR, 3), time_stretch=1.0, role=ly.get('role', ly['id']))
 
     def L_drone(self, ly):
@@ -153,7 +189,10 @@ class Renderer:
             if e.get('stretch_to_s'):
                 raise RuntimeError('time-stretch is not allowed')
             z = fade(z, e.get('fade_in_s', 0.01), e.get('fade_out_s', 3.0))
-            self.put(ly.get('bus', ly['id']), z, e['t'], e.get('gain', 1.0), sid, midi=s.get('expect_midi'), source_offset_s=round(so, 3), time_stretch=1.0, role=e.get('role', ly.get('role', ly['id'])))
+            meta = {}
+            if e.get('chord_index') is not None:
+                meta['chord_index'] = e['chord_index']
+            self.put(ly.get('bus', ly['id']), z, e['t'], e.get('gain', 1.0), sid, midi=s.get('expect_midi'), source_offset_s=round(so, 3), time_stretch=1.0, role=e.get('role', ly.get('role', ly['id'])), **meta)
 
     def L_notes(self, ly):
         half = ly.get('half_s', self.END / 2); first_db = ly.get('first_half_db', 0.0)

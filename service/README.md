@@ -4,7 +4,7 @@ This folder is a small website in front of the NetComposer Performer kit in the 
 
 You write a Composition. Perform searches openly licensed sounds across registered Suppliers and the open commons with no supplier preferred, checks the license, and renders a Performance. Pitch is never shifted, and this search does not time-stretch. The sound is shaped by **hacks** (trim, fade, reverb, a loudness limiter). The output is [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). The code is MIT, Copyright (c) 2026 Peter Semmelhack.
 
-An optional `instrument` field on `POST /api/perform` is a timbre hint (`choir`, `synth`, `piano`). It is matched against every source. It does not select musicmatter. A chord strike is a whole-chord file of that chord, or the same chord assembled from single notes at their recorded pitch. No origin is more than half the strikes unless the notes name it. The record's `summary.source_mix` lists that strike share.
+An optional `instrument` field on `POST /api/perform` is a timbre hint (`choir`, `synth`, `piano`). It is matched against every source. It does not select musicmatter. A chord strike is a whole-chord file of that chord, or the same chord assembled from single notes at their recorded pitch. One take keeps one ensemble and reuses those sounds across the chords. The next take, or Perform again, can choose a different ensemble. A Performance is not refused because only one or two origins answered. The record's `summary.source_mix` lists that strike share.
 
 You can run it on your own computer. You do not need an account on netcomposer.art. A record made here, or with the kit, can move to any other instance with `nc submit`.
 
@@ -32,7 +32,20 @@ There are no user accounts in v1. Each Performance comes with a `claim_token`, s
 - No `kind=url` sources. The service will not fetch an arbitrary URL.
 - The transforms are called hacks.
 
-AI planning runs only when the words ask for a line, triplets, or sections. Otherwise even-handed source discovery runs and no model is called. `summary.source_mix` on the record lists how many clips came from each origin. The hosted default model is `grok-4.3` at `https://api.x.ai/v1`. Set `XAI_API_KEY` and nothing else, and the kit posts to `{base}/chat/completions` with that model. If you set `NC_LLM_BASE_URL` yourself, that host is used instead. Tests point that URL at a local mock. They never call api.x.ai.
+AI planning runs only when the words ask for a line, triplets, or sections. Set `NC_LLM_EVERY_PERFORM=1` to send every Perform through the model. That flag defaults off, so the current behaviour stays until you turn it on. When the model is not used, phrase mapping still changes the plan: ring, space, distance, a plucked string, a fat synth, and "then" are read from the words. One take keeps one ensemble. Inside that ensemble the arrangement changes from chord to chord (who plays, when, how thick, how loud) unless the words ask for something steady, such as "repeat the same sounds over and over". Chord lengths vary too: some linger, some pass, some arrive early or late, unless the words lock a pulse ("steady pulse", "one chord per bar", "10 seconds per chord"). Words that ask a chord to ring or to be legato keep that sound going for the whole written length: the recording is started again, overlapped, and never time-stretched, so a long chord does not open a silence. A bar table in several columns is read in bar order, and chord words in the prose are not added. When every chord has a written length — `[2 bars Cm]`, `Cm (2 bars)`, or `Cm for 4 beats` — with a tempo (`60 BPM` or `quarter = 60`) and a meter (`4/4` by default, also `3/4`, `6/8`, `2/2`), that clock is kept, including `at bar 12, 80 BPM`. Uneven lengths are only used when the Composition does not set them. A written proportion, such as "second half", keeps that boundary and the total length, and the chords inside it still vary. The record's timeline and each sound's spans carry those real start and end times. A named voice that cannot play a chord is left out of that chord, and the record says which chords it missed, instead of swapping in a different instrument. Those choices are seeded and stored on `source_mix.arrangement` in the record. `summary.source_mix` on the record lists how many clips came from each origin. The hosted default model is `grok-4.3` at `https://api.x.ai/v1`. Set `XAI_API_KEY` and nothing else, and the kit posts to `{base}/chat/completions` with that model. If you set `NC_LLM_BASE_URL` yourself, that host is used instead. Tests point that URL at a local mock. They never call api.x.ai.
+
+`GET /api/config` includes `llm_price`: the model name, USD per million tokens in, cached, and out, and the page those prices came from (`https://docs.x.ai/docs/models`, grok-4.3 list prices recorded in `service/nc_perform/config.py`: $1.25 / $0.20 cached / $2.50 per million). A finished job's status adds `cost_estimate` with that card. When the model actually ran, it also includes the token counts and `usd` (tokens times those prices). No typical token count is invented.
+
+`GET /api/jobs/:id` always includes four fields the site reads while the job is running:
+
+- `trimmed`: a plain-English note when the plan was shortened to fit a limit, or `null` when nothing was cut. The same note is copied into the record's known compromises. A musical surprise is not a trim.
+- `seed`: the seed used for this take. An omitted seed is random. Pass `seed` when you want the same take again.
+- `found_sounds`: `[{title, supplier, license}]`, filled as sources are actually found. Rows without a title, supplier, and license are left out. Nothing is invented.
+- `stage_line`: a short sentence for the current stage, such as `Finding a choir on Freesound…`.
+
+The signed record still carries `performance.timeline` and `sounds_used[].spans` as kit 0.2.0 writes them.
+
+Freesound is queried through its official API when the Worker secret `FREESOUND_API_KEY` is set. If the secret is missing, or the API fails, the HTML search is used. The deploy workflow writes the secret only when it is non-empty.
 
 A soft daily cap of $3 switches new jobs to the stub. A hard cap of $5 answers "Perform is resting until tomorrow."
 
@@ -45,7 +58,7 @@ Keep with a JSON `{claim_token}` body still keeps the original render. When the 
 | Method and path | What it does |
 |---|---|
 | `POST /api/perform` | Start a Performance. Body: `title`, `composer`, `composition`, `performance`, optional `plan`, `visibility` (`unlisted` or `public`), `seed`, `perform_again`, `turnstile_token`, `keep`. Returns `202` with `id`, `claim_token` (once), and `record_url`. |
-| `GET /api/jobs/:id` | Status. `state` moves through queued, planning, fetching, measuring, rendering, reverb, mastering, verifying, storing, then done, failed, or rejected. |
+| `GET /api/jobs/:id` | Status. `state` moves through queued, planning, fetching, measuring, rendering, reverb, mastering, verifying, storing, then done, failed, or rejected. The body always includes `trimmed` (string or null), `seed`, `found_sounds`, and `stage_line`. |
 | `GET /api/jobs/:id/events` | The same status as a stream. |
 | `GET /api/jobs/:id/files/:name` | FLAC, MP3, the dialed `kept.wav` (and `kept.mp3` when the mirror made one), record, plan, and the other stored files. Expired or taken-down audio is `410`. `flac` and `mp3` on the job stay the original render. |
 | `POST /api/jobs/:id/keep` | JSON `{claim_token}` keeps the original audio. Multipart `claim_token`, `dials`, and `audio` (WAV) stores the dialed file, sets `live_dials`, and answers `{ok, processed:true, dials, audio_url}`. The signed record is unchanged. |
@@ -170,11 +183,12 @@ Do these steps once, in order.
    | `CLOUDFLARE_ACCOUNT_ID` | Already created. The workflow stops with an error if this is missing. |
    | `TURNSTILE_SECRET_KEY` | Add this. It is the secret half of the widget whose site key is `0x4AAAAAAFbvFabFcwn6LUki`. If you leave it empty, the workflow skips it and the bot check stays off. |
    | `XAI_API_KEY` | Add this. The key from step 3. If you leave it empty, the workflow skips it and planning stays on the stub. |
+   | `FREESOUND_API_KEY` | Add this when you want the official Freesound API. If you leave it empty, the workflow skips it and search falls back to the Freesound HTML page. |
    | `NC_SIGNING_KEY` | Add this. The PEM from step 4. If you leave it empty, the workflow skips it and hosted records stay unsigned. |
    | `NC_ADMIN_TOKEN` | Add this. Generate it with `openssl rand -hex 32` and paste that one line. It is the Bearer token for `/admin`. If you leave it empty, the workflow skips it and `/admin` stays off. |
 
    Never paste those values into a chat, an issue, or a commit.
-6. Deploy by hand: Actions → **Deploy Perform** → **Run workflow**. The workflow checks out the repo, refuses to continue when `CLOUDFLARE_API_TOKEN` or `CLOUDFLARE_ACCOUNT_ID` is missing, runs `wrangler deploy` from `service/worker`, then sets `XAI_API_KEY`, `TURNSTILE_SECRET_KEY`, `NC_SIGNING_KEY`, and `NC_ADMIN_TOKEN` only when that GitHub secret has a value. It has no push trigger.
+6. Deploy by hand: Actions → **Deploy Perform** → **Run workflow**. The workflow checks out the repo, refuses to continue when `CLOUDFLARE_API_TOKEN` or `CLOUDFLARE_ACCOUNT_ID` is missing, runs `wrangler deploy` from `service/worker`, then sets `XAI_API_KEY`, `FREESOUND_API_KEY`, `TURNSTILE_SECRET_KEY`, `NC_SIGNING_KEY`, and `NC_ADMIN_TOKEN` only when that GitHub secret has a value. It has no push trigger.
 7. When the run finishes, the log prints a `*.workers.dev` URL. That is the site. Open it and run one short Composition.
 8. Leave the DNS for netcomposer.art alone. The Worker does not require that domain. A custom hostname can be attached later if the DNS moves to Cloudflare.
 
@@ -188,4 +202,4 @@ A failed Perform should say `Something went wrong while performing. Please try a
 
 Only the container calls the model, and only when the words need it and the soft budget still has room.
 
-`XAI_API_KEY` selects `https://api.x.ai/v1` and `grok-4.3`. The kit function is `ncperf.interpret.llm`. It sends `POST {NC_LLM_BASE_URL}/chat/completions` with `Authorization: Bearer <key>`. The service wraps that post only to read `usage` for the cost log. Prices used for the estimate are $1.25 / $0.20 cached / $2.50 per million tokens. An explicit `NC_LLM_BASE_URL` wins over the xAI default, which is how tests substitute a mock.
+`XAI_API_KEY` selects `https://api.x.ai/v1` and `grok-4.3`. The kit function is `ncperf.interpret.llm`. It sends `POST {NC_LLM_BASE_URL}/chat/completions` with `Authorization: Bearer <key>`. The service wraps that post only to read `usage` for the cost log. Prices used for the estimate are $1.25 / $0.20 cached / $2.50 per million tokens, from the xAI model docs (https://docs.x.ai/docs/models), overridable with `NC_LLM_USD_PER_TOKEN_IN`, `NC_LLM_USD_PER_TOKEN_CACHED`, and `NC_LLM_USD_PER_TOKEN_OUT`. An explicit `NC_LLM_BASE_URL` wins over the xAI default, which is how tests substitute a mock. `NC_LLM_EVERY_PERFORM` defaults off.

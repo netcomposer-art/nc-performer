@@ -7,6 +7,7 @@ Three ways in, all producing the same schema (ncperf/schema/plan.schema.json):
 """
 import datetime, json, os, re, urllib.request, urllib.error
 from . import chords as CH
+from . import take
 from .schema import SCHEMA, validate
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -58,19 +59,25 @@ def _length(text):
 # ---------------- stub (rule-based, no LLM) ----------------
 def stub(comp, seed=1, length_s=None, plan_id=None):
     words = comp['composition'] + ' ' + comp['performance']
-    found = CH.find_full(comp['composition']) or CH.find_full(words); syms = [s for s, _ in found]
+    found = take.composition_chords(comp['composition']) or CH.find_full(words); syms = [s for s, _ in found]
     if not syms: raise ValueError('no chord symbols found in the Composition (e.g. "Cm, Am, F"); write a plan by hand or use an LLM')
-    L = length_s or _length(words)
-    n = len(syms); nb, bs = _bars(words)
-    reps = 1 if (nb and nb == n) else max(1, round(L / (n * 9.0))); seq = found * reps; dur = L / len(seq)
-    prev = None; chords = []; sources = {}; mm = []
+    written = None if length_s else take.written_durations(comp['composition'], found)
+    if written:
+        seq = list(found); durs = list(written); L = sum(durs)
+    else:
+        L = length_s or _length(words)
+        n = len(syms); nb, bs = _bars(words)
+        reps = 1 if (nb and nb == n) else max(1, round(L / (n * 9.0))); seq = found * reps; durs = [L / len(seq)] * len(seq)
+    prev = None; chords = []; sources = {}; mm = []; cursor = 0.0
     for i, (s, bass) in enumerate(seq):
         path, notes = CH.pick(s, prev, bass=bass); prev = notes
         sid = 'mm-' + path.split('/')[1]
+        dur = durs[i]
         sources[sid] = dict(kind='supplier', manifest=CH.manifest_url(path), pitched=False)
-        chords.append(dict(t=round(i * dur, 3), dur=round(dur, 3), symbol=s, voicing=notes, section='A'))
-        mm.append(dict(t=round(i * dur + 0.3, 3), source=sid, offset_s=0.0, dur_s=4.3, fade_in_s=0.02, fade_out_s=2.0, gain=0.8, role='chord strike (full chord set)'))
-        mm.append(dict(t=round(i * dur + dur / 2 + 0.3, 3), source=sid, offset_s=0.0, dur_s=4.3, fade_in_s=0.02, fade_out_s=2.0, gain=0.45, role='chord restrike (full chord set)'))
+        chords.append(dict(t=round(cursor, 3), dur=round(dur, 3), symbol=s, voicing=notes, section='A'))
+        mm.append(dict(t=round(cursor + 0.3, 3), source=sid, offset_s=0.0, dur_s=4.3, fade_in_s=0.02, fade_out_s=2.0, gain=0.8, role='chord strike (full chord set)'))
+        mm.append(dict(t=round(cursor + dur / 2 + 0.3, 3), source=sid, offset_s=0.0, dur_s=4.3, fade_in_s=0.02, fade_out_s=2.0, gain=0.45, role='chord restrike (full chord set)'))
+        cursor += dur
     pad = []
     for i, c in enumerate(chords):
         # Hold the chord by overlapping unaltered copies. Each copy keeps the recording's duration and pitch.

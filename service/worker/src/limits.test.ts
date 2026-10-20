@@ -9,6 +9,7 @@ import {
   DEFAULT_LIMITS,
   forPage,
   isInternalFailure,
+  jobStatusFields,
   proxyHosts,
   publicInternalError,
   rejectPlan,
@@ -177,4 +178,28 @@ test("wrangler rate limit is a 10-or-60 second burst, not the 10-minute window",
     { name: "BUDGET", class_name: "BudgetDO" },
     { name: "RENDER", class_name: "RenderContainer" },
   ]);
+});
+
+test("public job status always has trimmed, seed, found sounds, and a stage line", () => {
+  const planning = jobStatusFields({
+    stage: "planning",
+    seed: 11,
+    trimmed: null,
+    stage_line: "Finding a choir on Freesound…",
+    found_sounds: [
+      { title: "Choir", supplier: "Freesound", license: "CC0-1.0" },
+      { title: "", supplier: "Freesound", license: "CC0-1.0" },
+      { title: "Choir", supplier: "Freesound", license: "CC0-1.0" },
+    ],
+  });
+  assert.equal(planning.seed, 11);
+  assert.equal(planning.trimmed, null);
+  assert.equal(planning.stage_line, "Finding a choir on Freesound…");
+  assert.deepEqual(planning.found_sounds, [{ title: "Choir", supplier: "Freesound", license: "CC0-1.0" }]);
+
+  const idle = jobStatusFields({ stage: "queued", position: 2, seed: 4 });
+  assert.equal(idle.trimmed, null);
+  assert.deepEqual(idle.found_sounds, []);
+  assert.equal(idle.stage_line, "Queued (position 2)");
+  assert.equal(idle.seed, 4);
 });

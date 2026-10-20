@@ -27,6 +27,34 @@ def needs_llm(text: str) -> bool:
     return bool(_LINE.search(text or "") or _TRIPLET.search(text or "") or _SECTIONS.search(text or ""))
 
 
+def wants_model(text: str, settings: Settings) -> bool:
+    """Current behaviour unless NC_LLM_EVERY_PERFORM is on. The flag defaults off."""
+    if getattr(settings, "llm_every_perform", False):
+        return True
+    return needs_llm(text)
+
+
+# grok-4.3 list prices, as recorded in config.DEFAULT_LLM_USD.
+# https://docs.x.ai/docs/models (read for the plan on 18 Oct 2026).
+PRICE_SOURCE = "https://docs.x.ai/docs/models"
+
+
+def llm_price_card(settings: Settings) -> dict:
+    """How a Perform's model cost is priced. Token counts are not invented here."""
+    model = settings.llm_model or "grok-4.3"
+    return {
+        "model": model,
+        "usd_per_million": {
+            "in": round(settings.llm_usd_in * 1_000_000, 4),
+            "cached": round(settings.llm_usd_cached * 1_000_000, 4),
+            "out": round(settings.llm_usd_out * 1_000_000, 4),
+        },
+        "source": PRICE_SOURCE,
+        "every_perform": bool(getattr(settings, "llm_every_perform", False)),
+        "formula": "fresh prompt tokens times the input price, plus cached prompt tokens times the cached price, plus completion tokens times the output price",
+    }
+
+
 def cache_key(words: str, seed: int, model: str) -> str:
     blob = json.dumps({"words": words, "seed": seed, "model": model}, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(blob.encode()).hexdigest()
