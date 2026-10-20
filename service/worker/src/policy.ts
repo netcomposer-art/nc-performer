@@ -10,7 +10,7 @@ export function needsLlm(text: string): boolean {
   return LINE.test(text) || TRIPLET.test(text) || SECTIONS.test(text);
 }
 
-export function newId(prefix: "h" | "k" = "h"): string {
+export function newId(prefix: "h" | "k" | "g" = "h"): string {
   const bytes = new Uint8Array(8);
   crypto.getRandomValues(bytes);
   let n = 0n;
@@ -57,7 +57,10 @@ export function rejectPlan(plan: unknown, limits: LimitSettings = DEFAULT_LIMITS
   const p = plan as Record<string, unknown>;
   const sources = (p.sources || {}) as Record<string, { kind?: string }>;
   const nSources = Object.keys(sources).length;
-  if (nSources > limits.maxSources) return `A Performance can use at most ${limits.maxSources} sources.`;
+  // Raw assembly is one file per chord. A stack may hold several note files.
+  // The layered cap stays 24. The 64 KiB plan cap still applies above.
+  const sourceCap = p.assembly === "raw" ? Math.max(limits.maxSources, limits.maxChords * 8) : limits.maxSources;
+  if (nSources > sourceCap) return `A Performance can use at most ${sourceCap} sources.`;
   const chords = Array.isArray(p.chords) ? p.chords.length : 0;
   if (chords > limits.maxChords) return `A Performance can have at most ${limits.maxChords} chords.`;
   const layers = Array.isArray(p.layers) ? p.layers.length : 0;
@@ -92,12 +95,63 @@ export const BURST_PERIOD_S = 10;
 export const BURST_MESSAGE =
   "Too many Performs from this network in a few seconds. Wait a moment and try again.";
 
-export function windowMessage(limit: number): string {
-  return `Too many Performs from this network (${limit} every 10 minutes). Try again in a few minutes.`;
+export const DAY_S = 86400;
+
+export type RateBlock = { error: string; retry_after_s: number; retry_at: string };
+
+export type RateDecision = {
+  error: string | null;
+  retry_after_s: number | null;
+  retry_at: string | null;
+  hits: number[];
+};
+
+/** UTC clock for the fallback sentence. The page should format retry_at locally. */
+export function clockUtc(unix: number): string {
+  const shown = new Date(Math.ceil(unix) * 1000);
+  if (shown.getUTCSeconds() !== 0 || shown.getUTCMilliseconds() !== 0) {
+    shown.setUTCSeconds(0, 0);
+    shown.setUTCMinutes(shown.getUTCMinutes() + 1);
+  }
+  let hour = shown.getUTCHours();
+  const minute = String(shown.getUTCMinutes()).padStart(2, "0");
+  const ampm = hour < 12 ? "AM" : "PM";
+  hour = hour % 12 || 12;
+  return `${hour}:${minute} ${ampm} UTC`;
 }
 
-export function dayMessage(limit: number): string {
-  return `Daily limit reached (${limit} Performs from this network). It resets tomorrow.`;
+export function retryAtIso(unix: number): string {
+  return new Date(unix * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+export function windowMessage(limit: number, when: string): string {
+  return `Too many Performs from this network (${limit} every 10 minutes). Try again after ${when}.`;
+}
+
+export function dayMessage(limit: number, when: string): string {
+  return `Daily limit reached (${limit} Performs from this network). Try again after ${when}.`;
+}
+
+export function burstBlock(now: number): RateBlock {
+  return { error: BURST_MESSAGE, retry_after_s: BURST_PERIOD_S, retry_at: retryAtIso(now + BURST_PERIOD_S) };
+}
+
+/**
+ * True when X-NC-Tester matches NC_TESTER_TOKEN. An empty secret never matches.
+ * Both sides are hashed first so the compare does not stop on length. The token
+ * is not returned.
+ */
+export async function testerPass(header: string | null | undefined, secret: string | null | undefined): Promise<boolean> {
+  const token = (secret || "").trim();
+  const got = (header || "").trim();
+  if (!token || !got) return false;
+  const encode = new TextEncoder();
+  const a = new Uint8Array(await crypto.subtle.digest("SHA-256", encode.encode(got)));
+  const b = new Uint8Array(await crypto.subtle.digest("SHA-256", encode.encode(token)));
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+  return diff === 0;
 }
 
 /** Shown for Worker faults. The real error is logged; the id is how to find it. */
@@ -136,43 +190,44 @@ export function forPage(id: string | null, error: string | null): string | null 
   return isInternalFailure(error) ? publicInternalError(id) : error;
 }
 
-export type Counter = { start: number; n: number };
-export type DayCounter = { day: string; n: number };
-
 /**
- * One Perform against the 10-minute and daily windows.
- * Both caps are checked before either count increases, so a rejection
- * does not consume the other window. `now` is unix seconds.
- * The 10-minute window is fixed from its first hit and lasts WINDOW_S.
+ * One Perform against the rolling 10-minute and 24-hour windows.
+ * Both caps are checked before a hit is added, so a rejection does not
+ * consume either window. `now` and `hits` are unix seconds.
+ * The next free slot is the oldest hit in that window plus the window length.
  */
 export function applyPerformHit(
   now: number,
-  day: string,
-  window: Counter | null,
-  dayHit: DayCounter | null,
+  hits: readonly number[] | null,
   per10min = PER_10MIN,
   perDay = PER_DAY,
-): { error: string | null; window: Counter; dayHit: DayCounter } {
-  const open = window != null && now - window.start < WINDOW_S;
-  const start = open ? window.start : now;
-  const winN = open ? window.n : 0;
-  const dayN = dayHit != null && dayHit.day === day ? dayHit.n : 0;
-  if (winN >= per10min) {
-    return { error: windowMessage(per10min), window: { start, n: winN }, dayHit: { day, n: dayN } };
+): RateDecision {
+  const kept = (hits || []).filter((ts) => ts >= now - DAY_S).sort((a, b) => a - b);
+  const win = kept.filter((ts) => ts >= now - WINDOW_S);
+  if (win.length >= per10min) {
+    return blocked(now, win[0] + WINDOW_S, windowMessage(per10min, clockUtc(win[0] + WINDOW_S)), kept);
   }
-  if (dayN >= perDay) {
-    return { error: dayMessage(perDay), window: { start, n: winN }, dayHit: { day, n: dayN } };
+  if (kept.length >= perDay) {
+    return blocked(now, kept[0] + DAY_S, dayMessage(perDay, clockUtc(kept[0] + DAY_S)), kept);
   }
+  return { error: null, retry_after_s: null, retry_at: null, hits: [...kept, now] };
+}
+
+function blocked(now: number, freeAt: number, error: string, hits: number[]): RateDecision {
+  const at = Math.max(freeAt, now);
   return {
-    error: null,
-    window: { start, n: winN + 1 },
-    dayHit: { day, n: dayN + 1 },
+    error,
+    retry_after_s: Math.max(1, Math.ceil(at - now)),
+    retry_at: retryAtIso(at),
+    hits,
   };
 }
 
 /** Short lines the Create page shows. A search replaces the stage line with "Finding …". */
 export const STAGE_LINES: Record<string, string> = {
   queued: "Queued",
+  gathering: "Gathering the sounds…",
+  gathered: "Gathered.",
   planning: "Reading the notes…",
   fetching: "Fetching the recordings…",
   measuring: "Checking each note's pitch…",
@@ -187,12 +242,49 @@ export const STAGE_LINES: Record<string, string> = {
   cancelled: "Stopped.",
 };
 
-export type FoundSound = { title: string; supplier: string; license: string };
+export type FoundSound = {
+  title: string;
+  supplier: string;
+  license: string;
+  chord?: number;
+  id?: string;
+  preview_url?: string;
+  symbol?: string;
+  clip_id?: string;
+  url?: string;
+  author?: string;
+  credit?: string;
+  page?: string;
+  pos?: number;
+  start_s?: number;
+  end_s?: number;
+  duration_s?: number;
+  loudness_lufs?: number;
+  gain_db?: number;
+};
+
+/** Clip responses: echo netcomposer.art, and allow every other caller. */
+export function corsHeaders(origin: string | null | undefined): Record<string, string> {
+  const headers: Record<string, string> = {
+    "access-control-allow-headers": "Content-Type, Authorization, X-NC-Tester",
+    "access-control-allow-methods": "GET, POST, OPTIONS",
+  };
+  const text = (origin || "").trim();
+  if (/^https:\/\/([a-z0-9-]+\.)*netcomposer\.art$/i.test(text)) {
+    headers["access-control-allow-origin"] = text;
+    headers.vary = "Origin";
+  } else {
+    headers["access-control-allow-origin"] = "*";
+  }
+  return headers;
+}
+
+export const GATHER_CACHE = "public, max-age=31536000, immutable";
 
 export function foundSounds(rows: unknown): FoundSound[] {
   if (!Array.isArray(rows)) return [];
   const out: FoundSound[] = [];
-  const seen = new Set<string>();
+  const seen = new Map<string, number>();
   for (const row of rows) {
     if (!row || typeof row !== "object") continue;
     const item = row as Record<string, unknown>;
@@ -200,10 +292,29 @@ export function foundSounds(rows: unknown): FoundSound[] {
     const supplier = String(item.supplier || "").trim();
     const license = String(item.license || "").trim();
     if (!title || !supplier || !license) continue;
-    const key = `${title}\0${supplier}\0${license}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push({ title, supplier, license });
+    const chord = typeof item.chord === "number" && Number.isFinite(item.chord) ? Math.trunc(item.chord) : null;
+    const key = chord == null ? `${title}\0${supplier}\0${license}` : `chord\0${chord}`;
+    const sound: FoundSound = { title, supplier, license };
+    if (chord != null) sound.chord = chord;
+    if (typeof item.id === "string" && item.id.trim()) sound.id = item.id.trim();
+    if (typeof item.preview_url === "string" && item.preview_url.trim()) sound.preview_url = item.preview_url.trim();
+    if (typeof item.symbol === "string" && item.symbol.trim()) sound.symbol = item.symbol.trim();
+    for (const field of ["clip_id", "url", "author", "credit", "page"] as const) {
+      const value = item[field];
+      if (typeof value === "string" && value.trim()) sound[field] = value.trim();
+    }
+    if (typeof item.pos === "number" && Number.isFinite(item.pos)) sound.pos = Math.trunc(item.pos);
+    for (const field of ["start_s", "end_s", "duration_s", "loudness_lufs", "gain_db"] as const) {
+      const value = item[field];
+      if (typeof value === "number" && Number.isFinite(value)) sound[field] = value;
+    }
+    const at = seen.get(key);
+    if (at != null) {
+      out[at] = sound;
+      continue;
+    }
+    seen.set(key, out.length);
+    out.push(sound);
   }
   return out;
 }
@@ -215,7 +326,8 @@ export function jobStatusFields(input: {
   trimmed?: unknown;
   found_sounds?: unknown;
   stage_line?: unknown;
-}): { seed: number | null; trimmed: string | null; found_sounds: FoundSound[]; stage_line: string } {
+  tester?: unknown;
+}): { seed: number | null; trimmed: string | null; found_sounds: FoundSound[]; stage_line: string; tester: boolean } {
   let seed: number | null = null;
   if (typeof input.seed === "number" && Number.isFinite(input.seed)) seed = input.seed;
   else if (typeof input.seed === "string" && input.seed.trim() && Number.isFinite(Number(input.seed))) seed = Number(input.seed);
@@ -223,5 +335,34 @@ export function jobStatusFields(input: {
   const stage = input.stage || "";
   let line = typeof input.stage_line === "string" && input.stage_line.trim() ? input.stage_line.trim() : STAGE_LINES[stage] || stage || STAGE_LINES.planning;
   if (stage === "queued" && input.position) line = `Queued (position ${input.position})`;
-  return { seed, trimmed, found_sounds: foundSounds(input.found_sounds), stage_line: line };
+  return { seed, trimmed, found_sounds: foundSounds(input.found_sounds), stage_line: line, tester: input.tester === true };
+}
+
+export type RegistryStats = {
+  size: number;
+  ok: number;
+  rejected: number;
+  checker_version: number | null;
+  recheck_days: number | null;
+};
+
+/** Counts from registry/v1-stats.json. Missing or junk fields become zeros, never a secret. */
+export function registryPublicStats(doc: unknown): RegistryStats {
+  const row = doc && typeof doc === "object" ? (doc as Record<string, unknown>) : {};
+  const num = (value: unknown): number => {
+    const n = typeof value === "number" ? value : Number(value);
+    return Number.isFinite(n) && n >= 0 ? Math.trunc(n) : 0;
+  };
+  const optional = (value: unknown): number | null => {
+    if (value == null || value === "") return null;
+    const n = typeof value === "number" ? value : Number(value);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  };
+  return {
+    size: num(row.size),
+    ok: num(row.ok),
+    rejected: num(row.rejected),
+    checker_version: optional(row.checker_version),
+    recheck_days: optional(row.recheck_days),
+  };
 }

@@ -4,8 +4,10 @@ Registered Suppliers (today, musicmatter.art) are one origin among the open
 commons: Freesound, Openverse, the Internet Archive, Wikimedia Commons,
 ccMixter, and the bundled UIowa MIS library. Each origin is queried with the
 same words. A failure in one origin is skipped. An origin that does not answer
-within 20 seconds is skipped too. A room-tone search runs only when the words
-ask for air or space, and that whole pass stops after 20 seconds.
+within 20 seconds is skipped too. The origins are asked together, so the
+wait is the slowest one of them, not the sum. A room-tone search runs only
+when the words ask for air or space. Each of those origins also has 20
+seconds, and a stall in one does not skip the rest.
 
 A chord strike has to be that chord. It is either a whole-chord file of that
 root and quality, or the chord built from single notes that were recorded at
@@ -19,21 +21,29 @@ license, and a page.
 """
 from __future__ import annotations
 
+import contextvars
+import hashlib
 import html as html_lib
 import json
 import os
 import random
 import re
+import threading
+import time
 import urllib.parse
 import urllib.request
 import zlib
 from collections import Counter
 
+from . import cancel as job_cancel
 from . import chords as CH
+from . import creditcache
 from . import deadline
+from . import fetch
 from . import interpret
 from . import licenses as LIC
 from . import notemap
+from .parallel import run_all, submit
 from . import pitch
 from . import progress
 from . import take
@@ -81,6 +91,7 @@ HINT_ALIASES = {
     "voice": ("choir", "chorus"),
 }
 _MM_CACHE: dict[str, dict] = {}
+_MM_LOCK = threading.Lock()
 # Words the notes tell us to leave out ("keep the piano out"). Set for one plan_for call.
 _EXCLUDE: set[str] = set()
 
@@ -125,12 +136,15 @@ def excluded_terms(text: str) -> set[str]:
 
 
 def terms_for(comp: dict, instrument: str | None, seed: int) -> list[str]:
+    """Search words from the prompt. An instrument hint is not one of them.
+
+    The hint is not the ensemble and it does not steer the suppliers. When the
+    prompt names nothing, the seed rotates a palette that is not piano-first.
+    """
+    del instrument
     words = f"{comp.get('composition') or ''} {comp.get('performance') or ''}".lower()
     skip = excluded_terms(words)
     found = [w for w in LEXICON if w not in skip and re.search(rf"\b{re.escape(w)}\b", words)]
-    hint = (instrument or "").strip().lower()
-    if hint and hint not in found and hint not in skip:
-        found.insert(0, hint)
     if found:
         return found[:4]
     rng = random.Random(seed)
@@ -149,10 +163,10 @@ def _mentions(text: str, word: str | None) -> bool:
 
 
 def _fit(blob: str, terms: list[str], hint: str | None, chords: list[str]) -> int:
+    """How well a clip matches the prompt. The instrument hint adds nothing."""
+    del hint
     text = blob.lower()
     score = 0
-    if _mentions(text, hint):
-        score += 5
     for term in terms:
         if _mentions(text, term):
             score += 2
@@ -189,25 +203,70 @@ def _cand(origin: str, title: str, author: str, license_id: str, blob: str, sour
 
 
 def _instrument_label(blob: str, hint: str | None) -> str:
+    """Name the instrument the text actually says. A hint does not rename it.
+
+    Piano is not preferred when the text also names another instrument.
+    """
+    del hint
     text = blob.lower()
-    # A direct word (choir, synth) wins over a catalog alias such as full-chord-set.
-    if hint and re.search(rf"(?<![a-z0-9]){re.escape(hint)}(?![a-z0-9])", text):
-        return hint
-    for word in LEXICON:
-        if re.search(rf"(?<![a-z0-9]){re.escape(word)}(?![a-z0-9])", text):
-            return word
-    if _mentions(text, hint):
-        return hint
-    for word in LEXICON:
-        if _mentions(text, word):
-            return word
-    return "texture"
+    hits = [
+        word for word in LEXICON
+        if re.search(rf"(?<![a-z0-9]){re.escape(word)}(?![a-z0-9])", text)
+    ]
+    if not hits:
+        hits = [word for word in LEXICON if _mentions(text, word)]
+    if not hits:
+        return "texture"
+    specific = [word for word in hits if word not in ("piano", "rhodes")]
+    return specific[0] if specific else hits[0]
+
+
+def _index_disk(url: str) -> str:
+    folder = os.path.join(fetch.cache_dir(), "indexes")
+    os.makedirs(folder, exist_ok=True)
+    name = hashlib.sha1(url.encode()).hexdigest()[:20] + ".json"
+    return os.path.join(folder, name)
+
+
+def _read_index_disk(url: str):
+    path = _index_disk(url)
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            doc = json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return None
+    return doc if isinstance(doc, list) else None
+
+
+def _write_index_disk(url: str, offerings: list) -> None:
+    path = _index_disk(url)
+    tmp = f"{path}.part.{threading.get_ident()}"
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(offerings, fh)
+        os.replace(tmp, path)
+    except OSError:
+        pass
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
 
 
 def _mm_index(registry_url: str | None, host_ok_fn=None) -> list[dict]:
     url = registry_url or "https://netcomposer.art/suppliers.json"
-    if url in _MM_CACHE:
-        return _MM_CACHE[url]
+    with _MM_LOCK:
+        cached = _MM_CACHE.get(url)
+    if cached is not None:
+        return cached
+    disk = _read_index_disk(url)
+    if disk is not None:
+        with _MM_LOCK:
+            return _MM_CACHE.setdefault(url, disk)
     offerings = []
     try:
         reg = _json(url)
@@ -226,8 +285,11 @@ def _mm_index(registry_url: str | None, host_ok_fn=None) -> list[dict]:
     except Exception as exc:
         print(json.dumps({"event": "discover_origin", "origin": "musicmatter", "error": str(exc)[:200]}), flush=True)
         return []
-    _MM_CACHE[url] = offerings
-    return offerings
+    with _MM_LOCK:
+        stored = _MM_CACHE.setdefault(url, offerings)
+    if stored is offerings:
+        _write_index_disk(url, offerings)
+    return stored
 
 
 # A texture bed may be a pad or a field recording. A song, a cover, or a live
@@ -279,10 +341,52 @@ def _offering_symbol(off: dict) -> str | None:
             return spelled
     name = (off.get("audio") or off.get("manifest") or "").rsplit("/", 1)[-1]
     name = re.sub(r"\.(flac|nc\.json|wav|mp3|ogg)$", " ", name, flags=re.I).replace("_", " ")
+    # Catalog filenames write F# as Fsharp. The chord parser reads the sharp sign.
+    name = name.replace("sharp", "#").replace("flat", "b")
     found = [sym for sym, _bass in CH.find_full(name)]
     if not found:
         return None
     return max(found, key=len)
+
+
+_BASS_STEMS: dict | None = None
+
+
+def _bass_stems() -> dict:
+    """Lowest note of each catalog voicing, keyed by the filename stem."""
+    global _BASS_STEMS
+    if _BASS_STEMS is None:
+        stems = {}
+        for rows in (CH.CAT.get("chords") or {}).values():
+            for row in rows or []:
+                if not isinstance(row, (list, tuple)) or len(row) < 2 or not row[1]:
+                    continue
+                stems[str(row[0]).rsplit("/", 1)[-1]] = int(min(row[1])) % 12
+        _BASS_STEMS = stems
+    return _BASS_STEMS
+
+
+def _offering_bass_pc(off: dict):
+    """Pitch class of the recorded bass, from the file's voicing. No network."""
+    if off.get("bass_pc") is not None:
+        try:
+            return int(off["bass_pc"]) % 12
+        except (TypeError, ValueError):
+            pass
+    audio = str(off.get("audio") or off.get("manifest") or "")
+    stem = re.sub(r"\.(flac|wav|aiff?|mp3|ogg|nc\.json)$", "", audio.rsplit("/", 1)[-1], flags=re.I)
+    bass = _bass_stems().get(stem)
+    if bass is None and re.search(r"(^|[_\-])root([_\-.]|$)", stem, re.I):
+        sym = _offering_symbol(off)
+        match = re.match(r"([A-G])(#|b)?", sym or "")
+        if match:
+            pc = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}[match.group(1)]
+            if match.group(2) == "#":
+                pc += 1
+            elif match.group(2) == "b":
+                pc -= 1
+            bass = pc % 12
+    return bass
 
 
 def _offering_instrument(off: dict) -> str:
@@ -306,6 +410,8 @@ def _offering_instrument(off: dict) -> str:
         return "fat synth"
     if "syntharp" in blob:
         return "synth arp"
+    # The original full-chord set has no instrument name. Those files are piano.
+    # A named choir, synth, or other instrument is labeled above and is not folded in here.
     return "piano"
 
 
@@ -360,20 +466,43 @@ def _texture_ok(cand: dict) -> bool:
     return bool(_TEXTURE_OK.search(blob))
 
 
-def _manifest_credit(url: str) -> dict | None:
+def _manifest_credit(url: str, supplier: str = "musicmatter") -> dict | None:
     if not url:
         return None
+    from . import registry
+    action, entry = registry.consult(supplier, url)
+    if action == registry.USE:
+        return registry.credit_of(entry)
+    if action in (registry.SKIP, registry.DEFER):
+        return None
+    cached = creditcache.get("manifest:" + url)
+    if cached:
+        registry.remember_ok(supplier, url, cached)
+        return cached
+    if registry.time_left() is not None and registry.time_left() < registry.MIN_CHECK_S:
+        registry.enqueue(supplier, url, "new")
+        return None
+    credit, _reason = _manifest_credit_fetch(url)
+    if credit:
+        creditcache.put("manifest:" + url, credit)
+        registry.remember_ok(supplier, url, credit)
+        return credit
+    registry.remember_rejected(supplier, url, _reason or "unreachable", page=url)
+    return None
+
+
+def _manifest_credit_fetch(url: str) -> tuple[dict | None, str]:
     try:
         manifest = _json(url)
     except Exception as exc:
         print(json.dumps({"event": "discover_manifest", "error": str(exc)[:160]}), flush=True)
-        return None
+        return None, "unreachable"
     lid = manifest.get("license")
     if isinstance(lid, dict):
         lid = lid.get("id") or lid.get("name")
     parsed = LIC.from_id(str(lid or ""))
     if not lid or not LIC.allowed(parsed[0]):
-        return None
+        return None, "bad_license"
     creator = manifest.get("creator") or {}
     if isinstance(creator, str):
         author = creator
@@ -381,7 +510,7 @@ def _manifest_credit(url: str) -> dict | None:
         author = creator.get("name") or ""
     title = manifest.get("title") or ""
     if not str(title).strip() or not str(author).strip():
-        return None
+        return None, "missing_credit"
     chord = manifest.get("chord")
     symbol = None
     bass_pc = None
@@ -391,7 +520,7 @@ def _manifest_credit(url: str) -> dict | None:
             bass_pc = int(chord["bass_midi"]) % 12
     elif isinstance(chord, str):
         symbol = CH.spell(chord)
-    return {
+    credit = {
         "title": str(title).strip(),
         "author": str(author).strip(),
         "license": parsed[0],
@@ -399,25 +528,54 @@ def _manifest_credit(url: str) -> dict | None:
         "chord_symbol": symbol,
         "bass_pc": bass_pc,
     }
+    if manifest.get("audio"):
+        credit["audio_url"] = manifest["audio"]
+    if manifest.get("sha256"):
+        credit["sha256"] = manifest["sha256"]
+    return credit, ""
 
 
 def _freesound_credit(sid: str) -> dict | None:
     if not sid:
         return None
+    page = f"https://freesound.org/s/{sid}/"
+    from . import registry
+    action, entry = registry.consult("freesound", page)
+    if action == registry.USE:
+        return registry.credit_of(entry)
+    if action in (registry.SKIP, registry.DEFER):
+        return None
+    cached = creditcache.get("freesound:" + str(sid))
+    if cached:
+        registry.remember_ok("freesound", page, cached)
+        return cached
+    if registry.time_left() is not None and registry.time_left() < registry.MIN_CHECK_S:
+        registry.enqueue("freesound", page, "new")
+        return None
+    credit, reason = _freesound_credit_fetch(sid)
+    if credit:
+        creditcache.put("freesound:" + str(sid), credit)
+        registry.remember_ok("freesound", page, credit)
+        return credit
+    registry.remember_rejected("freesound", page, reason or "unreachable", page=page)
+    return None
+
+
+def _freesound_credit_fetch(sid: str) -> tuple[dict | None, str]:
     try:
         raw = _get(f"https://freesound.org/s/{sid}/")
     except Exception as exc:
         print(json.dumps({"event": "discover_license", "origin": "freesound", "error": str(exc)[:160]}), flush=True)
-        return None
+        return None, "unreachable"
     page = raw.decode("utf-8", "replace")
     found = LIC.page_licenses(page)
     if len(found) != 1 or not LIC.allowed(found[0]):
-        return None
+        return None, "bad_license"
     title = re.search(r'og:audio:title" content="([^"]*)"', page)
     artist = re.search(r'og:audio:artist" content="([^"]*)"', page)
     og_type = re.search(r'og:type" content="([^"]*)"', page)
     if not title or not artist:
-        return None
+        return None, "missing_credit"
     # The site-wide meta description mentions "ambience" for every sound. Use the sound's own blurb.
     desc = re.search(r'twitter:description" content="([^"]*)"', page, re.I)
     if not desc:
@@ -430,8 +588,9 @@ def _freesound_credit(sid: str) -> dict | None:
         parts.append(html_lib.unescape(tags))
     text = " ".join(parts)
     if not parts[0].strip() or not parts[1].strip():
-        return None
-    return {
+        return None, "missing_credit"
+    lq = re.search(r'https://cdn\.freesound\.org/previews/\d+/[\w-]+-lq\.ogg', page)
+    credit = {
         "title": parts[0].strip(),
         "author": parts[1].strip(),
         "license": found[0],
@@ -439,6 +598,9 @@ def _freesound_credit(sid: str) -> dict | None:
         "text": text,
         "og_type": (og_type.group(1).strip().lower() if og_type else ""),
     }
+    if lq:
+        credit["audio_url"] = lq.group(0).replace("-lq.ogg", "-hq.ogg")
+    return credit, ""
 
 
 def _ensure_credit(cand: dict, verify_live: bool, bass=None) -> dict | None:
@@ -447,7 +609,7 @@ def _ensure_credit(cand: dict, verify_live: bool, bass=None) -> dict | None:
     src = dict(cand.get("source") or {})
     kind = src.get("kind")
     if verify_live and kind == "supplier":
-        credit = _manifest_credit(src.get("manifest") or "")
+        credit = _manifest_credit(src.get("manifest") or "", supplier=str(cand.get("origin") or "musicmatter"))
         if not credit:
             return None
         if cand.get("chord_symbol") and credit.get("chord_symbol") and credit["chord_symbol"] != cand["chord_symbol"]:
@@ -457,12 +619,16 @@ def _ensure_credit(cand: dict, verify_live: bool, bass=None) -> dict | None:
         if credit.get("bass_pc") is not None:
             cand["bass_pc"] = credit["bass_pc"]
         src.update({k: credit[k] for k in _CREDIT_KEYS})
+        if credit.get("audio_url"):
+            src["audio_url"] = credit["audio_url"]
     elif verify_live and kind == "freesound":
         credit = _freesound_credit(str(src.get("id") or ""))
         if not credit:
             return None
         src.update({k: credit[k] for k in _CREDIT_KEYS})
-        cand["text"] = credit["text"]
+        if credit.get("audio_url"):
+            src["audio_url"] = credit["audio_url"]
+        cand["text"] = credit.get("text") or ""
         cand["og_type"] = credit.get("og_type") or ""
     else:
         for key in _CREDIT_KEYS:
@@ -492,23 +658,16 @@ def _ensure_credit(cand: dict, verify_live: bool, bass=None) -> dict | None:
 
 
 def _match_label(cand: dict) -> str:
-    if cand.get("instrument") == "piano":
-        return "piano fallback"
     if cand.get("voicing_kind") == "alt":
         return "alt voicing"
     return "exact"
 
 
 def _tier(cand: dict) -> int:
-    piano = cand.get("instrument") == "piano"
-    alt = cand.get("voicing_kind") == "alt"
-    if not piano and not alt:
-        return 0
-    if not piano and alt:
+    """An inversion ranks after the root voicing. Piano does not rank after the other families."""
+    if cand.get("voicing_kind") == "alt":
         return 1
-    if piano and not alt:
-        return 2
-    return 3
+    return 0
 
 
 def _strike_order(cands: list[dict], hint: str | None, seed: int, index: int, named: str | None) -> list[dict]:
@@ -519,10 +678,8 @@ def _strike_order(cands: list[dict], hint: str | None, seed: int, index: int, na
         named_pool = [c for c in pool if c.get("origin") == named]
         if named_pool:
             pool = named_pool
-    if hint == "piano":
-        pianos = [c for c in pool if c.get("instrument") == "piano"]
-        if pianos:
-            pool = pianos
+    # The instrument hint does not narrow this pool. Piano is one family among the rest.
+    del hint
     ordered: list[dict] = []
     for tier_n in range(4):
         tier = [c for c in pool if _tier(c) == tier_n]
@@ -532,12 +689,7 @@ def _strike_order(cands: list[dict], hint: str | None, seed: int, index: int, na
             start = (seed + index) % len(names)
             return names[start:] + names[:start]
 
-        if hint and hint != "piano":
-            hinted_inst = sorted({c.get("instrument") or "" for c in tier if _hint_ok(c.get("instrument") or "", hint)})
-            other_inst = sorted({c.get("instrument") or "" for c in tier if (c.get("instrument") or "") not in hinted_inst})
-            instruments = rotate(hinted_inst) + rotate(other_inst)
-        else:
-            instruments = rotate(sorted({c.get("instrument") or "" for c in tier}))
+        instruments = rotate(sorted({c.get("instrument") or "" for c in tier}))
         if not instruments:
             continue
         buckets = {inst: [c for c in tier if (c.get("instrument") or "") == inst] for inst in instruments}
@@ -572,7 +724,41 @@ def search_musicmatter(terms, hint, chords, seed, host_ok_fn=None, registry_url=
     out = []
     for (sym, inst, kind), group in buckets.items():
         group = sorted(group, key=lambda o: (0 if o.get("default_voicing") else 1, rng.random()))
-        for off in group[:2]:
+        # One-shot keeps two files. Gather also keeps a root and each inversion, so a
+        # written bass (Dm7/C) is in the pool when the note files did not finish.
+        # Main-catalog files come first. A filename like G7sharp9 still spells as G,
+        # and that must not take the inversion slot from the plain G voicing.
+        if _plan_until.get() is None:
+            kept = group[:2]
+        else:
+            group = sorted(group, key=lambda o: (
+                0 if ("00a_main" in (o.get("manifest") or "") or "00b_main" in (o.get("manifest") or "")) else 1,
+                0 if o.get("default_voicing") else 1,
+                rng.random(),
+            ))
+            kept = []
+            seen_inv = set()
+            for off in group:
+                path = f"{off.get('audio') or ''} {off.get('manifest') or ''}".lower()
+                if "inv3" in path:
+                    inv = "inv3"
+                elif "inv2" in path:
+                    inv = "inv2"
+                elif "inv1" in path:
+                    inv = "inv1"
+                elif "root" in path:
+                    inv = "root"
+                else:
+                    inv = "other"
+                if inv in seen_inv:
+                    continue
+                seen_inv.add(inv)
+                kept.append(off)
+                if len(kept) >= 4:
+                    break
+            if not kept:
+                kept = group[:2]
+        for off in kept:
             blob = " ".join(str(off.get(k) or "") for k in (
                 "instrument_name", "instrument", "collection", "chord", "root", "quality", "audio",
             ))
@@ -588,6 +774,9 @@ def search_musicmatter(terms, hint, chords, seed, host_ok_fn=None, registry_url=
                 "license": "CC-BY-SA-4.0",
                 "_host_ok": host_ok_fn,
             }
+            if off.get("audio"):
+                src["url"] = off["audio"]
+                src["audio_url"] = off["audio"]
             cand = _cand("musicmatter", title, author, "CC-BY-SA-4.0", f"{title} {blob}", src, terms, hint, chords)
             if not cand:
                 continue
@@ -595,6 +784,9 @@ def search_musicmatter(terms, hint, chords, seed, host_ok_fn=None, registry_url=
             cand["voicing_kind"] = kind
             cand["pitched"] = True
             cand["instrument"] = inst
+            bass_pc = _offering_bass_pc(off)
+            if bass_pc is not None:
+                cand["bass_pc"] = bass_pc
             out.append(cand)
     return out
 
@@ -934,11 +1126,8 @@ def _select(groups: dict[str, list], order: list[str], n: int, hint: str | None,
             if len(chosen) >= n:
                 break
             add(cand)
-    if hint and not named and len(chosen) < n:
-        pool = [c for group in groups.values() for c in group if c["instrument"] == hint or hint in c["title"].lower()]
-        pool.sort(key=lambda c: (-c["fit"], c["origin"], c["title"]))
-        if pool:
-            add(pool[0])
+    # A timbre hint does not take the first slot.
+    del hint
     cap = n if named else max(1, n // 2)
     guard = 0
     while len(chosen) < n and guard < 8:
@@ -973,14 +1162,32 @@ def _voicing(sym: str) -> list[int]:
     return [60, 64, 67]
 
 
+_plan_until: contextvars.ContextVar[float | None] = contextvars.ContextVar("nc_plan_until", default=None)
+
+
+def arm_wall(seconds: float):
+    """Cap later file-reach checks to this many seconds from now. One-shot Perform does not arm it."""
+    return _plan_until.set(time.monotonic() + max(0.0, float(seconds)))
+
+
+def reset_wall(token) -> None:
+    _plan_until.reset(token)
+
+
 def _audio_reachable(cand: dict) -> bool:
     """Drop a file the renderer would not be allowed to download."""
     src = cand.get("source") or {}
     url = src.get("url") or ""
     if not url or src.get("kind") in ("freesound", "supplier"):
         return True
+    budget = 25.0
+    until = _plan_until.get()
+    if until is not None:
+        budget = min(budget, until - time.monotonic())
+        if budget <= 0.05:
+            return False
     try:
-        with deadline.limit(25):
+        with deadline.limit(budget):
             wait = deadline.socket_timeout(25)
             req = urllib.request.Request(url, headers={"User-Agent": UA, "Range": "bytes=0-2047"})
             with urllib.request.urlopen(req, timeout=wait) as r:
@@ -1045,7 +1252,58 @@ def assign_strikes(groups: list[list[dict]], seed: int, hint: str | None, mentio
     return chosen
 
 
-def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_fn=None, searchers=None, registry_url=None, verify_live: bool = True, note_maps=None, progress_cb=None, origin_budget_s: float = 20, texture_budget_s: float = 20) -> dict:
+def _start_prefetch(src: dict):
+    """Download a chosen bed while planning continues. The renderer then finds it cached."""
+    ctx = contextvars.copy_context()
+    box: dict = {}
+
+    def run() -> None:
+        try:
+            ctx.run(fetch.resolve, dict(src))
+        except Exception as exc:
+            box["error"] = exc
+            print(json.dumps({"event": "prefetch", "error": str(exc)[:160]}), flush=True)
+        except BaseException as exc:
+            box["error"] = exc
+
+    thread = threading.Thread(target=run, name="nc-prefetch", daemon=True)
+    thread.start()
+    return thread, box
+
+
+def _drop_avoided_notes(maps, blocked: set[str]):
+    """Copy note maps without samples whose id or url was kept by an earlier Gather."""
+    if not maps or not blocked:
+        return maps
+    out = []
+    for mp in maps:
+        copy = dict(mp)
+        notes = {}
+        for midi, sample in (mp.get("notes") or {}).items():
+            ident = str(sample.get("id") or "")
+            url = str(sample.get("url") or "")
+            if ident in blocked or url in blocked:
+                continue
+            notes[midi] = sample
+        copy["notes"] = notes
+        out.append(copy)
+    return out
+
+
+def _foreign_bass(sym: str, bass) -> bool:
+    """The slash bass is not a tone of this chord. Gather may play the chord anyway.
+
+    One-shot Perform does not arm the plan wall, so a mismatched bass still drops the file.
+    """
+    if bass is None or _plan_until.get() is None:
+        return False
+    tones = {int(n) % 12 for _name, notes in CH.voicings(sym) for n in notes}
+    if not tones:
+        return False
+    return int(bass) % 12 not in tones
+
+
+def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_fn=None, searchers=None, registry_url=None, verify_live: bool = True, note_maps=None, progress_cb=None, origin_budget_s: float = 20, texture_budget_s: float = 20, avoid_keys=None, avoid_sample_ids=None, note_budget_s: float | None = None) -> dict:
     """Build a plan from an even-handed search. Raises ValueError if nothing usable came back."""
     comp_text = comp.get("composition") or ""
     found = take.composition_chords(comp_text) or CH.find_full(
@@ -1096,59 +1354,93 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
             "license": hit.get("license"),
         })
 
+    def query_origin(fn, terms, hint_arg, origin_seed, budget_s):
+        try:
+            with deadline.limit(budget_s):
+                hits = fn(terms, hint_arg, syms, origin_seed, host_ok_fn, registry_url) or []
+        except deadline.SearchTimeout:
+            return [], "timed out"
+        except Exception as exc:
+            return [], str(exc)[:180]
+        return [h for h in hits if h], None
+
+    # Note files do not depend on which supplier answered. Start them before the
+    # searches so a cold library overlaps the supplier replies.
+    note_pool = None
+    note_future = None
+    if note_maps is None and verify_live:
+        # Copy the deadline into the note workers, then clear it on this thread
+        # so a later one-shot Perform in the same process is not capped.
+        budget_token = notemap.arm_budget(note_budget_s) if note_budget_s is not None else None
+        try:
+            note_pool, note_future = submit(notemap.ensure, syms, False, hint)
+        finally:
+            if budget_token is not None:
+                notemap.reset_budget(budget_token)
+
     groups: dict[str, list] = {}
     errors = {}
-    for origin in order:
-        fn = fns.get(origin)
-        if not fn:
+    jobs = []
+    texture_terms = ["field recording", "room tone", "ambience"]
+    wants_bed = bool(take.phrase(words).get("bed"))
+    try:
+        for origin in order:
+            fn = fns.get(origin)
+            if not fn:
+                continue
+            tell(progress.finding_line(origin, query))
+            jobs.append((
+                "chord",
+                origin,
+                lambda fn=fn: query_origin(fn, query, hint, seed, origin_budget_s),
+            ))
+        # The bed is optional. Skip the room-tone pass unless the words asked for air or space.
+        # Each origin keeps its own budget. One stall does not skip the others.
+        if wants_bed:
+            for origin in order:
+                if origin in ("musicmatter", "uiowa"):
+                    continue
+                fn = fns.get(origin)
+                if not fn:
+                    continue
+                tell(progress.finding_line(origin, texture_terms, texture=True))
+                jobs.append((
+                    "texture",
+                    origin,
+                    lambda fn=fn: query_origin(fn, texture_terms, None, seed + 17, texture_budget_s),
+                ))
+        results = run_all([job for _kind, _origin, job in jobs], workers=max(1, len(jobs)))
+    except BaseException:
+        if note_pool is not None:
+            note_pool.shutdown(wait=True)
+        raise
+    for (kind, origin, _job), (hits, err) in zip(jobs, results):
+        if kind != "chord":
             continue
-        tell(progress.finding_line(origin, query))
-        try:
-            with deadline.limit(origin_budget_s):
-                hits = fn(query, hint, syms, seed, host_ok_fn, registry_url) or []
-        except deadline.SearchTimeout:
-            errors[origin] = "timed out"
-            hits = []
-        except Exception as exc:
-            errors[origin] = str(exc)[:180]
-            hits = []
-        hits = [h for h in hits if h]
+        if err:
+            errors[origin] = err
         hits.sort(key=lambda c: (-c["fit"], c["title"]))
         for hit in hits:
             groups.setdefault(hit.get("origin") or origin, []).append(hit)
             note_hit(hit, origin)
     seen = {hit["key"] for hits in groups.values() for hit in hits if hit.get("key")}
-    texture_terms = ["field recording", "room tone", "ambience"]
-    # The bed is optional. Skip the room-tone pass unless the words asked for air or space.
-    if take.phrase(words).get("bed"):
-        try:
-            with deadline.limit(texture_budget_s):
-                for origin in order:
-                    if origin in ("musicmatter", "uiowa"):
-                        continue
-                    fn = fns.get(origin)
-                    if not fn:
-                        continue
-                    tell(progress.finding_line(origin, texture_terms, texture=True))
-                    try:
-                        deadline.check()
-                        extra = fn(texture_terms, None, syms, seed + 17, host_ok_fn, registry_url) or []
-                    except deadline.SearchTimeout:
-                        errors[origin + ":texture"] = "timed out"
-                        break
-                    except Exception as exc:
-                        errors[origin + ":texture"] = str(exc)[:180]
-                        extra = []
-                    for hit in extra:
-                        if not hit or hit.get("key") in seen:
-                            continue
-                        seen.add(hit["key"])
-                        groups.setdefault(hit.get("origin") or origin, []).append(hit)
-                        note_hit(hit, origin)
-        except deadline.SearchTimeout:
-            errors["texture"] = "timed out"
+    for (kind, origin, _job), (hits, err) in zip(jobs, results):
+        if kind != "texture":
+            continue
+        if err:
+            errors[origin + ":texture"] = err
+        for hit in hits:
+            if not hit or hit.get("key") in seen:
+                continue
+            seen.add(hit["key"])
+            groups.setdefault(hit.get("origin") or origin, []).append(hit)
+            note_hit(hit, origin)
     for origin in ORIGINS:
         groups.setdefault(origin, [])
+    blocked_keys = {str(k) for k in (avoid_keys or []) if k}
+    if blocked_keys:
+        for origin in list(groups):
+            groups[origin] = [h for h in groups[origin] if str(h.get("key") or "") not in blocked_keys]
     print(json.dumps({
         "event": "discover",
         "terms": query,
@@ -1199,6 +1491,50 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
         })
         return got
 
+    bed = None
+    prefetch_thread = None
+    prefetch_box: dict = {}
+    # The bed file is chosen from the search hits, before the note maps are
+    # joined, so its download overlaps the rest of planning.
+    if wants_bed:
+        textures = []
+        for cand in pool:
+            if cand.get("_blocked") or cand.get("_wrong_chord") or cand.get("chord_symbol"):
+                continue
+            if cand.get("origin") in ("musicmatter", "uiowa") or cand.get("pitched"):
+                continue
+            kind = (cand.get("source") or {}).get("kind")
+            if _texture_ok(cand) or (verify_live and kind == "freesound"):
+                textures.append(cand)
+        random.Random(seed + 29).shuffle(textures)
+        tried_late = False
+        for cand in textures:
+            until = _plan_until.get()
+            late = until is not None and time.monotonic() >= until - 0.05
+            if late and tried_late:
+                break
+            if late:
+                # The supplier clock is spent. One live check, then stop. No 25 second hang.
+                tried_late = True
+                try:
+                    with deadline.limit(1.5):
+                        got = accept(cand, None, None)
+                except deadline.SearchTimeout:
+                    got = None
+            else:
+                got = accept(cand, None, None)
+            if not got:
+                continue
+            got["instrument"] = _instrument_label(got.get("text") or got.get("title") or "", None)
+            if _declared_chord(got.get("title") or "", syms):
+                continue
+            if not _texture_ok(got):
+                continue
+            bed = got
+            break
+        if bed and verify_live and (bed.get("source") or {}).get("kind"):
+            prefetch_thread, prefetch_box = _start_prefetch(bed["source"])
+
     sources = {}
     events = []
     banks: dict = {}
@@ -1206,6 +1542,7 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
     assembled: list[dict] = []
     used: dict[str, str] = {}
     sample_ids: dict[str, str] = {}
+    kept_picks: list[str] = []
 
     def sid_for(cand: dict, suffix: str) -> str:
         if cand["key"] in used:
@@ -1213,6 +1550,8 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
         sid = f"{cand['origin'][:2]}-{suffix}"
         used[cand["key"]] = sid
         sources[sid] = cand["source"]
+        if cand.get("key"):
+            kept_picks.append(str(cand["key"]))
         return sid
 
     def sid_for_sample(sample: dict) -> str:
@@ -1225,10 +1564,17 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
             sid = f"n{len(sources)}x{len(sample_ids)}"
         sample_ids[key] = sid
         keep = {}
-        for field in ("kind", "url", "id", "page", "title", "author", "license", "pitched", "expect_midi", "segment"):
+        for field in ("kind", "url", "id", "audio_url", "page", "title", "author", "license", "pitched", "expect_midi", "segment", "onset_s", "length_s", "credit_checked"):
             if sample.get(field) not in (None, ""):
                 keep[field] = sample[field]
+        if sample.get("cents") is not None:
+            keep["cents"] = sample["cents"]
+            keep["pitch_checked"] = True
         sources[sid] = keep
+        if sample.get("id"):
+            kept_picks.append(str(sample["id"]))
+        if sample.get("url"):
+            kept_picks.append(str(sample["url"]))
         tell(None, {
             "title": keep.get("title"),
             "supplier": progress.origin_label(keep.get("kind")),
@@ -1237,15 +1583,19 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
         return sid
 
     tell(progress.NOTE_LINE)
-    if note_maps is None and verify_live:
+    if note_future is not None:
         try:
-            note_maps, library_meta = notemap.ensure(syms)
+            note_maps, library_meta = note_future.result()
         except Exception as exc:
             note_maps, library_meta = [], {"skipped": [], "error": str(exc)[:180]}
+        finally:
+            if note_pool is not None:
+                note_pool.shutdown(wait=True)
     else:
         library_meta = {}
         if note_maps is None:
             note_maps = []
+    note_maps = _drop_avoided_notes(note_maps or [], {str(s) for s in (avoid_sample_ids or []) if s})
     assembly = notemap.assemblies_for(syms, note_maps or [], _EXCLUDE)
 
     # A written bar or beat length is the clock. Otherwise a "second half" is a time boundary,
@@ -1358,6 +1708,8 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
                 continue
             sym, bass = symbols[i]
             got = accept(opt["cand"], sym, bass)
+            if not got and _foreign_bass(sym, bass):
+                got = accept(opt["cand"], sym, None)
             if not got:
                 dead[i].add(id(opt["cand"]))
                 return False
@@ -1434,6 +1786,8 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
             if not opt or opt.get("built") != "whole-chord file" or opt.get("accepted"):
                 continue
             got = accept(opt["cand"], symbols[i][0], symbols[i][1])
+            if not got and _foreign_bass(symbols[i][0], symbols[i][1]):
+                got = accept(opt["cand"], symbols[i][0], None)
             if not got:
                 member["opts"][i] = None
             else:
@@ -1819,29 +2173,6 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
                 "notes_by_chord": {str(surprise_i): [high_midi]},
             })
 
-    bed = None
-    if kn["bed"]:
-        textures = []
-        for cand in pool:
-            if cand.get("_blocked") or cand.get("_wrong_chord") or cand.get("chord_symbol"):
-                continue
-            if cand.get("origin") in ("musicmatter", "uiowa") or cand.get("pitched"):
-                continue
-            kind = (cand.get("source") or {}).get("kind")
-            if _texture_ok(cand) or (verify_live and kind == "freesound"):
-                textures.append(cand)
-        random.Random(seed + 29).shuffle(textures)
-        for cand in textures:
-            got = accept(cand, None, None)
-            if not got:
-                continue
-            got["instrument"] = _instrument_label(got.get("text") or got.get("title") or "", None)
-            if _declared_chord(got.get("title") or "", syms):
-                continue
-            if not _texture_ok(got):
-                continue
-            bed = got
-            break
     bed_note = "Texture: none. The words did not ask for air or space." if not kn["bed"] else "Texture: none. No unpitched field recording, room tone, or pad passed the rights check."
     if bed:
         sid = sid_for(bed, "bed")
@@ -1963,6 +2294,7 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
         "sections": plan_sections,
         "chords": chords,
         "sources": sources,
+        "gather_picks": list(dict.fromkeys(kept_picks)),
         "banks": banks,
         "layers": layers,
         "master": {
@@ -2022,4 +2354,14 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
     if slice_note:
         plan["trimmed"] = slice_note
     fit_plan(plan)
+    if prefetch_thread is not None:
+        until = _plan_until.get()
+        # Gather has already spent its search clock. Do not sit here for the bed file;
+        # the chosen-file download has its own short clock and finds a finished prefetch.
+        timeout = None if until is None else max(0.0, until - time.monotonic())
+        prefetch_thread.join(timeout=timeout)
+        if not prefetch_thread.is_alive():
+            err = prefetch_box.get("error")
+            if isinstance(err, job_cancel.Cancelled):
+                raise err
     return plan

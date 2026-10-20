@@ -6,11 +6,13 @@ the same runner over HTTP.
 from __future__ import annotations
 
 import json
+import math
 import os
 import sqlite3
 import threading
 import time
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 
 def _now() -> str:
@@ -19,6 +21,32 @@ def _now() -> str:
 
 def _day() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+_WIN_S = 600
+_DAY_S = 86400
+
+
+@dataclass(frozen=True)
+class RateBlock:
+    """A per-network limit. retry_at is UTC so a page can show the visitor's clock."""
+
+    error: str
+    retry_after_s: int
+    retry_at: str
+
+
+def _rate_block(now: float, free_at: float, template: str) -> RateBlock:
+    if free_at < now:
+        free_at = now
+    moment = datetime.fromtimestamp(free_at, timezone.utc)
+    retry_at = moment.strftime("%Y-%m-%dT%H:%M:%SZ")
+    shown = moment
+    if shown.second or shown.microsecond:
+        shown = shown.replace(second=0, microsecond=0) + timedelta(minutes=1)
+    hour = shown.hour % 12 or 12
+    clock = f"{hour}:{shown.minute:02d} {'AM' if shown.hour < 12 else 'PM'} UTC"
+    return RateBlock(template.format(when=clock), max(1, math.ceil(free_at - now)), retry_at)
 
 
 class Store:
@@ -124,7 +152,7 @@ class Store:
 
     def running_count(self) -> int:
         return self.db.execute(
-            "SELECT COUNT(*) FROM jobs WHERE state NOT IN ('queued','done','failed','rejected','cancelled')"
+            "SELECT COUNT(*) FROM jobs WHERE state NOT IN ('queued','done','failed','rejected','cancelled','gathered')"
         ).fetchone()[0]
 
     def mark_cancelled(self, job_id: str, message: str) -> str | None:
@@ -147,6 +175,19 @@ class Store:
             )
             self.db.commit()
             return "cancelled"
+
+    def mark_gathered(self, job_id: str, result: dict) -> bool:
+        """A Gather finished. It is not a Performance, so it does not become done."""
+        with self._lock:
+            row = self.db.execute("SELECT state FROM jobs WHERE id=?", (job_id,)).fetchone()
+            if not row or row["state"] == "cancelled":
+                return False
+            self.db.execute(
+                """UPDATE jobs SET state=?, stage=?, percent=?, result_json=?, updated_at=? WHERE id=?""",
+                ("gathered", "gathered", 100, json.dumps(result), _now(), job_id),
+            )
+            self.db.commit()
+            return True
 
     def mark_done(self, job_id: str, **fields) -> bool:
         """Finish a job. A cancel that won the race keeps the row cancelled and returns False."""
@@ -182,17 +223,31 @@ class Store:
             self.db.commit()
         return self.spend_today()
 
-    def hit(self, ip_hash: str, per_10min: int, per_day: int) -> str | None:
-        """Record a submit. Return an error string if the IP is over a limit."""
+    def hit(self, ip_hash: str, per_10min: int, per_day: int) -> RateBlock | None:
+        """Record a submit. The day is a rolling 24 hours, not the next calendar date."""
         now = time.time()
         with self._lock:
-            self.db.execute("DELETE FROM ip_hits WHERE ts < ?", (now - 86400,))
-            day_n = self.db.execute("SELECT COUNT(*) c FROM ip_hits WHERE ip_hash=? AND ts >= ?", (ip_hash, now - 86400)).fetchone()["c"]
-            win_n = self.db.execute("SELECT COUNT(*) c FROM ip_hits WHERE ip_hash=? AND ts >= ?", (ip_hash, now - 600)).fetchone()["c"]
-            if win_n >= per_10min:
-                return f"Too many Performs from this network ({per_10min} every 10 minutes). Try again in a few minutes."
-            if day_n >= per_day:
-                return f"Daily limit reached ({per_day} Performs from this network). It resets tomorrow."
+            self.db.execute("DELETE FROM ip_hits WHERE ts < ?", (now - _DAY_S,))
+            day = self.db.execute(
+                "SELECT COUNT(*) c, MIN(ts) oldest FROM ip_hits WHERE ip_hash=? AND ts >= ?",
+                (ip_hash, now - _DAY_S),
+            ).fetchone()
+            win = self.db.execute(
+                "SELECT COUNT(*) c, MIN(ts) oldest FROM ip_hits WHERE ip_hash=? AND ts >= ?",
+                (ip_hash, now - _WIN_S),
+            ).fetchone()
+            if win["c"] >= per_10min:
+                return _rate_block(
+                    now,
+                    float(win["oldest"]) + _WIN_S,
+                    f"Too many Performs from this network ({per_10min} every 10 minutes). Try again after {{when}}.",
+                )
+            if day["c"] >= per_day:
+                return _rate_block(
+                    now,
+                    float(day["oldest"]) + _DAY_S,
+                    f"Daily limit reached ({per_day} Performs from this network). Try again after {{when}}.",
+                )
             self.db.execute("INSERT INTO ip_hits (ip_hash, ts) VALUES (?, ?)", (ip_hash, now))
             self.db.commit()
         return None

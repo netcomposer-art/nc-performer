@@ -14,6 +14,7 @@ import json
 import os
 import resource
 import shutil
+import subprocess
 import tempfile
 import threading
 import time
@@ -31,7 +32,9 @@ from ncperf.render import Renderer
 from .config import Settings
 from .ids import sha256_text
 from .jobs import Store
-from .limits import Reject, check_plan, load_suppliers
+import ncperf.assemble as assemble
+import ncperf.assembly as assembly
+from .limits import Reject, check_plan, load_suppliers, source_cap
 from ncperf.cancel import MESSAGE as CANCELLED_MESSAGE
 from ncperf.cancel import bind as bind_cancel
 from ncperf.cancel import check as cancel_check
@@ -39,7 +42,9 @@ from ncperf.cancel import reset as reset_cancel
 from ncperf import cancel as job_cancel
 from ncperf.discover import plan_for
 from ncperf.fit import fit_plan
-from ncperf.progress import STAGE_LINES, merge_sounds, sounds_from_sources
+import ncperf.gather as gather
+from ncperf.gather import load_collection, public_sounds, restore_cache, save_collection, wipe_gather
+from ncperf.progress import STAGE_LINES, merge_sounds, sounds_from_sources, with_preview
 from .cancel import wipe_performance, write_cancelled_status
 from .planner import PRICE_SOURCE, cache_key, compute_cost, llm_cost, llm_price_card, wants_model
 from .sign import Signer, apply_signature
@@ -49,6 +54,8 @@ from .storage import Storage
 STAGES = ("queued", "planning", "fetching", "measuring", "rendering", "reverb", "mastering", "verifying", "storing", "done")
 PERCENT = {s: i * 10 for i, s in enumerate(STAGES)}
 PERCENT["done"] = 100
+PERCENT["gathering"] = 40
+PERCENT["gathered"] = 100
 _UNSET = object()
 
 
@@ -166,6 +173,7 @@ class Runner:
         if state == "done":
             return
         wipe_performance(self.storage, job_id)
+        wipe_gather(self.storage, job_id)
         write_cancelled_status(self.storage, job_id)
 
     def run_job(self, job_id: str) -> None:
@@ -197,10 +205,12 @@ class Runner:
             self.store.add_spend(cost)
             self.store.update(job_id, cost_usd=round(cost, 6))
             row = self.store.get(job_id) or {}
+            req_row = row.get("request") if isinstance(row.get("request"), dict) else {}
             print(json.dumps({
                 "event": "job",
                 "id": job_id,
                 "ip_hash": row.get("ip_hash"),
+                "tester": req_row.get("tester") is True,
                 "outcome": row.get("state"),
                 "error_code": row.get("error_code"),
                 "stage_s": {k: round(v, 3) for k, v in stage_t.items()},
@@ -246,16 +256,31 @@ class Runner:
         settings = self.settings
         job_id = job["id"]
         req = job["request"]
-        mark = ["planning", time.perf_counter()]
-        self._stage(job_id, "planning", stage_t, mark)
-
         if self.store.spend_today() >= settings.daily_hard_usd or self.store.flag("perform_enabled", "1" if settings.perform_enabled else "0") == "0":
             raise Reject("Perform is resting until tomorrow.", "resting")
+
+        if req.get("kind") == "gather":
+            self._gather_job(job, stage_t)
+            return
+        if req.get("kind") == "keep-take":
+            self._keep_job(job, stage_t)
+            return
+
+        mark = ["planning", time.perf_counter()]
+        self._stage(job_id, "planning", stage_t, mark)
 
         comp = req["composition"]
         seed = int(req.get("seed") or 1)
         self._progress(job_id, seed=seed, trimmed=None)
         plan = req.get("plan")
+        if plan is None and req.get("gather_id"):
+            doc = load_collection(self.storage, req["gather_id"])
+            if not doc or not isinstance(doc.get("plan"), dict):
+                raise Reject("That Gather is not ready.", "rejected")
+            plan = doc["plan"]
+        if req.get("gather_id"):
+            restore_cache(self.storage, req["gather_id"])
+        processed = bool(req.get("processed")) and bool(settings.processed)
         mode = "plan"
         os.environ["NC_SUPPLIERS_JSON"] = settings.suppliers_json
         os.environ["NC_PERFORMER"] = settings.instance_name
@@ -266,10 +291,35 @@ class Runner:
             fetch._reg.clear()
         with egress_guard(settings):
             suppliers = None
-            if plan is None:
+            if plan is None and not processed:
+                instrument = (comp.get("instrument") or "").strip() or None
+
+                def progress_cb(line, sound=None):
+                    if isinstance(sound, dict):
+                        sound = with_preview(sound, job_id, settings.public_base_url)
+                    self._progress(job_id, stage_line=line, sound=sound, seed=seed)
+
+                try:
+                    built = gather.build(
+                        comp,
+                        seed=seed,
+                        instrument=instrument,
+                        host_ok_fn=settings.host_allowed,
+                        registry_url=settings.suppliers_json,
+                        progress_cb=progress_cb,
+                    )
+                except ValueError as exc:
+                    raise Reject(str(exc)) from exc
+                plan = built["plan"]
+                mode = "raw"
+            elif plan is None:
                 plan, mode = self._interpret(
                     comp, seed, usage, force_stub=bool(req.get("force_stub")), job_id=job_id,
                 )
+            elif plan.get("assembly") == "raw":
+                mode = "raw"
+            elif not processed:
+                raise Reject("This release assembles the recordings in order. Processing is off.")
             # Supplier manifests are checked against the live registry. A failure
             # here is a rejection, before any audio is written.
             try:
@@ -284,18 +334,22 @@ class Runner:
             fit_plan(
                 plan,
                 max_layers=settings.max_layers,
-                max_sources=settings.max_sources,
+                max_sources=source_cap(plan, settings),
                 max_chords=settings.max_chords,
                 max_length_s=settings.max_length_s,
                 max_plan_bytes=settings.max_plan_bytes,
             )
             check_plan(plan, settings, suppliers)
             trimmed = plan.get("trimmed")
+            if plan.get("assembly") == "raw":
+                heard = public_sounds(plan, job_id, settings.public_base_url.rstrip("/"), gather.source_rows(plan))
+            else:
+                heard = sounds_from_sources(plan.get("sources"))
             self._progress(
                 job_id,
                 seed=int(plan.get("seed") or seed),
                 trimmed=trimmed if isinstance(trimmed, str) and trimmed.strip() else None,
-                sounds=sounds_from_sources(plan.get("sources")),
+                sounds=heard,
             )
             self._stage(job_id, "fetching", stage_t, mark)
             out = self._render(job_id, plan, comp, req, stage_t, mark)
@@ -315,6 +369,218 @@ class Runner:
         done["trimmed"] = trimmed if isinstance(trimmed, str) and trimmed.strip() else None
         if not self.store.mark_done(job_id, result=done):
             self._settle_cancelled(job_id)
+
+    def _gather_job(self, job: dict, stage_t: dict) -> None:
+        settings = self.settings
+        job_id = job["id"]
+        req = job["request"]
+        mark = ["gathering", time.perf_counter()]
+        self._stage(job_id, "gathering", stage_t, mark)
+        comp = req["composition"]
+        seed = int(req.get("seed") or 1)
+        instrument = (comp.get("instrument") or "").strip() or None
+        self._progress(job_id, seed=seed, trimmed=None)
+
+        def progress_cb(line, sound=None):
+            if isinstance(sound, dict):
+                sound = with_preview(sound, job_id, settings.public_base_url)
+            self._progress(job_id, stage_line=line, sound=sound, seed=seed)
+
+        try:
+            built = gather.build(
+                comp,
+                seed=seed,
+                instrument=instrument,
+                avoid_keys=req.get("avoid_keys"),
+                avoid_sample_ids=req.get("avoid_sample_ids"),
+                host_ok_fn=settings.host_allowed,
+                registry_url=settings.suppliers_json,
+                progress_cb=progress_cb,
+            )
+        except ValueError as exc:
+            raise Reject(str(exc)) from exc
+        plan = built["plan"]
+        suppliers = None
+        try:
+            suppliers = load_suppliers(settings)
+        except Exception as e:
+            if any((s or {}).get("kind") == "supplier" for s in (plan.get("sources") or {}).values()):
+                raise Reject(f"Could not read the Supplier registry: {e}") from e
+        fit_plan(
+            plan,
+            max_layers=settings.max_layers,
+            max_sources=source_cap(plan, settings),
+            max_chords=settings.max_chords,
+            max_length_s=settings.max_length_s,
+            max_plan_bytes=settings.max_plan_bytes,
+        )
+        check_plan(plan, settings, suppliers)
+        base = settings.public_base_url.rstrip("/")
+        files = built["files"]
+        clock = None
+        if plan.get("assembly") == "raw":
+            self._progress(job_id, stage_line="Copying the recordings…", seed=seed)
+            try:
+                files, measured = assembly.materialize(plan, files, budget_s=gather.FETCH_S)
+            except ValueError as exc:
+                raise Reject(str(exc)) from exc
+            clock = assembly.written_clock(comp, plan)
+        sounds = public_sounds(plan, job_id, base, files)
+        if plan.get("assembly") == "raw":
+            assembly.annotate_sounds(sounds, measured)
+        trimmed = plan.get("trimmed")
+        trimmed = trimmed if isinstance(trimmed, str) and trimmed.strip() else None
+        doc = {
+            "id": job_id,
+            "seed": int(plan.get("seed") or seed),
+            "claim_hash": req.get("claim_hash"),
+            "composition": comp,
+            "plan": plan,
+            "sounds": sounds,
+            "picked_keys": built["picked_keys"],
+            "picked_sample_ids": built["picked_sample_ids"],
+            "excluded_gather_id": req.get("excluded_gather_id"),
+            "clock": clock,
+        }
+        save_collection(self.storage, job_id, doc, files)
+        result = {
+            "seed": int(plan.get("seed") or seed),
+            "trimmed": trimmed,
+            "found_sounds": sounds if plan.get("assembly") == "raw" else sounds_from_sources(plan.get("sources")),
+            "sounds": sounds,
+            "stage_line": STAGE_LINES["gathered"],
+            "gather_id": job_id,
+            "clock": clock,
+        }
+        self._guard(job_id)
+        if not self.store.mark_gathered(job_id, result):
+            self._settle_cancelled(job_id)
+
+    def _keep_job(self, job: dict, stage_t: dict) -> None:
+        """Check the page's plan, store its audio, and sign that take."""
+        settings = self.settings
+        job_id = job["id"]
+        req = job["request"]
+        mark = ["fetching", time.perf_counter()]
+        self._stage(job_id, "fetching", stage_t, mark)
+        gather_id = str(req.get("gather_id") or "")
+        doc = load_collection(self.storage, gather_id)
+        if not doc or not isinstance(doc.get("plan"), dict):
+            raise Reject("That Gather is not ready.", "rejected")
+        try:
+            take_state = assembly.parse_take_state(req.get("take_state"), gather_id)
+        except ValueError as exc:
+            raise Reject(str(exc), "rejected") from exc
+        kept = take_state["plan"]
+        errors = assembly.validate(kept, doc, max_length_s=settings.max_length_s)
+        if errors:
+            raise Reject(errors[0], "rejected")
+        upload = self.storage.get(req.get("upload_key") or f"jobs/{job_id}/take-audio")
+        if not upload:
+            raise Reject("The take audio was not stored.", "rejected")
+        try:
+            info = assembly.inspect_upload(upload, float(kept.get("total_s") or 0))
+        except ValueError as exc:
+            raise Reject(str(exc), "rejected") from exc
+        title = req.get("title")
+        if isinstance(title, str):
+            title = title.strip() or None
+        plan = assembly.plan_for_record(doc["plan"], kept, title=title)
+        plan["interpreter"] = {"kind": "browser", "note": "browser assembly"}
+        comp = dict(doc.get("composition") or {})
+        if title:
+            comp["title"] = title
+        seed = int(plan.get("seed") or 1)
+        self._progress(job_id, seed=seed, trimmed=None, sounds=doc.get("sounds") or [])
+        out = self._store_uploaded(job_id, plan, take_state, upload, info, gather_id, comp, stage_t, mark)
+        self._stage(job_id, "storing", stage_t, mark)
+        self._store_outputs(job_id, out, req, "raw", {})
+        self._read_back(job_id)
+        self.storage.delete(f"jobs/{job_id}/take-audio")
+        self._guard(job_id)
+        self._stage(job_id, "done", stage_t, mark)
+        done = self._snapshot(job_id)
+        done.update({
+            "record_url": f"{settings.public_base_url}/records/{job_id}.json",
+            "page_url": f"{settings.public_base_url}/records/{job_id}",
+            "interpreter": "browser",
+            "seed": seed,
+            "stage_line": STAGE_LINES["done"],
+            "gather_id": gather_id,
+        })
+        done["trimmed"] = None
+        if not self.store.mark_done(job_id, result=done):
+            self._settle_cancelled(job_id)
+
+    def _store_uploaded(self, job_id, plan, take_state, upload, info, gather_id, comp, stage_t, mark) -> dict:
+        """Confirm the raw plan, then store the browser's file as the take."""
+        settings = self.settings
+        work = tempfile.mkdtemp(prefix="nc-keep-")
+        try:
+            os.environ["NC_PERFORMER"] = settings.instance_name
+            comp_path = os.path.join(work, "composition.md")
+            open(comp_path, "w", encoding="utf-8").write(_composition_md(comp, raw=True))
+            plan_path = os.path.join(work, "plan.json")
+            json.dump(plan, open(plan_path, "w", encoding="utf-8"), indent=1, ensure_ascii=False)
+
+            def log(line: str):
+                self._stage(job_id, "rendering", stage_t, mark)
+
+            self._stage(job_id, "rendering", stage_t, mark)
+            try:
+                assembly.render_take(
+                    self.storage, gather_id, plan, take_state["plan"], work, log=log, encode=False,
+                )
+            except RuntimeError as exc:
+                raise Reject(str(exc), "rejected") from exc
+            try:
+                master, preview = assembly.write_take_files(upload, work)
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError, RuntimeError) as exc:
+                raise Reject("The take could not be stored.", "rejected") from exc
+            with open(preview, "rb") as fh:
+                self._publish_preview(job_id, fh.read())
+            record_url = f"{settings.public_base_url}/records/{job_id}.json"
+            _tag(master, preview, plan.get("title") or comp.get("title") or "Performance",
+                 comp.get("composer") or "anonymous", record_url)
+            self._stage(job_id, "verifying", stage_t, mark)
+            rec_path = os.path.join(work, "record.json")
+            rlog = json.load(open(os.path.join(work, "uses.json"), encoding="utf-8"))
+            record.build(plan, plan_path, rlog, master, preview, rec_path,
+                         performer=settings.instance_name, composition_path=comp_path)
+            rec = json.load(open(rec_path, encoding="utf-8"))
+            assembly.finish_browser_record(rec, take_state, info, master)
+            apply_signature(rec, self.signer, settings.instance_name)
+            note = rec.get("signature") or {}
+            if note.get("status") == "SIGNED":
+                note["note"] = (
+                    "Signature covers record_hash (hex, UTF-8). The audio is the browser's take. "
+                    "This instance checked the plan and stored that file."
+                )
+            elif note.get("status") == "UNSIGNED":
+                note["note"] = (
+                    "This instance has no NC_SIGNING_KEY. The record_hash still identifies the bytes. "
+                    "The audio is the browser's take."
+                )
+            json.dump(rec, open(rec_path, "w", encoding="utf-8"), indent=1, ensure_ascii=False)
+            ok, lines = record.verify(rec_path, audio_dir=work)
+            if not ok:
+                raise Reject("verify-record failed:\n" + "\n".join(lines), "verify")
+            files = {}
+            for name in ("performance.flac", "preview.mp3", "record.json", "plan.json", "uses.json", "composition.md"):
+                files[name] = open(os.path.join(work, name), "rb").read()
+            return files
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+
+    def _read_back(self, job_id: str) -> None:
+        """done is not published until the stored bytes can be read back."""
+        missing = []
+        for name in ("performance.flac", "preview.mp3", "record.json", "plan.json", "uses.json", "composition.md"):
+            got = self.storage.get(f"performances/{job_id}/{name}")
+            if not got:
+                missing.append(name)
+        if missing:
+            raise Reject("Stored files were not readable: " + ", ".join(missing), "verify")
 
     def _interpret(self, comp: dict, seed: int, usage: dict, force_stub: bool = False, job_id: str | None = None) -> tuple[dict, str]:
         settings = self.settings
@@ -336,6 +602,8 @@ class Runner:
                 registry_url=settings.suppliers_json,
                 progress_cb=progress_cb if job_id else None,
             )
+            if isinstance(discovered, dict):
+                discovered.pop("gather_picks", None)
         except Exception as exc:
             discovered = None
             discover_error = str(exc)
@@ -377,7 +645,8 @@ class Runner:
         try:
             os.environ["NC_PERFORMER"] = settings.instance_name
             comp_path = os.path.join(work, "composition.md")
-            open(comp_path, "w", encoding="utf-8").write(_composition_md(comp))
+            raw = plan.get("assembly") == "raw"
+            open(comp_path, "w", encoding="utf-8").write(_composition_md(comp, raw=raw))
             plan_path = os.path.join(work, "plan.json")
             json.dump(plan, open(plan_path, "w", encoding="utf-8"), indent=1, ensure_ascii=False)
 
@@ -393,11 +662,17 @@ class Runner:
             self._stage(job_id, "rendering", stage_t, mark)
             # The 10 minute cap is enforced by the caller: the Cloudflare queue
             # consumer stops waiting, and `docker` can be given a stop timeout.
-            # Renderer itself is one blocking call into the kit.
-            flac, mp3, rlog = Renderer(plan, work, log=log).run("performance")
-            self._stage(job_id, "mastering", stage_t, mark)
+            if raw:
+                flac, mp3, rlog = assemble.render(plan, work, log=log)
+            else:
+                flac, mp3, rlog = Renderer(plan, work, log=log).run("performance")
+                self._stage(job_id, "mastering", stage_t, mark)
             preview = os.path.join(work, "preview.mp3")
             os.replace(mp3, preview)
+            # The page can play this as soon as the bytes are stored and read back.
+            # The record and the signature finish after, and done still waits for them.
+            with open(preview, "rb") as fh:
+                self._publish_preview(job_id, fh.read())
             master = os.path.join(work, "performance.flac")
             if flac != master:
                 os.replace(flac, master)
@@ -420,6 +695,23 @@ class Runner:
             return files
         finally:
             shutil.rmtree(work, ignore_errors=True)
+
+    def _publish_preview(self, job_id: str, data: bytes) -> None:
+        """Store the MP3 and say so only after those bytes can be read back.
+
+        The record is not part of this claim. ``done`` still waits for it.
+        """
+        if not data:
+            return
+        key = f"performances/{job_id}/preview.mp3"
+        self.storage.put(key, data, "audio/mpeg")
+        got = self.storage.get(key)
+        if not got or len(got) != len(data):
+            return
+        result = self._snapshot(job_id)
+        result["preview_ready"] = True
+        result["stage_line"] = "The recording is ready."
+        self.store.update(job_id, result=result)
 
     def _store_outputs(self, job_id: str, files: dict, req: dict, mode: str, usage: dict | None = None) -> None:
         base = f"performances/{job_id}/"
@@ -460,6 +752,8 @@ class Runner:
         status["seed"] = seed
         status["found_sounds"] = merge_sounds(snap.get("found_sounds"), sounds_from_sources(plan_doc.get("sources")))
         status["stage_line"] = STAGE_LINES["done"]
+        if (req or {}).get("tester") is True:
+            status["tester"] = True
         card = llm_price_card(self.settings)
         spent = usage or {}
         status["cost_estimate"] = {
@@ -503,7 +797,12 @@ class Runner:
             self._settle_cancelled(job_id)
             return
         self.store.update(job_id, state=state, stage=state, percent=100, error=message, error_code=code)
-        body = json.dumps({"id": job_id, "state": state, "error": message, "error_code": code, "at": _utc()}).encode()
+        failed = self.store.get(job_id) or {}
+        failed_req = failed.get("request") if isinstance(failed.get("request"), dict) else {}
+        note = {"id": job_id, "state": state, "error": message, "error_code": code, "at": _utc()}
+        if failed_req.get("tester") is True:
+            note["tester"] = True
+        body = json.dumps(note).encode()
         try:
             self.storage.put(f"jobs/{job_id}/status.json", body, "application/json")
         except Exception:
@@ -514,13 +813,14 @@ def _iso_plus_hours(hours: int) -> str:
     return (datetime.now(timezone.utc) + timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _composition_md(comp: dict) -> str:
+def _composition_md(comp: dict, raw: bool = False) -> str:
     title = comp.get("title") or "Untitled"
     composer = comp.get("composer") or "anonymous"
+    transforms = "trim, fade, gain (no pitch-shift, no time-stretch)" if raw else "trim, gain, fade, filter, reverb, delay (no pitch-shift, no time-stretch)"
     return f"""# {title}
 
 **Composer of this Composition:** {composer} · **License out:** CC BY-SA 4.0
-**Allowed transforms:** trim, gain, fade, filter, reverb, delay (no pitch-shift, no time-stretch)
+**Allowed transforms:** {transforms}
 
 ## Composition
 

@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import random
 import re
-import zlib
 
 from . import chords as CH
 
@@ -613,58 +612,40 @@ def _key(opt: dict) -> tuple:
     return (opt.get("origin") or "", opt.get("instrument") or "", opt.get("built") or "")
 
 
-def choose(groups: list[list[dict]], seed: int, prefer: list[str] | None, hint: str | None, long: bool, avoid: tuple | None = None) -> tuple[list, tuple | None]:
-    """One ensemble for these chords. Seed breaks ties so the next take can differ.
+def family_of(name: str) -> str:
+    """The ensemble family of a recording. Piano is one family, wherever it was recorded."""
+    inst = (name or "").lower()
+    if "piano" in inst or inst == "rhodes":
+        return "piano"
+    if "fat" in inst and "synth" in inst:
+        return "fat synth"
+    if "arp" in inst:
+        return "synth arp"
+    if "synth" in inst:
+        return "synth"
+    if any(part in inst for part in ("cello", "violin", "viola", "string")):
+        return "strings"
+    if any(part in inst for part in ("flute", "oboe", "clarinet", "bassoon", "trumpet", "horn", "sax")):
+        return "winds"
+    if any(part in inst for part in ("marimba", "vibraphone", "xylophone", "glock", "bell")):
+        return "mallets"
+    if "guitar" in inst:
+        return "guitar"
+    if "harp" in inst:
+        return "harp"
+    if "choir" in inst or inst in ("voice", "chorus"):
+        return "choir"
+    if "organ" in inst:
+        return "organ"
+    return inst or "other"
 
-    An ensemble is one origin, one instrument, and one way of building the chord.
-    Full coverage wins. Words and the instrument hint rank next. A long piece
-    prefers assembled notes so pitches are reused instead of one file per chord.
-    """
-    n = len(groups)
-    by_key: dict[tuple, dict[int, dict]] = {}
-    for i, group in enumerate(groups):
-        best: dict[tuple, dict] = {}
-        for opt in group:
-            key = _key(opt)
-            if avoid and key == avoid:
-                continue
-            prev = best.get(key)
-            if prev is None or int(opt.get("tier") or 9) < int(prev.get("tier") or 9):
-                best[key] = opt
-        for key, opt in best.items():
-            by_key.setdefault(key, {})[i] = opt
-    if not by_key:
-        return [None] * n, None
 
-    def rank(key: tuple):
-        covered = by_key[key]
-        sample = next(iter(covered.values()))
-        origin, inst, built = key
-        missing = n - len(covered)
-        word = 0 if matches_any(sample, prefer) else 1
-        if hint:
-            hint_rank = 0 if matches(sample, hint) else 1
-        else:
-            hint_rank = 0
-        if long:
-            kind_rank = 0 if built == "assembled notes" else 1
-        else:
-            kind_rank = 0
-        tier = min(int(opt.get("tier") or 9) for opt in covered.values())
-        tie = zlib.adler32(f"{seed}|{origin}|{inst}|{built}".encode()) % 100000
-        return (0 if missing == 0 else 1, missing, word, hint_rank, kind_rank, tier, tie)
-
-    keys = sorted(by_key, key=rank)
-    primary = keys[0]
-    chosen: list = [by_key[primary].get(i) for i in range(n)]
-    if any(row is None for row in chosen):
-        for key in keys[1:]:
-            for i in range(n):
-                if chosen[i] is None and i in by_key[key]:
-                    chosen[i] = by_key[key][i]
-            if all(row is not None for row in chosen):
-                break
-    return chosen, primary
+def _tier_value(opt: dict) -> int:
+    """0 is a real rank. A missing tier sorts last."""
+    raw = opt.get("tier")
+    if raw is None:
+        return 9
+    return int(raw)
 
 
 def _coverage(groups: list[list[dict]], avoid: tuple | None = None) -> dict[tuple, dict[int, dict]]:
@@ -676,30 +657,93 @@ def _coverage(groups: list[list[dict]], avoid: tuple | None = None) -> dict[tupl
             if avoid and key == avoid:
                 continue
             prev = best.get(key)
-            if prev is None or int(opt.get("tier") or 9) < int(prev.get("tier") or 9):
+            if prev is None or _tier_value(opt) < _tier_value(prev):
                 best[key] = opt
         for key, opt in best.items():
             by_key.setdefault(key, {})[i] = opt
     return by_key
 
 
-def _rank_key(key, covered, n, seed, prefer, hint, long):
-    sample = next(iter(covered.values()))
-    origin, inst, built = key
-    missing = n - len(covered)
-    word = 0 if matches_any(sample, prefer) else 1
-    hint_rank = 0 if not hint or matches(sample, hint) else 1
-    if long:
-        kind_rank = 0 if built == "assembled notes" else 1
+def pick_recording(by_key: dict, n: int, seed: int, prefer: list[str] | None) -> tuple | None:
+    """One recording that can play every chord.
+
+    A family is in the draw when one of its recordings covers the piece: a
+    whole-chord file for each chord, or a stack of indexed notes for each
+    chord. Families draw with equal weight. Piano files and piano notes are
+    one family, the same size as choir, guitar, or a synth. The word "piano"
+    does not shrink that draw. Another named instrument does, when that
+    family can cover. The seed picks the family, then a recording inside it.
+    A whole-chord file ranks ahead of a note stack. An exact voicing ranks
+    ahead of an inversion. A family that cannot cover the piece is not used
+    to fill the gaps.
+    """
+    if not by_key:
+        return None
+    full = [key for key, rows in by_key.items() if len(rows) == n and n]
+    if full:
+        pool = full
     else:
-        kind_rank = 0
-    tier = min(int(opt.get("tier") or 9) for opt in covered.values())
-    tie = zlib.adler32(f"{seed}|{origin}|{inst}|{built}".encode()) % 100000
-    return (0 if missing == 0 else 1, missing, word, hint_rank, kind_rank, tier, tie)
+        best = max(len(rows) for rows in by_key.values())
+        pool = [key for key, rows in by_key.items() if len(rows) == best]
+    # Piano in the words is not a default. Choir, guitar, strings, and the
+    # other named families still keep the draw when they can play the chords.
+    asked = [word for word in (prefer or []) if word != "piano"]
+    if asked:
+        named = []
+        for key in pool:
+            sample = next(iter(by_key[key].values()))
+            if matches_any(sample, asked):
+                named.append(key)
+        if named:
+            pool = named
+    families: dict[str, list] = {}
+    for key in pool:
+        families.setdefault(family_of(key[1]), []).append(key)
+    rng = random.Random(int(seed) + 17)
+    names = sorted(families)
+    rng.shuffle(names)
+    options = list(families[names[0]])
+    rng.shuffle(options)
+    options.sort(key=lambda key: (
+        0 if key[2] == "whole-chord file" else 1,
+        min(_tier_value(opt) for opt in by_key[key].values()),
+    ))
+    return options[0]
+
+
+def choose(groups: list[list[dict]], seed: int, prefer: list[str] | None, hint: str | None, long: bool, avoid: tuple | None = None) -> tuple[list, tuple | None]:
+    """One ensemble for these chords. The next seed can choose another family.
+
+    ``hint`` and ``long`` do not choose the ensemble. A named choir, guitar,
+    or synth does, via ``prefer``, when that family can cover. The word
+    "piano" does not. A recording that cannot play a chord is not used to
+    fill one. Nothing is pitch-shifted to fill a gap.
+    """
+    del hint, long
+    n = len(groups)
+    by_key = _coverage(groups, avoid)
+    if not by_key:
+        return [None] * n, None
+    primary = pick_recording(by_key, n, seed, prefer)
+    chosen: list = [by_key[primary].get(i) for i in range(n)]
+    if any(row is None for row in chosen):
+        rest = [key for key in by_key if key != primary]
+        fam = family_of(primary[1])
+        rng = random.Random(int(seed) + 29)
+        rng.shuffle(rest)
+        rest.sort(key=lambda key: (0 if family_of(key[1]) == fam else 1, -len(by_key[key])))
+        for key in rest:
+            for i in range(n):
+                if chosen[i] is None and i in by_key[key]:
+                    chosen[i] = by_key[key][i]
+            if all(row is not None for row in chosen):
+                break
+    return chosen, primary
 
 
 def _best_named(by_key: dict, words: list[str], n: int, seed: int, prefer, hint, long):
     """The recording of this named voice that covers the most chords. Partial cover is allowed."""
+    del prefer, hint, long
     hits = []
     for key, covered in by_key.items():
         sample = next(iter(covered.values()))
@@ -707,11 +751,14 @@ def _best_named(by_key: dict, words: list[str], n: int, seed: int, prefer, hint,
             hits.append(key)
     if not hits:
         return None
+    rng = random.Random(int(seed) + 41)
+    rng.shuffle(hits)
 
     def sort_key(key: tuple):
         covered = by_key[key]
         missing = n - len(covered)
-        return (0 if missing == 0 else 1, missing, _rank_key(key, covered, n, seed, prefer, hint, long))
+        tier = min(_tier_value(opt) for opt in covered.values())
+        return (0 if missing == 0 else 1, missing, tier)
 
     hits.sort(key=sort_key)
     return hits[0]
@@ -754,24 +801,21 @@ def named_coverage(members: list[dict], symbols: list, word_lists: list[list[str
 
 
 def palette(groups: list[list[dict]], seed: int, prefer: list[str] | None, hint: str | None, long: bool, mode: str, required: list[list[str]] | None = None) -> list[dict]:
-    """The cast for this take. Orderly keeps one member. Free keeps a few who can play the chords.
+    """The cast for this take. One family, unless the words name more than one voice.
 
-    Extras stay with the anchor's origin when that origin has more than one instrument.
     Named timbres ('layer a pluck with a synth') are the cast, even when one of them
     cannot play every chord. A chord that voice cannot play is left to the other voice.
+    A timbre hint does not add a second family, and piano is not added beside the
+    family the seed chose.
     """
+    del hint, long, mode
     n = len(groups)
     by_key = _coverage(groups)
     if not by_key:
         return []
-    keys = sorted(by_key, key=lambda key: _rank_key(key, by_key[key], n, seed, prefer, hint, long))
-
-    def full(key: tuple) -> bool:
-        return len(by_key[key]) == n
 
     def pack(key: tuple) -> dict:
         opts = [by_key[key].get(i) for i in range(n)]
-        sample = next(opt for opt in opts if opt)
         return {
             "key": key,
             "origin": key[0],
@@ -786,42 +830,17 @@ def palette(groups: list[list[dict]], seed: int, prefer: list[str] | None, hint:
         for words in required:
             if not words:
                 continue
-            hit = _best_named(by_key, words, n, seed, prefer, hint, long)
+            hit = _best_named(by_key, words, n, seed, prefer, None, False)
             if hit and hit not in picked:
                 picked.append(hit)
         if picked:
             return [pack(key) for key in picked[:3]]
         return []
 
-    anchor = keys[0]
-    if prefer:
-        named = [key for key in keys if full(key) and matches_any(next(iter(by_key[key].values())), prefer)]
-        if named:
-            anchor = named[0]
-    members = [pack(anchor)]
-    if mode == "orderly":
-        return members
-
-    same = [
-        key for key in keys
-        if full(key) and key[0] == anchor[0] and key[1] != anchor[1]
-        and (not hint or matches(next(iter(by_key[key].values())), hint))
-        and (not prefer or matches_any(next(iter(by_key[key].values())), prefer))
-    ]
-    others = [
-        key for key in keys
-        if full(key) and key not in same and key != anchor and (not long or key[2] == "assembled notes")
-        and (not hint or matches(next(iter(by_key[key].values())), hint))
-        and (not prefer or matches_any(next(iter(by_key[key].values())), prefer))
-    ]
-    # A timbre hint stays on one origin. The next seed can pick a different origin.
-    pool = same if hint else (same or others)
-    rng = random.Random(seed + 91)
-    rng.shuffle(pool)
-    # Not the rank order, so the next seed can keep the anchor and change the company.
-    for key in pool[:2]:
-        members.append(pack(key))
-    return members
+    anchor = pick_recording(by_key, n, seed, prefer)
+    if anchor is None:
+        return []
+    return [pack(anchor)]
 
 
 def _entry_times(rng: random.Random, kind: str, twice: bool, dur: float) -> list[float]:

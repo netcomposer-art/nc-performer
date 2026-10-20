@@ -47,6 +47,18 @@ def check_words(comp: dict, settings: Settings) -> None:
         raise Reject(f"Those words are {len(text)} characters. The limit is {settings.max_words}.")
 
 
+def source_cap(plan: dict, settings: Settings) -> int:
+    """How many sources this plan may keep.
+
+    A layered plan stays at 24. Raw assembly is one file per chord, and a
+    stacked chord may hold several note files, so the bound is the chord cap
+    times the notes in a voicing. The 64 KiB plan cap still applies to both.
+    """
+    if isinstance(plan, dict) and plan.get("assembly") == "raw":
+        return max(settings.max_sources, settings.max_chords * 8)
+    return settings.max_sources
+
+
 def check_plan(plan: dict, settings: Settings, suppliers: dict | None) -> None:
     raw = json.dumps(plan, ensure_ascii=False).encode()
     if len(raw) > settings.max_plan_bytes:
@@ -54,8 +66,9 @@ def check_plan(plan: dict, settings: Settings, suppliers: dict | None) -> None:
     errs = schema_validate(plan)
     if errs:
         raise Reject("The plan does not match the schema:\n" + "\n".join(errs[:12]))
-    if len(plan.get("sources") or {}) > settings.max_sources:
-        raise Reject(f"A Performance can use at most {settings.max_sources} sources.")
+    cap = source_cap(plan, settings)
+    if len(plan.get("sources") or {}) > cap:
+        raise Reject(f"A Performance can use at most {cap} sources.")
     if len(plan.get("chords") or []) > settings.max_chords:
         raise Reject(f"A Performance can have at most {settings.max_chords} chords.")
     if len(plan.get("layers") or []) > settings.max_layers:

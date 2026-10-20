@@ -1,0 +1,40 @@
+# Rebuilds the checked-sounds registry. Manual only. Does not deploy and does not commit.
+# This file has no push, pull_request, or schedule trigger. Do not add one.
+# NC_REGISTRY_RECHECK_DAYS is the license interval. It is not a cap. A schedule
+# can be added later if someone wants the recheck to run unattended.
+name: Refresh checked-sounds registry
+
+on:
+  workflow_dispatch:
+    inputs:
+      recheck_days:
+        description: "License recheck interval in days (NC_REGISTRY_RECHECK_DAYS)"
+        required: false
+        default: "90"
+
+jobs:
+  registry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the kit
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+      - name: Backfill the registry
+        env:
+          NC_REGISTRY_RECHECK_DAYS: ${{ inputs.recheck_days }}
+        run: python -m ncperf.registry --backfill --out checked-sounds.json
+      - name: Upload the registry
+        uses: actions/upload-artifact@v4
+        with:
+          name: checked-sounds
+          path: checked-sounds.json
+          if-no-files-found: error

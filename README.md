@@ -117,7 +117,7 @@ A plan holds: `sections`; `chords` (time, length, symbol, voicing as MIDI notes)
 `clips`, `notes` for the line and triplets); `master` (buses with the hacks, reverb, loudness); `quality`
 (resampling engine); `seed`; `notes`. Hosted Perform
 ([`service/`](service/)) searches Suppliers and the open commons with the same words and does not
-prefer one supplier. A chord strike has to be that chord. `--stub` drafts a musicmatter chord plan
+prefer one supplier. Single notes are read from `ncperf/data/note-index.json` (pitch, onset, length, license) and only the notes a take uses are downloaded. The libraries are not measured again on each take. A chord strike has to be that chord. `--stub` drafts a musicmatter chord plan
 with a pad of overlapped unaltered copies, for editing by hand. Older example plans in this
 repository asked for `stretch_to_s`; the renderer now refuses those plans.
 

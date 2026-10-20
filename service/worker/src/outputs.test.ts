@@ -22,6 +22,19 @@ test("container done stays storing until the files are read back", () => {
   assert.equal(view.stage_line, "Storing the Performance…");
 });
 
+test("a gathered collection is not stored as a finished Performance", () => {
+  const view = containerPageUpdate({
+    state: "gathered",
+    stage: "gathered",
+    percent: 100,
+    stage_line: "Gathered.",
+  });
+  assert.equal(view.state, "gathered");
+  assert.equal(view.stage, "gathered");
+  assert.equal(view.percent, 100);
+  assert.equal(view.stage_line, "Gathered.");
+});
+
 test("a running stage is published as the container reported it", () => {
   const view = containerPageUpdate({
     state: "running",

@@ -18,6 +18,8 @@
   .muted { color: #5c564c; font: 14px/1.4 sans-serif; }
   progress { width: 100%; height: .6rem; }
   audio { width: 100%; margin: .6rem 0; }
+  #sounds { margin: .6rem 0 0; padding-left: 1.2rem; font: 14px/1.45 sans-serif; color: #5c564c; }
+  #sounds li { margin: .15rem 0; }
   .error { background: #f3ddd4; padding: .6rem .8rem; border-radius: 8px; }
   footer { margin-top: 2rem; font: 13px sans-serif; color: #5c564c; }
   a { color: #6b3a1f; }
@@ -26,7 +28,7 @@
 <body data-perform-api="">
 <main>
   <h1>Perform</h1>
-  <p>Write a Composition, then press Perform. A minute or two later the Performance plays here. You can keep the FLAC and the record. Pitch is never shifted.</p>
+  <p>Write a Composition, then press Perform. Each chord appears as it is chosen, and the recording plays as soon as it is encoded. You can keep the FLAC and the record. Pitch is never shifted.</p>
   <form id="form">
     <label for="title">Title</label>
     <input id="title" name="title" value="Glass garden">
@@ -49,6 +51,8 @@
   <section id="status" hidden>
     <p id="stage" class="muted">Queued…</p>
     <progress id="bar" max="100" value="0"></progress>
+    <ol id="sounds"></ol>
+    <audio id="early" controls hidden></audio>
     <p class="row"><button id="stop" type="button" hidden>Stop</button></p>
     <p id="err" class="error" hidden></p>
   </section>
@@ -64,7 +68,7 @@
       <button type="button" id="keep">Keep audio</button>
     </div>
     <p id="credits"></p>
-    <p class="muted">Output is <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>. The sound is shaped by hacks: time-stretch, reverb, and a loudness limiter. Pitch is never shifted.</p>
+    <p class="muted">Output is <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>. The recordings play in order, with a short fade and a peak guard. Pitch is never shifted.</p>
     <details><summary>Full record</summary><pre id="full"></pre></details>
   </section>
   <footer>Peter Semmelhack · NetComposer · code MIT · performances CC BY-SA 4.0</footer>
@@ -74,6 +78,14 @@ const apiBase = document.body.dataset.performApi || "";
 const $ = (id) => document.getElementById(id);
 let claim = sessionStorage.getItem("nc-claim") || "";
 let jobId = "";
+let warmed = false;
+let earlySrc = "";
+
+$("composition").addEventListener("focus", () => {
+  if (warmed) return;
+  warmed = true;
+  fetch(apiBase + "/api/warm").catch(() => {});
+});
 
 async function config() {
   const r = await fetch(apiBase + "/api/config");
@@ -102,6 +114,10 @@ $("form").onsubmit = async (ev) => {
   $("err").hidden = true;
   $("status").hidden = false;
   $("go").disabled = true;
+  $("sounds").replaceChildren();
+  $("early").hidden = true;
+  $("early").removeAttribute("src");
+  earlySrc = "";
   const token = document.querySelector("[name=cf-turnstile-response]");
   const body = {
     title: $("title").value,
@@ -132,11 +148,29 @@ $("form").onsubmit = async (ev) => {
   }
 };
 
+function listSounds(rows) {
+  const box = $("sounds");
+  box.replaceChildren();
+  (rows || []).forEach((row) => {
+    const li = document.createElement("li");
+    const where = Number.isInteger(row.chord) ? "Chord " + (row.chord + 1) + ". " : "";
+    li.textContent = where + row.title + " — " + row.supplier + ", " + row.license;
+    box.appendChild(li);
+  });
+}
+
 async function poll() {
   const r = await fetch(apiBase + "/api/jobs/" + jobId);
   const j = await r.json();
   $("stage").textContent = j.stage_line || j.stage || j.state;
   $("bar").value = j.percent || 0;
+  listSounds(j.found_sounds);
+  const mp3 = j.files && j.files.mp3;
+  if (mp3 && (j.preview_ready || j.state === "done") && mp3 !== earlySrc) {
+    earlySrc = mp3;
+    $("early").src = mp3;
+    $("early").hidden = false;
+  }
   if (j.state === "done") { $("stop").hidden = true; show(j); return; }
   if (j.state === "failed" || j.state === "rejected" || j.state === "cancelled") {
     $("err").hidden = false;
@@ -145,7 +179,7 @@ async function poll() {
     $("stop").hidden = true;
     return;
   }
-  setTimeout(poll, 2000);
+  setTimeout(poll, 400);
 }
 
 async function show(j) {

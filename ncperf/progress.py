@@ -3,6 +3,8 @@ from __future__ import annotations
 
 STAGE_LINES = {
     "queued": "Queued",
+    "gathering": "Gathering the sounds…",
+    "gathered": "Gathered.",
     "planning": "Reading the notes…",
     "fetching": "Fetching the recordings…",
     "measuring": "Checking each note's pitch…",
@@ -64,21 +66,64 @@ def sound_row(title, supplier, license_id) -> dict | None:
     return {"title": title, "supplier": supplier, "license": license_id}
 
 
+def clip_row(sound) -> dict | None:
+    """A chosen chord. Position and preview URL stay on the row the page fills."""
+    if not isinstance(sound, dict):
+        return None
+    row = sound_row(sound.get("title"), sound.get("supplier"), sound.get("license"))
+    if not row:
+        return None
+    if sound.get("chord") is not None and sound.get("chord") != "":
+        try:
+            row["chord"] = int(sound["chord"])
+        except (TypeError, ValueError):
+            pass
+    for key in ("id", "preview_url", "symbol", "clip_id", "url", "author", "credit", "page"):
+        value = sound.get(key)
+        if value not in (None, ""):
+            row[key] = str(value)
+    for key in ("pos", "start_s", "end_s", "duration_s", "loudness_lufs", "gain_db"):
+        value = sound.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        row[key] = int(value) if key == "pos" else float(value)
+    return row
+
+
+def with_preview(sound, job_id: str, base: str) -> dict | None:
+    """Point a chosen clip at the preview route for this job."""
+    row = clip_row(sound)
+    if not row or not job_id:
+        return row
+    sid = row.get("id")
+    if sid and not row.get("preview_url"):
+        path = f"/api/jobs/{job_id}/audio/{sid}"
+        root = (base or "").rstrip("/")
+        row["preview_url"] = f"{root}{path}" if root else path
+    return row
+
+
+def _sound_key(row: dict):
+    if "chord" in row:
+        return ("chord", row["chord"])
+    return ("hit", row["title"], row["supplier"], row["license"])
+
+
 def merge_sounds(have: list | None, extra: list | None) -> list[dict]:
-    out: list[dict] = []
-    seen = set()
+    order = []
+    by = {}
     for row in list(have or []) + list(extra or []):
         if not isinstance(row, dict):
             continue
-        clean = sound_row(row.get("title"), row.get("supplier"), row.get("license"))
+        clean = clip_row(row)
         if not clean:
             continue
-        key = (clean["title"], clean["supplier"], clean["license"])
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(clean)
-    return out
+        key = _sound_key(clean)
+        if key not in by:
+            order.append(key)
+        # A later pick for the same chord replaces the one already on the list.
+        by[key] = clean
+    return [by[key] for key in order]
 
 
 def sounds_from_sources(sources: dict | None) -> list[dict]:

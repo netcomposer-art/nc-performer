@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import {
   applyPerformHit,
   BURST_LIMIT,
+  DAY_S,
   DEFAULT_LIMITS,
   forPage,
   isInternalFailure,
@@ -16,74 +17,79 @@ import {
   BURST_PERIOD_S,
   PER_10MIN,
   PER_DAY,
+  testerPass,
   WINDOW_S,
-  type Counter,
-  type DayCounter,
+  corsHeaders,
+  registryPublicStats,
 } from "./policy.ts";
 
 const T0 = 1_700_000_000;
-const DAY = "2026-10-19";
 
-function take(now: number, window: Counter | null, dayHit: DayCounter | null) {
-  const next = applyPerformHit(now, DAY, window, dayHit);
+function take(now: number, hits: number[]): number[] {
+  const next = applyPerformHit(now, hits);
   assert.equal(next.error, null);
-  return next;
+  return next.hits;
 }
 
 test("three performs are allowed, the fourth in the same 10 minutes is not", () => {
-  let window: Counter | null = null;
-  let dayHit: DayCounter | null = null;
-  for (let i = 0; i < PER_10MIN; i++) {
-    const next = take(T0 + i, window, dayHit);
-    window = next.window;
-    dayHit = next.dayHit;
-  }
-  assert.equal(window?.n, 3);
-  assert.equal(dayHit?.n, 3);
+  let hits: number[] = [];
+  for (let i = 0; i < PER_10MIN; i++) hits = take(T0 + i, hits);
+  assert.equal(hits.length, 3);
 
-  const blocked = applyPerformHit(T0 + 30, DAY, window, dayHit);
+  const blocked = applyPerformHit(T0 + 30, hits);
   assert.match(blocked.error || "", /3 every 10 minutes/);
-  assert.equal(blocked.window.n, 3);
-  assert.equal(blocked.dayHit.n, 3);
+  assert.match(blocked.error || "", /Try again after \d{1,2}:\d{2} [AP]M UTC/);
+  assert.equal(blocked.hits.length, 3);
+  assert.equal(blocked.retry_at, new Date((T0 + WINDOW_S) * 1000).toISOString().replace(/\.\d{3}Z$/, "Z"));
+  assert.equal(blocked.retry_after_s, WINDOW_S - 30);
 });
 
-test("a fresh 10-minute window still counts toward the daily cap", () => {
-  let window: Counter | null = null;
-  let dayHit: DayCounter | null = null;
-  for (let i = 0; i < PER_DAY; i++) {
-    const next = take(T0 + i * WINDOW_S, window, dayHit);
-    window = next.window;
-    dayHit = next.dayHit;
-  }
-  assert.equal(dayHit?.n, PER_DAY);
-  const blocked = applyPerformHit(T0 + PER_DAY * WINDOW_S, DAY, window, dayHit);
-  assert.match(blocked.error || "", /Daily limit reached \(10 Performs/);
-  assert.equal(blocked.dayHit.n, PER_DAY);
-  assert.equal(blocked.window.n, 0);
+test("a fresh 10-minute window still counts toward the rolling daily cap", () => {
+  let hits: number[] = [];
+  for (let i = 0; i < PER_DAY; i++) hits = take(T0 + i * WINDOW_S, hits);
+  assert.equal(hits.length, PER_DAY);
+  const now = T0 + PER_DAY * WINDOW_S;
+  const blocked = applyPerformHit(now, hits);
+  assert.match(blocked.error || "", /Daily limit reached \(10 Performs from this network\)\. Try again after \d{1,2}:\d{2} [AP]M UTC\./);
+  assert.equal(blocked.error?.includes("tomorrow"), false);
+  assert.equal(blocked.hits.length, PER_DAY);
+  const free = T0 + DAY_S;
+  assert.equal(blocked.retry_at, new Date(free * 1000).toISOString().replace(/\.\d{3}Z$/, "Z"));
+  assert.equal(blocked.retry_after_s, free - now);
 });
 
-test("a daily rejection does not consume the 10-minute window", () => {
-  const window = { start: T0, n: 1 };
-  const dayHit = { day: DAY, n: PER_DAY };
-  const blocked = applyPerformHit(T0 + 5, DAY, window, dayHit);
+test("a daily rejection does not consume another hit", () => {
+  const hits = Array.from({ length: PER_DAY }, (_, i) => T0 - (PER_DAY - 1 - i) * WINDOW_S);
+  const blocked = applyPerformHit(T0 + 5, hits);
   assert.match(blocked.error || "", /Daily limit/);
-  assert.equal(blocked.window.n, 1);
-  assert.equal(blocked.dayHit.n, PER_DAY);
+  assert.equal(blocked.error?.includes("10 minutes"), false);
+  assert.equal(blocked.hits.length, PER_DAY);
+  assert.equal(blocked.retry_after_s != null && blocked.retry_after_s > 0, true);
 });
 
-test("the next UTC day starts a new daily count inside an open 10-minute window", () => {
-  const window = { start: T0, n: PER_10MIN };
-  const dayHit = { day: DAY, n: PER_DAY };
-  const stillToday = applyPerformHit(T0 + 10, DAY, window, dayHit);
-  assert.match(stillToday.error || "", /10 minutes/);
-  const tomorrow = applyPerformHit(T0 + 10, "2026-10-20", window, dayHit);
-  assert.match(tomorrow.error || "", /10 minutes/);
-  assert.equal(tomorrow.dayHit.n, 0);
-  const later = applyPerformHit(T0 + WINDOW_S, "2026-10-20", window, dayHit);
-  assert.equal(later.error, null);
-  assert.equal(later.window.n, 1);
-  assert.equal(later.dayHit.day, "2026-10-20");
-  assert.equal(later.dayHit.n, 1);
+test("a hit older than 24 hours drops out and one from 23 hours ago still counts", () => {
+  const recent = T0 - 23 * 3600;
+  let hits: number[] = [];
+  for (let i = 0; i < PER_DAY; i++) hits = take(recent + i * WINDOW_S, hits);
+  const blocked = applyPerformHit(T0, hits);
+  assert.match(blocked.error || "", /Daily limit reached \(10 Performs/);
+  assert.equal(blocked.error?.includes("tomorrow"), false);
+  const freed = applyPerformHit(recent + DAY_S + 1, hits);
+  assert.equal(freed.error, null);
+  assert.equal(freed.hits[0] > recent, true);
+});
+
+test("the tester token matches only the whole secret", async () => {
+  assert.equal(await testerPass("correct-token", "correct-token"), true);
+  assert.equal(await testerPass("  correct-token  ", "correct-token"), true);
+  assert.equal(await testerPass("wrong-token", "correct-token"), false);
+  assert.equal(await testerPass("correct-token-extra", "correct-token"), false);
+  assert.equal(await testerPass("correct", "correct-token"), false);
+  assert.equal(await testerPass(null, "correct-token"), false);
+  assert.equal(await testerPass("", "correct-token"), false);
+  assert.equal(await testerPass("correct-token", ""), false);
+  assert.equal(await testerPass("correct-token", null), false);
+  assert.equal(await testerPass("correct-token", undefined), false);
 });
 
 test("internal failures stay a short sentence and keep the job id", () => {
@@ -104,6 +110,22 @@ test("proxy allowlist covers subdomains the exact apex would miss", () => {
   assert.ok(hosts.includes("*.audio.musicmatter.art"));
   assert.ok(hosts.includes("*.example.com"));
   assert.equal(hosts.includes("*.*.example.com"), false);
+});
+
+test("raw assembly keeps one file per chord past the layered source cap", () => {
+  const sources: Record<string, { kind: string }> = {};
+  for (let i = 0; i < 35; i++) sources["c" + i] = { kind: "supplier" };
+  const plan = {
+    assembly: "raw",
+    sources,
+    chords: Array.from({ length: 35 }, () => ({ t: 0 })),
+    layers: [{}],
+    length_s: 120,
+    tail_s: 0,
+  };
+  assert.equal(rejectPlan(plan), null);
+  const layered = { ...plan, assembly: "layered" };
+  assert.match(rejectPlan(layered) || "", /at most 24 sources/);
 });
 
 test("a Performance can have 16 layers and not 17", () => {
@@ -180,6 +202,24 @@ test("wrangler rate limit is a 10-or-60 second burst, not the 10-minute window",
   ]);
 });
 
+test("registry stats are counts only", () => {
+  assert.deepEqual(registryPublicStats({ size: 12, ok: 9, rejected: 3, checker_version: 1, recheck_days: 90 }), {
+    size: 12,
+    ok: 9,
+    rejected: 3,
+    checker_version: 1,
+    recheck_days: 90,
+  });
+  assert.deepEqual(registryPublicStats(null), {
+    size: 0,
+    ok: 0,
+    rejected: 0,
+    checker_version: null,
+    recheck_days: null,
+  });
+  assert.equal(registryPublicStats({ size: 4, token: "secret" }).size, 4);
+});
+
 test("public job status always has trimmed, seed, found sounds, and a stage line", () => {
   const planning = jobStatusFields({
     stage: "planning",
@@ -202,4 +242,53 @@ test("public job status always has trimmed, seed, found sounds, and a stage line
   assert.deepEqual(idle.found_sounds, []);
   assert.equal(idle.stage_line, "Queued (position 2)");
   assert.equal(idle.seed, 4);
+  assert.equal(planning.tester, false);
+  assert.equal(idle.tester, false);
+  assert.equal(jobStatusFields({ stage: "queued", tester: true }).tester, true);
+});
+
+test("a chord row keeps its position and preview, and a later pick replaces that chord", () => {
+  const live = jobStatusFields({
+    stage: "gathering",
+    found_sounds: [
+      { title: "Choir Cm", supplier: "Musicmatter", license: "CC-BY-SA-4.0", chord: 0, id: "c0", preview_url: "/api/jobs/g-0123456789ab/audio/c0", symbol: "Cm" },
+      { title: "Choir F", supplier: "Musicmatter", license: "CC-BY-SA-4.0", chord: 1, id: "c1", preview_url: "/api/jobs/g-0123456789ab/audio/c1", symbol: "F" },
+      { title: "Piano Cm", supplier: "Musicmatter", license: "CC-BY-SA-4.0", chord: 0, id: "c0", preview_url: "/api/jobs/g-0123456789ab/audio/c0", symbol: "Cm" },
+    ],
+  });
+  assert.deepEqual(live.found_sounds, [
+    { title: "Piano Cm", supplier: "Musicmatter", license: "CC-BY-SA-4.0", chord: 0, id: "c0", preview_url: "/api/jobs/g-0123456789ab/audio/c0", symbol: "Cm" },
+    { title: "Choir F", supplier: "Musicmatter", license: "CC-BY-SA-4.0", chord: 1, id: "c1", preview_url: "/api/jobs/g-0123456789ab/audio/c1", symbol: "F" },
+  ]);
+});
+
+test("a gathered chord keeps the fields the page assembles with", () => {
+  const live = jobStatusFields({
+    stage: "gathered",
+    found_sounds: [{
+      title: "Choir Cm",
+      supplier: "Musicmatter",
+      license: "CC-BY-SA-4.0",
+      chord: 0,
+      id: "c0",
+      preview_url: "/api/jobs/g-0123456789ab/audio/c0",
+      symbol: "Cm",
+      clip_id: "c0",
+      pos: 0,
+      url: "/api/jobs/g-0123456789ab/audio/c0",
+      gain_db: 1.5,
+      duration_s: 2.5,
+      start_s: 0,
+      end_s: 2.5,
+      loudness_lufs: -21.5,
+      credit: "Choir Cm by Ada",
+    }],
+  });
+  assert.equal(live.found_sounds[0].gain_db, 1.5);
+  assert.equal(live.found_sounds[0].duration_s, 2.5);
+  assert.equal(live.found_sounds[0].clip_id, "c0");
+  assert.equal(corsHeaders("https://netcomposer.art")["access-control-allow-origin"], "https://netcomposer.art");
+  assert.equal(corsHeaders("https://play.netcomposer.art").vary, "Origin");
+  assert.equal(corsHeaders("https://evil.example")["access-control-allow-origin"], "*");
+  assert.equal(corsHeaders(null)["access-control-allow-origin"], "*");
 });

@@ -19,6 +19,10 @@ export const KEPT_TAIL_S = 30;
 /** 40 MiB. Confirm with Petrus before raising it. */
 export const KEPT_WAV_MAX_BYTES = 40 * 1024 * 1024;
 export const KEPT_FORM_OVERHEAD = 64 * 1024;
+/** Same 40 MiB cap as a dialed WAV. The take is WAV or FLAC. */
+export const TAKE_AUDIO_MAX_BYTES = KEPT_WAV_MAX_BYTES;
+/** take_state is at most the 64 KiB plan cap, plus the other form fields. */
+export const TAKE_REQUEST_MAX_BYTES = TAKE_AUDIO_MAX_BYTES + 64 * 1024 + 16 * 1024;
 export const DEFAULT_JOB_LENGTH_S = 180;
 const DURATION_EPS_S = 0.05;
 
@@ -51,6 +55,20 @@ export type LiveDials = {
   wet: number;
   loop: boolean;
 };
+
+export function takeAudioKind(audio: Uint8Array): "wav" | "flac" | null {
+  if (
+    audio.length >= 12 &&
+    audio[0] === 0x52 && audio[1] === 0x49 && audio[2] === 0x46 && audio[3] === 0x46 &&
+    audio[8] === 0x57 && audio[9] === 0x41 && audio[10] === 0x56 && audio[11] === 0x45
+  ) return "wav";
+  if (audio.length >= 4 && audio[0] === 0x66 && audio[1] === 0x4c && audio[2] === 0x61 && audio[3] === 0x43) return "flac";
+  return null;
+}
+
+export function takeTooLargeMessage(n: number): string {
+  return `The take is too large (${n} bytes). The limit is ${TAKE_AUDIO_MAX_BYTES} bytes (40 MiB).`;
+}
 
 export function tooLargeMessage(n: number): string {
   const cap = KEPT_WAV_MAX_BYTES;

@@ -1,7 +1,10 @@
 """Fetch one planned sound and check its license on the live page or manifest.
 Which sounds to try is decided by ncperf.discover. This module does not rank suppliers.
-Downloads are cached by URL (and byte range)."""
-import hashlib, html as _html, json, os, re, socket, time, urllib.request
+Downloads are cached by URL (and byte range). Several note files may download at once;
+the cache write for one URL is single-threaded.
+"""
+import hashlib, html as _html, json, os, re, socket, threading, time, urllib.request
+from . import creditcache
 from . import deadline
 from . import licenses as LIC
 from .util import sha256_file
@@ -46,35 +49,91 @@ def http(url, range_bytes=None, timeout=120, tries=3):
         time.sleep(2 * (k + 1))
 
 _text = {}
-def text(url):
-    if url not in _text:
-        b, final = http(url); _text[url] = (b.decode('utf-8', 'replace'), final)
-    return _text[url]
+_fetch_lock = threading.Lock()
 
-def download(url, range_bytes=None, ext=None):
+def text(url):
+    with _fetch_lock:
+        hit = _text.get(url)
+    if hit is not None:
+        return hit
+    b, final = http(url)
+    row = (b.decode('utf-8', 'replace'), final)
+    with _fetch_lock:
+        return _text.setdefault(url, row)
+
+def cache_path(url, range_bytes=None, ext=None):
+    """Local path for one URL. range_bytes is part of the key, including None."""
     key = hashlib.sha1(f'{url}|{range_bytes}'.encode()).hexdigest()[:20]
     ext = ext or os.path.splitext(url.split('?')[0])[1] or '.bin'
-    p = os.path.join(cache_dir(), key + ext.replace('%20', ''))
-    if not os.path.exists(p):
-        b, _ = http(url, range_bytes=range_bytes, timeout=600)
-        if range_bytes and len(b) > range_bytes: b = b[:range_bytes]
-        tmp = p + '.part'; open(tmp, 'wb').write(b); os.replace(tmp, p)
+    return os.path.join(cache_dir(), key + ext.replace('%20', ''))
+
+
+def seed_file(url, data: bytes, ext=None, range_bytes=None):
+    """Write bytes where download() will find them, so a later resolve skips the network."""
+    p = cache_path(url, range_bytes=range_bytes, ext=ext)
+    if os.path.exists(p) and os.path.getsize(p) > 0:
+        return p
+    tmp = f'{p}.part.{threading.get_ident()}'
+    try:
+        with open(tmp, 'wb') as fh:
+            fh.write(data)
+        with _fetch_lock:
+            if not os.path.exists(p):
+                os.replace(tmp, p)
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+    return p
+
+
+def download(url, range_bytes=None, ext=None):
+    p = cache_path(url, range_bytes=range_bytes, ext=ext)
+    if os.path.exists(p):
+        return p
+    b, _ = http(url, range_bytes=range_bytes, timeout=600)
+    if range_bytes and len(b) > range_bytes: b = b[:range_bytes]
+    tmp = f'{p}.part.{threading.get_ident()}'
+    try:
+        with open(tmp, 'wb') as fh:
+            fh.write(b)
+        with _fetch_lock:
+            if not os.path.exists(p):
+                os.replace(tmp, p)
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
     return p
 
 # ---------------- registered Suppliers ----------------
 _reg = {}
 def registry():
-    if 'r' not in _reg: _reg['r'] = json.loads(text(REGISTRY)[0])
-    return _reg['r']
+    with _fetch_lock:
+        if 'r' in _reg:
+            return _reg['r']
+    doc = json.loads(text(REGISTRY)[0])
+    with _fetch_lock:
+        return _reg.setdefault('r', doc)
 
 _idx = {}
 def supplier_for_manifest(manifest_url):
     """Find the active registered Supplier whose index lists this manifest."""
     for s in registry().get('suppliers', []):
         if s.get('status') != 'active': continue
-        if s['index'] not in _idx: _idx[s['index']] = json.loads(text(s['index'])[0])
-        for o in _idx[s['index']].get('offerings', []):
-            if o.get('manifest') == manifest_url: return s, _idx[s['index']], o
+        index = s['index']
+        with _fetch_lock:
+            cached = _idx.get(index)
+        if cached is None:
+            cached = json.loads(text(index)[0])
+            with _fetch_lock:
+                cached = _idx.setdefault(index, cached)
+        for o in cached.get('offerings', []):
+            if o.get('manifest') == manifest_url: return s, cached, o
     return None, None, None
 
 def resolve(src):
@@ -83,19 +142,53 @@ def resolve(src):
     if k == 'supplier':
         s, idx, off = supplier_for_manifest(src['manifest'])
         if not s: raise ValueError(f"manifest not listed by any active registered Supplier: {src['manifest']}")
-        m = json.loads(text(src['manifest'])[0]); lid = m.get('license') or idx.get('default_license')
+        cached = creditcache.get('manifest:' + src['manifest'])
+        if cached and cached.get('audio_url') and cached.get('license'):
+            m = {
+                'license': cached.get('license'),
+                'audio': cached.get('audio_url'),
+                'sha256': cached.get('sha256'),
+                'title': cached.get('title'),
+                'creator': {'name': cached.get('author') or ''},
+            }
+        else:
+            m = json.loads(text(src['manifest'])[0])
+        lid = m.get('license') or idx.get('default_license')
         L = LIC.from_id(lid)
         if not LIC.allowed(L[0]): raise ValueError(f'license not allowed: {lid}')
         p = download(m['audio'])
         sha = sha256_file(p)
         if m.get('sha256') and sha != m['sha256']: raise ValueError(f"sha256 mismatch for {m['audio']}")
         cr = m.get('creator') or idx.get('creator') or {}
+        creditcache.put('manifest:' + src['manifest'], {
+            'title': m.get('title') or os.path.basename(m['audio']),
+            'author': cr.get('name', s.get('display_name')),
+            'license': L[0],
+            'page': src['manifest'],
+            'audio_url': m['audio'],
+            'sha256': sha,
+        })
         return dict(path=p, audio_url=m['audio'], what='Supplier audio as listed in its manifest (sha256 matches the manifest)', source='Supplier: ' + s['name'],
                     source_url=src['manifest'], title=m.get('title', os.path.basename(m['audio'])), author=cr.get('name', s.get('display_name')),
                     supplier=dict(display_name=cr.get('name', s.get('display_name')), primary_link=cr.get('link', s.get('url')), registry_id=s.get('id')),
                     license=dict(id=L[0], name=L[1], uri=L[2], verified_live=f"{now}, manifest {src['manifest']}"), sha256=sha, size_bytes=os.path.getsize(p),
                     chord=m.get('chord'), partial=False)
     if k == 'freesound':
+        # The note index, or an earlier credit lookup, already checked this page.
+        audio_url = src.get('audio_url')
+        lic_id = src.get('license')
+        if audio_url and lic_id and str(src.get('author') or '').strip() and str(src.get('title') or '').strip():
+            L = LIC.from_id(str(lic_id))
+            if not LIC.allowed(L[0]): raise ValueError(f"freesound {src['id']}: license not allowed: {lic_id}")
+            rb = src.get('range_bytes'); p = download(audio_url, rb, '.ogg')
+            a = src.get('author')
+            checked = src.get('credit_checked') or 'cached credit'
+            page_url = src.get('page') or f"https://freesound.org/s/{src['id']}/"
+            what = 'Freesound HQ preview (lossy Ogg Vorbis); originals need OAuth, so the preview is used'
+            if rb: what += f'; only the first {rb:,} bytes were fetched (HTTP Range) and hashed'
+            return dict(path=p, audio_url=audio_url, what=what, source='Freesound', source_url=page_url,
+                        title=src.get('title') or src['id'], author=a, supplier=dict(display_name=a, primary_link=f"https://freesound.org/people/{a}/"),
+                        license=dict(id=L[0], name=L[1], uri=L[2], verified_live=str(checked)), sha256=sha256_file(p), size_bytes=os.path.getsize(p), partial=bool(rb))
         page, final = text(f"https://freesound.org/s/{src['id']}/")
         lic = [l for l in LIC.page_licenses(page)]
         if len(lic) != 1: raise ValueError(f"freesound {src['id']}: could not read exactly one license from the live page ({lic})")
@@ -109,6 +202,13 @@ def resolve(src):
         a = _html.unescape(artist.group(1)) if artist else src.get('author', '?')
         what = 'Freesound HQ preview (lossy Ogg Vorbis); originals need OAuth, so the preview is used'
         if rb: what += f'; only the first {rb:,} bytes were fetched (HTTP Range) and hashed'
+        creditcache.put('freesound:' + str(src['id']), {
+            'title': _html.unescape(title.group(1)) if title else src['id'],
+            'author': a,
+            'license': L[0],
+            'page': final if '/sounds/' in final else f"https://freesound.org/s/{src['id']}/",
+            'audio_url': url,
+        })
         return dict(path=p, audio_url=url, what=what, source='Freesound', source_url=final if '/sounds/' in final else f"https://freesound.org/s/{src['id']}/",
                     title=_html.unescape(title.group(1)) if title else src['id'], author=a, supplier=dict(display_name=a, primary_link=f'https://freesound.org/people/{a}/'),
                     license=dict(id=L[0], name=L[1], uri=L[2], verified_live=f'{now}, {final}'), sha256=sha256_file(p), size_bytes=os.path.getsize(p), partial=bool(rb))

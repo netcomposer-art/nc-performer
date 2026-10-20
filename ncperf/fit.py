@@ -308,6 +308,9 @@ def _prune(plan: dict) -> None:
         for ev in ly.get("events") or []:
             if ev.get("source"):
                 used_s.add(ev["source"])
+    for clip in plan.get("clips") or []:
+        if isinstance(clip, dict):
+            used_s.update(str(sid) for sid in (clip.get("sids") or []) if sid)
     sources = plan.get("sources") or {}
     plan["sources"] = {sid: src for sid, src in sources.items() if sid in used_s}
 

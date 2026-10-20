@@ -18,6 +18,10 @@ def rhash(r): return hashlib.sha256(canon({k: v for k, v in r.items() if k not i
 def interpreter_label(it):
     if not it: return 'human/agent-written plan'
     if it.get('kind') == 'llm': return it.get('model') or 'llm (model not named)'
+    if it.get('kind') == 'browser':
+        return 'browser assembly (the page placed the clips and processed them; the server stored that audio)'
+    if it.get('kind') == 'discover' and str(it.get('note') or '').startswith('raw'):
+        return 'raw assembly (one clip per chord, no processing)'
     if it.get('kind') == 'discover': return 'even-handed source discovery (no supplier preferred)'
     if it.get('kind') == 'stub': return 'nc interpret --stub (rule-based draft, no LLM)'
     return 'human/agent-written plan'
@@ -26,8 +30,20 @@ def hacks_chain(plan, log=None):
     """The hacks in the order they ran. With a render log, the reverb, tone and loudness entries say what actually ran.
 
     Time-stretch is not a hack this kit runs. A log that still lists a stretch engine records that fact;
-    a new render leaves that list empty.
+    a new render leaves that list empty. Raw assembly records only the trim, the fades,
+    the per-clip loudness match, and the peak guard.
     """
+    if plan.get('assembly') == 'raw':
+        if plan.get('assembly_plan'):
+            fade = 'equal-power fades from the assembly plan, each at most 50 ms, placed at the plan\'s start time'
+        else:
+            fade = '12 ms equal-power fade in and out, overlapped 12 ms at each join'
+        return [
+            dict(n=1, tool='trim', type='each clip cut to its chord slot; a shorter clip ends, and the rest of the slot is silence'),
+            dict(n=2, tool='fade', type=fade),
+            dict(n=3, tool='loudness', type='each clip matched to the same integrated loudness', target_lufs=-20, mode_actual='per-clip'),
+            dict(n=4, tool='peak', type='one gain on the sum so the peak stays under full scale', ceiling=0.98),
+        ]
     log = log or {}; M = plan['master']; Q = log.get('quality') or {}
     H = []
     st = Q.get('stretch') or []
@@ -115,8 +131,8 @@ def build(plan, plan_path, log, flac, mp3, out_path, performer='nc-performer kit
         interpreter=it, plan_ref=dict(path=os.path.basename(plan_path), sha256=sha256_file(plan_path)),
         composition_ref=dict(title=C['title'], composer=dict(display_name=C.get('composer')), words_verbatim=C.get('words_verbatim'), **({'sha256': sha256_file(composition_path)} if composition_path and os.path.exists(composition_path) else {})),
         rule_set=dict(seed=plan['seed'], pulse_bpm=plan.get('pulse_bpm'), sections=plan.get('sections'), layers=[dict(id=l['id'], type=l['type'], bus=l.get('bus'), role=l.get('role')) for l in plan['layers']],
-                      pitch_shift=False, transforms_enabled=['trim', 'gain', 'fade', 'filter', 'reverb', 'delay'],
-                      pitch_policy=f"Every pitched sound chosen by NC measurement (pYIN / FFT), not by label; accepted within {plan.get('pitch_tolerance_cents', 15)} cents.", selections=log['selections']),
+                      pitch_shift=False, transforms_enabled=(['trim', 'fade', 'gain'] if plan.get('assembly') == 'raw' else ['trim', 'gain', 'fade', 'filter', 'reverb', 'delay']),
+                      pitch_policy=("Each clip is the recording as published, cut to its slot. Nothing was pitch-shifted or time-stretched." if plan.get('assembly') == 'raw' else f"Every pitched sound chosen by NC measurement (pYIN / FFT), not by label; accepted within {plan.get('pitch_tolerance_cents', 15)} cents."), selections=log['selections']),
         timeline=[dict(chord_index=i, start_s=c['t'], end_s=round(c['t'] + c['dur'], 3), section=c.get('section'), chord=c['symbol'], voicing_midi=c['voicing']) for i, c in enumerate(plan['chords'])],
         line_events=[e for ly in plan['layers'] if ly['type'] == 'notes' for e in ly['events']],
         outputs=[dict(file=os.path.basename(flac), format='FLAC 24-bit/48 kHz stereo', sha256=sha256_file(flac), size_bytes=os.path.getsize(flac), duration_s=round(dur(flac), 3), loudness_lufs_integrated=fI, true_peak_dbtp=fP, lra_lu=fL),
@@ -130,6 +146,8 @@ def build(plan, plan_path, log, flac, mp3, out_path, performer='nc-performer kit
       provenance_files=dict(plan=dict(path=os.path.basename(plan_path), sha256=sha256_file(plan_path)), uses_log=dict(path='uses.json', sha256=sha256_file(os.path.join(os.path.dirname(out_path), 'uses.json')))),
       created_at=now.isoformat(timespec='seconds'),
       signature=dict(status='UNSIGNED', signed_by=None, algorithm=None, key_id=None, value=None, note='Placeholder. Open decision #33 (signed usage records) is not decided.'), amendments=[])
+    if plan.get('assembly_plan'):
+        rec['assembly_plan'] = plan['assembly_plan']
     rec['record_hash'] = dict(algorithm='sha256', over='canonical JSON (sorted keys, no whitespace) of the record without record_hash and signature', value=rhash(rec))
     json.dump(rec, open(out_path, 'w'), indent=1, ensure_ascii=False, default=float)
     return rec

@@ -24,6 +24,10 @@ import {
   KEPT_TAIL_S,
   KEPT_WAV,
   KEPT_WAV_MAX_BYTES,
+  TAKE_AUDIO_MAX_BYTES,
+  TAKE_REQUEST_MAX_BYTES,
+  takeAudioKind,
+  takeTooLargeMessage,
   KeepReject,
   dialsLine,
   inspectWav,
@@ -37,7 +41,7 @@ import {
 } from "./keep";
 import { CANCELLED_MESSAGE, cancelToken, queueErrorIsCancel } from "./cancel";
 import { REQUIRED_OUTPUTS, containerPageUpdate, missingOutputs, readableBytes } from "./outputs";
-import { applyPerformHit, BURST_MESSAGE, claimToken, forPage, isInternalFailure, jobStatusFields, newId, PER_10MIN, PER_DAY, proxyHosts, publicInternalError, rejectPlan, wordsTooLong, type FoundSound } from "./policy";
+import { applyPerformHit, burstBlock, claimToken, corsHeaders, forPage, GATHER_CACHE, isInternalFailure, jobStatusFields, newId, PER_10MIN, PER_DAY, proxyHosts, publicInternalError, registryPublicStats, rejectPlan, testerPass, wordsTooLong, type FoundSound, type RateBlock, type RegistryStats } from "./policy";
 
 // @cloudflare/containers 0.3.7 looks up this exact export on ctx.exports when
 // allowedHosts is set. It is a WorkerEntrypoint, not a Durable Object, so it
@@ -68,6 +72,9 @@ const ALLOWED_HOSTS = [
 ];
 
 const FILES = [...REQUIRED_OUTPUTS];
+const NOTE_INDEX_KEY = "note-index/v1.json";
+const REGISTRY_KEY = "registry/v1.json";
+const REGISTRY_STATS_KEY = "registry/v1-stats.json";
 
 const FILE_TYPES: Record<string, string> = {
   "performance.flac": "audio/flac",
@@ -88,9 +95,13 @@ const TURNSTILE_TEST: Record<string, boolean> = {
   "3x0000000000000000000000000000000AA": false,
 };
 const DUMMY_TOKEN = "XXXX.DUMMY.TOKEN.XXXX";
-const ID_RE = /^[hk]-[0-9abcdefghjkmnpqrstvwxyz]{12}$/;
+const ID_RE = /^[hkg]-[0-9abcdefghjkmnpqrstvwxyz]{12}$/;
 /** Importing Dragonfly and the Python audio stack on a cold instance can take a few minutes. */
 const PORT_READY_MS = 300_000;
+/** One container for every Perform, so a focus ping warms the next job. */
+const WARM_ID = "nc-warm";
+const POLL_MS = 300;
+const JOB_WALL_MS = 10 * 60 * 1000;
 
 export interface Env {
   JOBS: DurableObjectNamespace<JobDO>;
@@ -113,10 +124,21 @@ export interface Env {
   TURNSTILE_VERIFY_URL?: string;
   NC_SIGNING_KEY?: string;
   NC_ADMIN_TOKEN?: string;
+  NC_TESTER_TOKEN?: string;
   NC_INTERNAL_TOKEN?: string;
   NC_PUBLIC_BASE_URL?: string;
   NC_IP_HASH_SALT?: string;
+  NC_PROCESSED?: string;
+  NC_REGISTRY_RECHECK_DAYS?: string;
 }
+
+type AssemblyClock = {
+  written: boolean;
+  durations_s: number[];
+  slots: { t: number; dur: number }[];
+  tempo: { bar: number; bpm: number }[];
+  quarters_per_bar: number;
+};
 
 type Job = {
   id: string;
@@ -133,7 +155,36 @@ type Job = {
   seed?: number | null;
   trimmed?: string | null;
   found_sounds?: FoundSound[];
+  sounds?: GatherSound[];
   stage_line?: string;
+  tester?: boolean;
+  preview_ready?: boolean;
+  clock?: AssemblyClock | null;
+};
+
+type GatherSound = {
+  id: string;
+  title: string;
+  supplier: string;
+  license: string;
+  preview_url: string;
+  page?: string;
+  source_url?: string;
+};
+
+type GatherFile = { sid?: string; url?: string; ext?: string; range_bytes?: number | null };
+
+type GatherDoc = {
+  id?: string;
+  seed?: number;
+  claim_hash?: string;
+  composition?: Record<string, unknown>;
+  plan?: unknown;
+  sounds?: GatherSound[];
+  picked_keys?: string[];
+  picked_sample_ids?: string[];
+  files?: GatherFile[];
+  clock?: AssemblyClock | null;
 };
 
 export class RenderContainer extends Container<Env> {
@@ -164,7 +215,7 @@ export class JobDO extends DurableObject<Env> {
   async patch(fields: Partial<Job>): Promise<Job | null> {
     const job = await this.get();
     if (!job) return null;
-    const finished = job.state === "done" || job.state === "failed" || job.state === "rejected" || job.state === "cancelled";
+    const finished = job.state === "done" || job.state === "failed" || job.state === "rejected" || job.state === "cancelled" || job.state === "gathered";
     if (finished && fields.state && fields.state !== job.state) {
       const next = { ...job };
       if (typeof fields.cost_usd === "number") next.cost_usd = fields.cost_usd;
@@ -204,6 +255,7 @@ export class BudgetDO extends DurableObject<Env> {
       "CREATE TABLE IF NOT EXISTS budget (day TEXT PRIMARY KEY, usd REAL NOT NULL)",
       "CREATE TABLE IF NOT EXISTS day_hits (ip TEXT, day TEXT, n INTEGER NOT NULL, PRIMARY KEY (ip, day))",
       "CREATE TABLE IF NOT EXISTS win_hits (ip TEXT PRIMARY KEY, start REAL NOT NULL, n INTEGER NOT NULL)",
+      "CREATE TABLE IF NOT EXISTS ip_hits (ip TEXT, ts REAL)",
       "CREATE TABLE IF NOT EXISTS queued (id TEXT PRIMARY KEY, created TEXT NOT NULL)",
       "CREATE TABLE IF NOT EXISTS flags (k TEXT PRIMARY KEY, v TEXT NOT NULL)",
       "CREATE TABLE IF NOT EXISTS seen (id TEXT PRIMARY KEY, state TEXT, cost_usd REAL, ip_hash TEXT, error_code TEXT, created_at TEXT)",
@@ -243,35 +295,18 @@ export class BudgetDO extends DurableObject<Env> {
   }
 
   /**
-   * 3 Performs per 10 minutes and 10 per day for one network.
-   * Checked together so a daily rejection does not consume the 10-minute window.
+   * 3 Performs per 10 minutes and 10 per rolling 24 hours for one network.
+   * Checked together so a rejection does not consume either window.
    */
-  async hit(ip: string, per10min = PER_10MIN, perDay = PER_DAY): Promise<string | null> {
+  async hit(ip: string, per10min = PER_10MIN, perDay = PER_DAY): Promise<RateBlock | null> {
     const now = Date.now() / 1000;
-    const today = day();
-    const winRows = this.ctx.storage.sql.exec("SELECT start, n FROM win_hits WHERE ip = ?", ip).toArray();
-    const dayRows = this.ctx.storage.sql.exec("SELECT day, n FROM day_hits WHERE ip = ? AND day = ?", ip, today).toArray();
-    const decision = applyPerformHit(
-      now,
-      today,
-      winRows.length ? { start: Number(winRows[0].start), n: Number(winRows[0].n) } : null,
-      dayRows.length ? { day: String(dayRows[0].day), n: Number(dayRows[0].n) } : null,
-      per10min,
-      perDay,
-    );
-    if (decision.error) return decision.error;
-    this.ctx.storage.sql.exec(
-      "INSERT INTO win_hits (ip, start, n) VALUES (?, ?, ?) ON CONFLICT(ip) DO UPDATE SET start = excluded.start, n = excluded.n",
-      ip,
-      decision.window.start,
-      decision.window.n,
-    );
-    this.ctx.storage.sql.exec(
-      "INSERT INTO day_hits (ip, day, n) VALUES (?, ?, ?) ON CONFLICT(ip, day) DO UPDATE SET n = excluded.n",
-      ip,
-      decision.dayHit.day,
-      decision.dayHit.n,
-    );
+    this.ctx.storage.sql.exec("DELETE FROM ip_hits WHERE ts < ?", now - 86400);
+    const rows = this.ctx.storage.sql.exec("SELECT ts FROM ip_hits WHERE ip = ? AND ts >= ?", ip, now - 86400).toArray();
+    const decision = applyPerformHit(now, rows.map((row) => Number(row.ts)), per10min, perDay);
+    if (decision.error) {
+      return { error: decision.error, retry_after_s: decision.retry_after_s || 1, retry_at: decision.retry_at || "" };
+    }
+    this.ctx.storage.sql.exec("INSERT INTO ip_hits (ip, ts) VALUES (?, ?)", ip, now);
     return null;
   }
 
@@ -336,19 +371,12 @@ async function getSigner(env: Env): Promise<Signer | null> {
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     if (request.method === "OPTIONS") {
-    return new Response(null, {
-      status: 204,
-      headers: {
-        "access-control-allow-origin": "*",
-        "access-control-allow-headers": "Content-Type, Authorization",
-        "access-control-allow-methods": "GET, POST, OPTIONS",
-      },
-    });
+    return new Response(null, { status: 204, headers: corsHeaders(request.headers.get("Origin")) });
   }
     try {
-      return await route(request, env);
+      return await route(request, env, ctx);
     } catch (err) {
       return json({ error: logInternal(null, err), code: "error" }, 500);
     }
@@ -388,7 +416,7 @@ export default {
   },
 };
 
-async function route(request: Request, env: Env): Promise<Response> {
+async function route(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/$/, "") || "/";
   const base = publicBase(request, env);
@@ -397,34 +425,43 @@ async function route(request: Request, env: Env): Promise<Response> {
     return html(pageHtml);
   }
   if (request.method === "GET" && path === "/health") {
-    return json({ ok: true, service: "nc-perform", version: "0.2.0" });
+    return json({ ok: true, service: "nc-perform", version: "0.2.0", registry: await readRegistryStats(env) });
   }
+  if (request.method === "GET" && path === "/api/warm") return warm(env, ctx);
   if (request.method === "GET" && path === "/api/config") return config(env);
   if (request.method === "GET" && path === "/.well-known/nc-record-keys.json") return keys(env);
   if (request.method === "GET" && path === "/api/feed") return feed(env, base);
   if (request.method === "GET" && path === "/admin") return adminPage(request, env);
+  if (request.method === "POST" && path === "/api/gather") return gather(request, env, base);
   if (request.method === "POST" && path === "/api/perform") return perform(request, env, base);
+  if (request.method === "POST" && path === "/api/keep-take") return keepTake(request, env, base);
+  if (request.method === "POST" && path === "/api/perform-processed") {
+    if (!processedOn(env)) return json({ error: "not found" }, 404);
+    return perform(request, env, base, true);
+  }
   if (request.method === "POST" && path === "/api/submit") return submit(request, env, base);
   if (request.method === "POST" && path === "/admin/enabled") return adminEnabled(request, env);
   if (request.method === "POST" && (path === "/admin/hide" || path === "/admin/takedown")) {
     return adminModerate(request, env, path.endsWith("hide") ? "hide" : "takedown");
   }
 
-  let m = path.match(/^\/api\/jobs\/([hk]-[0-9a-z]+)$/);
+  let m = path.match(/^\/api\/jobs\/([hkg]-[0-9a-z]+)$/);
   if (request.method === "GET" && m) return jobStatus(env, m[1], base);
-  m = path.match(/^\/api\/jobs\/([hk]-[0-9a-z]+)\/files\/([A-Za-z0-9._-]+)$/);
+  m = path.match(/^\/api\/jobs\/([hkg]-[0-9a-z]+)\/files\/([A-Za-z0-9._-]+)$/);
   if (request.method === "GET" && m) return file(env, m[1], m[2]);
-  m = path.match(/^\/api\/jobs\/([hk]-[0-9a-z]+)\/events$/);
+  m = path.match(/^\/api\/jobs\/([hkg]-[0-9a-z]+)\/audio\/([A-Za-z0-9._-]+)$/);
+  if (request.method === "GET" && m) return gatherAudio(request, env, m[1], m[2]);
+  m = path.match(/^\/api\/jobs\/([hkg]-[0-9a-z]+)\/events$/);
   if (request.method === "GET" && m) return events(env, m[1], base);
-  m = path.match(/^\/api\/jobs\/([hk]-[0-9a-z]+)\/cancel$/);
+  m = path.match(/^\/api\/jobs\/([hkg]-[0-9a-z]+)\/cancel$/);
   if (request.method === "POST" && m) return cancelJob(request, env, m[1], base);
-  m = path.match(/^\/api\/jobs\/([hk]-[0-9a-z]+)\/(keep|visibility)$/);
+  m = path.match(/^\/api\/jobs\/([hkg]-[0-9a-z]+)\/(keep|visibility)$/);
   if (request.method === "POST" && m) return metaPost(request, env, m[1], m[2]);
-  m = path.match(/^\/api\/verify\/([hk]-[0-9a-z]+)$/);
+  m = path.match(/^\/api\/verify\/([hkg]-[0-9a-z]+)$/);
   if (request.method === "GET" && m) return verify(env, m[1]);
   m = path.match(/^\/records\/sha256\/([0-9a-f]{64})$/);
   if (request.method === "GET" && m) return alias(env, m[1]);
-  m = path.match(/^\/records\/([hk]-[0-9a-z]+)(\.json)?$/);
+  m = path.match(/^\/records\/([hkg]-[0-9a-z]+)(\.json)?$/);
   if (request.method === "GET" && m) return record(env, m[1], Boolean(m[2]));
   return json({ error: "not found" }, 404);
 }
@@ -448,7 +485,18 @@ async function config(env: Env): Promise<Response> {
       formula:
         "fresh prompt tokens times the input price, plus cached prompt tokens times the cached price, plus completion tokens times the output price",
     },
+    registry: await readRegistryStats(env),
   });
+}
+
+async function readRegistryStats(env: Env): Promise<RegistryStats> {
+  try {
+    const obj = await env.PERFORMANCES.get(REGISTRY_STATS_KEY);
+    if (!obj) return registryPublicStats(null);
+    return registryPublicStats(await obj.json());
+  } catch {
+    return registryPublicStats(null);
+  }
 }
 
 async function keys(env: Env): Promise<Response> {
@@ -456,7 +504,7 @@ async function keys(env: Env): Promise<Response> {
   return json({ keys: signer ? [publicJwk(signer)] : [] });
 }
 
-async function perform(request: Request, env: Env, base: string): Promise<Response> {
+async function gather(request: Request, env: Env, base: string): Promise<Response> {
   const b = budget(env);
   const spend = await b.spendToday();
   const on = await b.enabled(env.PERFORM_ENABLED !== "0");
@@ -474,36 +522,188 @@ async function perform(request: Request, env: Env, base: string): Promise<Respon
   const words = `${comp.composition || ""}\n${comp.performance || ""}`;
   const wordErr = wordsTooLong(words);
   if (wordErr) return json({ error: wordErr, code: "rejected" }, 400);
-  if (body.plan != null) {
+  let excluded: string | null = null;
+  let avoidKeys: string[] | null = null;
+  let avoidSamples: string[] | null = null;
+  if (typeof body.exclude_gather_id === "string" && body.exclude_gather_id.trim()) {
+    excluded = body.exclude_gather_id.trim();
+    if (!ID_RE.test(excluded) || !excluded.startsWith("g-")) return json({ error: "not found" }, 404);
+    const token = typeof body.claim_token === "string" ? body.claim_token.trim() : "";
+    if (!token) return json({ error: "claim_token is required.", code: "rejected" }, 400);
+    const previous = await readJsonKey(env, `gathers/${excluded}/collection.json`) as GatherDoc | null;
+    const previousJob = await jobs(env, excluded).get();
+    if (!previous) return json({ error: "not found" }, 404);
+    const claim = previous.claim_hash || previousJob?.claim_hash;
+    if (!(await claimMatches(claim, token))) {
+      return json({ error: "claim_token does not match this Gather." }, 403);
+    }
+    avoidKeys = Array.isArray(previous.picked_keys) ? previous.picked_keys : [];
+    avoidSamples = Array.isArray(previous.picked_sample_ids) ? previous.picked_sample_ids : [];
+  }
+  const ipHash = await sha256Text(`${env.NC_IP_HASH_SALT || "nc-perform"}:${ip}`);
+  const tester = await testerPass(request.headers.get("X-NC-Tester"), env.NC_TESTER_TOKEN);
+  const limited = await rateLimit(env, ipHash, tester);
+  if (limited) return rateJson(limited);
+  const randomSeed = () => crypto.getRandomValues(new Uint32Array(1))[0] % 2147483646 || 1;
+  const seed = body.seed == null ? randomSeed() : (Number(body.seed) || 1);
+  const token = claimToken();
+  const id = newId("g");
+  const created = isoNow();
+  const req = {
+    kind: "gather",
+    composition: comp,
+    visibility: "unlisted",
+    seed,
+    instrument,
+    claim_hash: await sha256Text(token),
+    public_base: base,
+    avoid_keys: avoidKeys,
+    avoid_sample_ids: avoidSamples,
+    excluded_gather_id: excluded,
+    force_stub: spend >= 3,
+    tester,
+  };
+  const job: Job = {
+    id,
+    state: "queued",
+    stage: "queued",
+    percent: 0,
+    error: null,
+    error_code: null,
+    request_json: JSON.stringify(req),
+    ip_hash: ipHash,
+    claim_hash: req.claim_hash,
+    cost_usd: 0,
+    created_at: created,
+    seed,
+    trimmed: null,
+    found_sounds: [],
+    sounds: [],
+    stage_line: "Queued",
+    tester,
+  };
+  await jobs(env, id).create(job);
+  const placed = await b.enqueue(id, created, 50);
+  if ("error" in placed) {
+    await jobs(env, id).patch({ state: "rejected", stage: "rejected", percent: 100, error: placed.error, error_code: "busy" });
+    return json({ error: placed.error, code: "busy" }, 503);
+  }
+  try {
+    await env.PERFORM_JOBS.send({ id });
+  } catch (err) {
+    await b.dequeue(id);
+    const error = logInternal(id, err);
+    await jobs(env, id).patch({ state: "failed", stage: "failed", percent: 100, error, error_code: "queue" });
+    return json({ error, id, gather_id: id, code: "error" }, 500);
+  }
+  return json({
+    gather_id: id,
+    id,
+    claim_token: token,
+    seed,
+    sounds: [],
+    pending: true,
+    status: "queued",
+    position: placed.position,
+    poll: `/api/jobs/${id}`,
+    excluded_gather_id: excluded,
+  }, 202);
+}
+
+async function keptGather(env: Env, body: Record<string, unknown>): Promise<{ gather_id: string; plan: unknown; composition: Record<string, unknown>; seed: number } | Response | null> {
+  const raw = body.gather_id;
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  const gatherId = raw.trim();
+  if (!ID_RE.test(gatherId) || !gatherId.startsWith("g-")) return json({ error: "not found" }, 404);
+  const token = typeof body.claim_token === "string" ? body.claim_token.trim() : "";
+  if (!token) return json({ error: "claim_token is required.", code: "rejected" }, 400);
+  const doc = await readJsonKey(env, `gathers/${gatherId}/collection.json`) as GatherDoc | null;
+  const gatherJob = await jobs(env, gatherId).get();
+  if (!doc) {
+    if (gatherJob && !["gathered", "failed", "rejected", "cancelled", "done"].includes(gatherJob.state)) {
+      return json({ error: "That Gather is not ready.", code: "rejected", gather_id: gatherId, state: gatherJob.state }, 409);
+    }
+    return json({ error: "not found" }, 404);
+  }
+  const claim = doc.claim_hash || gatherJob?.claim_hash;
+  if (!(await claimMatches(claim, token))) return json({ error: "claim_token does not match this Gather." }, 403);
+  if (!doc.plan || !doc.composition || typeof doc.composition !== "object") {
+    return json({ error: "That Gather is not ready.", code: "rejected", gather_id: gatherId }, 409);
+  }
+  const planErr = rejectPlan(doc.plan);
+  if (planErr) return json({ error: planErr, code: "rejected" }, 400);
+  const planSeed = (doc.plan as { seed?: number }).seed;
+  const seed = Number(doc.seed || planSeed) || 1;
+  return { gather_id: gatherId, plan: doc.plan, composition: doc.composition, seed };
+}
+
+function processedOn(env: Env): boolean {
+  const value = (env.NC_PROCESSED || "").trim().toLowerCase();
+  return value === "1" || value === "true" || value === "yes" || value === "on";
+}
+
+async function perform(request: Request, env: Env, base: string, processed = false): Promise<Response> {
+  const b = budget(env);
+  const spend = await b.spendToday();
+  const on = await b.enabled(env.PERFORM_ENABLED !== "0");
+  if (!on || spend >= 5) return json({ error: "Perform is resting until tomorrow.", code: "resting" }, 503);
+  const body = (await readJson(request)) as Record<string, unknown>;
+  const ip = clientIp(request);
+  if (env.TURNSTILE_SECRET_KEY && !(await turnstile(env, body.turnstile_token, ip))) {
+    return json({ error: "The bot check failed. Reload the page and try again.", code: "turnstile" }, 403);
+  }
+  const kept = await keptGather(env, body);
+  if (kept instanceof Response) return kept;
+  const comp = kept ? kept.composition : compositionFrom(body);
+  const instrumentError = kept ? null : instrumentProblem(body.instrument);
+  if (instrumentError) return json({ error: instrumentError, code: "rejected" }, 400);
+  const instrument = typeof body.instrument === "string" && body.instrument.trim() ? body.instrument.trim() : null;
+  if (!kept && instrument) comp.instrument = instrument;
+  if (!kept) {
+    const words = `${comp.composition || ""}\n${comp.performance || ""}`;
+    const wordErr = wordsTooLong(words);
+    if (wordErr) return json({ error: wordErr, code: "rejected" }, 400);
+  }
+  if (!kept && body.plan != null) {
     if (typeof body.plan !== "object" || Array.isArray(body.plan)) return json({ error: "plan must be a JSON object.", code: "rejected" }, 400);
     const planErr = rejectPlan(body.plan);
     if (planErr) return json({ error: planErr, code: "rejected" }, 400);
+    const posted = body.plan as { assembly?: string };
+    if (!processed && posted.assembly !== "raw") {
+      return json({ error: "This release assembles the recordings in order. Processing is off.", code: "rejected" }, 400);
+    }
   }
   const ipHash = await sha256Text(`${env.NC_IP_HASH_SALT || "nc-perform"}:${ip}`);
-  const limited = await rateLimit(env, ipHash);
-  if (limited) return json({ error: limited, code: "rate" }, 429);
+  const tester = await testerPass(request.headers.get("X-NC-Tester"), env.NC_TESTER_TOKEN);
+  const limited = await rateLimit(env, ipHash, tester);
+  if (limited) return rateJson(limited);
   const visibility = body.visibility || "unlisted";
   if (visibility !== "unlisted" && visibility !== "public") {
     return json({ error: "visibility must be unlisted or public.", code: "rejected" }, 400);
   }
   const randomSeed = () => crypto.getRandomValues(new Uint32Array(1))[0] % 2147483646 || 1;
   let seed: number;
-  if (body.perform_again || body.seed == null) seed = randomSeed();
+  if (kept) seed = kept.seed;
+  else if (body.perform_again || body.seed == null) seed = randomSeed();
   else seed = Number(body.seed) || 1;
   const token = claimToken();
   const id = newId("h");
   const created = isoNow();
   const req = {
     composition: comp,
-    plan: body.plan ?? null,
+    plan: kept ? kept.plan : (body.plan ?? null),
+    gather_id: kept ? kept.gather_id : null,
     visibility,
     seed,
     keep: Boolean(body.keep),
     instrument: instrument,
     claim_hash: await sha256Text(token),
     public_base: base,
-    // The container still decides discovery vs model from the words. This flag skips the model when the soft budget is spent.
+    // Raw assembly does not call the model. This flag still skips it on the processed endpoint when the soft budget is spent.
+    // A tester pass does not change it, and it does not change the $5 rest either.
     force_stub: spend >= 3,
+    tester,
+    processed: processed && processedOn(env),
   };
   const job: Job = {
     id,
@@ -521,6 +721,7 @@ async function perform(request: Request, env: Env, base: string): Promise<Respon
     trimmed: null,
     found_sounds: [],
     stage_line: "Queued",
+    tester,
   };
   await jobs(env, id).create(job);
   const placed = await b.enqueue(id, created, 50);
@@ -547,6 +748,160 @@ async function perform(request: Request, env: Env, base: string): Promise<Respon
   }, 202);
 }
 
+async function keepTake(request: Request, env: Env, base: string): Promise<Response> {
+  const b = budget(env);
+  const spend = await b.spendToday();
+  const on = await b.enabled(env.PERFORM_ENABLED !== "0");
+  if (!on || spend >= 5) return json({ error: "Perform is resting until tomorrow.", code: "resting" }, 503);
+  const ctype = request.headers.get("content-type") || "";
+  if (!ctype.toLowerCase().includes("multipart/form-data")) {
+    return json({ error: "Save the take as multipart/form-data.", code: "rejected" }, 400);
+  }
+  const len = Number(request.headers.get("content-length") || 0);
+  if (len > TAKE_REQUEST_MAX_BYTES) return json({ error: `Request is too large (${len} bytes).`, code: "rejected" }, 400);
+  const raw = new Uint8Array(await request.arrayBuffer());
+  if (raw.byteLength > TAKE_REQUEST_MAX_BYTES) return json({ error: `Request is too large (${raw.byteLength} bytes).`, code: "rejected" }, 400);
+  let parts: Record<string, Uint8Array>;
+  try {
+    parts = parseMultipart(raw, ctype);
+  } catch (err) {
+    if (err instanceof KeepReject) return json({ error: err.message, code: "rejected" }, 400);
+    throw err;
+  }
+  const text = (name: string): string | null => {
+    const blob = parts[name];
+    if (!blob) return null;
+    try {
+      return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(blob);
+    } catch {
+      throw new KeepReject(`${name} must be text.`);
+    }
+  };
+  let fields: { gather_id: string; claim_token: string; turnstile_token: string; title: string | null; listed: string | null; takeState: unknown; audio: Uint8Array };
+  try {
+    const stateBytes = parts.take_state;
+    if (!stateBytes || stateBytes.byteLength < 2) return json({ error: "take_state is required.", code: "rejected" }, 400);
+    if (stateBytes.byteLength > 64 * 1024) return json({ error: "take_state is too large.", code: "rejected" }, 400);
+    let takeState: unknown;
+    try {
+      takeState = JSON.parse(text("take_state") || "");
+    } catch (err) {
+      if (err instanceof KeepReject) throw err;
+      return json({ error: "take_state must be JSON.", code: "rejected" }, 400);
+    }
+    const plan = (takeState as { plan?: unknown } | null)?.plan;
+    if (!takeState || typeof takeState !== "object" || Array.isArray(takeState) || !plan || typeof plan !== "object" || Array.isArray(plan)) {
+      return json({ error: "take_state.plan is the assembly plan.", code: "rejected" }, 400);
+    }
+    const audio = parts.audio;
+    if (!audio || audio.byteLength < 1) return json({ error: "Attach the take as the form field 'audio'.", code: "rejected" }, 400);
+    if (audio.byteLength > TAKE_AUDIO_MAX_BYTES) return json({ error: takeTooLargeMessage(audio.byteLength), code: "rejected" }, 400);
+    if (!takeAudioKind(audio)) return json({ error: "audio must be WAV or FLAC.", code: "rejected" }, 400);
+    fields = {
+      gather_id: (text("gather_id") || "").trim(),
+      claim_token: (text("claim_token") || "").trim(),
+      turnstile_token: text("turnstile_token") || "",
+      title: text("title"),
+      listed: text("listed"),
+      takeState,
+      audio,
+    };
+  } catch (err) {
+    if (err instanceof KeepReject) return json({ error: err.message, code: "rejected" }, 400);
+    throw err;
+  }
+  const ip = clientIp(request);
+  if (env.TURNSTILE_SECRET_KEY && !(await turnstile(env, fields.turnstile_token, ip))) {
+    return json({ error: "The bot check failed. Reload the page and try again.", code: "turnstile" }, 403);
+  }
+  const kept = await keptGather(env, fields);
+  if (kept instanceof Response) return kept;
+  if (!kept) return json({ error: "gather_id is required.", code: "rejected" }, 400);
+  let title: string | null = null;
+  if (fields.title && fields.title.trim()) {
+    title = fields.title.trim();
+    if (title.length > 200) return json({ error: "title must be a short name.", code: "rejected" }, 400);
+  }
+  let listed = false;
+  if (fields.listed != null && fields.listed.trim()) {
+    const flag = fields.listed.trim().toLowerCase();
+    if (flag !== "true" && flag !== "false") return json({ error: "listed must be true or false.", code: "rejected" }, 400);
+    listed = flag === "true";
+  }
+  const ipHash = await sha256Text(`${env.NC_IP_HASH_SALT || "nc-perform"}:${ip}`);
+  const tester = await testerPass(request.headers.get("X-NC-Tester"), env.NC_TESTER_TOKEN);
+  const limited = await rateLimit(env, ipHash, tester);
+  if (limited) return rateJson(limited);
+  const randomSeed = () => crypto.getRandomValues(new Uint32Array(1))[0] % 2147483646 || 1;
+  const planSeed = Number((fields.takeState as { plan?: { seed?: number } }).plan?.seed);
+  const seed = Number.isFinite(planSeed) && planSeed >= 1 ? Math.trunc(planSeed) : randomSeed();
+  const token = claimToken();
+  const id = newId("h");
+  const created = isoNow();
+  const kind = takeAudioKind(fields.audio) || "wav";
+  await env.PERFORMANCES.put(`jobs/${id}/take-audio`, fields.audio, {
+    httpMetadata: { contentType: kind === "flac" ? "audio/flac" : "audio/wav" },
+  });
+  const req = {
+    kind: "keep-take",
+    composition: kept.composition,
+    gather_id: kept.gather_id,
+    take_state: fields.takeState,
+    upload_key: `jobs/${id}/take-audio`,
+    visibility: listed ? "public" : "unlisted",
+    seed,
+    keep: true,
+    title,
+    claim_hash: await sha256Text(token),
+    public_base: base,
+    force_stub: spend >= 3,
+    tester,
+  };
+  const job: Job = {
+    id,
+    state: "queued",
+    stage: "queued",
+    percent: 0,
+    error: null,
+    error_code: null,
+    request_json: JSON.stringify(req),
+    ip_hash: ipHash,
+    claim_hash: req.claim_hash,
+    cost_usd: 0,
+    created_at: created,
+    seed,
+    trimmed: null,
+    found_sounds: [],
+    stage_line: "Queued",
+    tester,
+  };
+  await jobs(env, id).create(job);
+  const placed = await b.enqueue(id, created, 50);
+  if ("error" in placed) {
+    await jobs(env, id).patch({ state: "rejected", stage: "rejected", percent: 100, error: placed.error, error_code: "busy" });
+    return json({ error: placed.error, code: "busy" }, 503);
+  }
+  try {
+    await env.PERFORM_JOBS.send({ id });
+  } catch (err) {
+    await b.dequeue(id);
+    const error = logInternal(id, err);
+    await jobs(env, id).patch({ state: "failed", stage: "failed", percent: 100, error, error_code: "queue" });
+    return json({ error, id, code: "error" }, 500);
+  }
+  return json({
+    id,
+    gather_id: kept.gather_id,
+    status: "queued",
+    position: placed.position,
+    poll: `/api/jobs/${id}`,
+    claim_token: token,
+    record_url: `${base}/records/${id}.json`,
+    page_url: `${base}/records/${id}`,
+    note: "Save claim_token. It is not shown again. A later account can use it to adopt this Performance. v1 has no accounts.",
+  }, 202);
+}
+
 async function runContainer(env: Env, id: string): Promise<void> {
   const stub = jobs(env, id);
   const job = await stub.get();
@@ -556,11 +911,11 @@ async function runContainer(env: Env, id: string): Promise<void> {
     await writeCancelledStatus(env, id);
     return;
   }
-  if (job.state === "done" || job.state === "failed" || job.state === "rejected") return;
+  if (job.state === "done" || job.state === "failed" || job.state === "rejected" || job.state === "gathered") return;
   await budget(env).dequeue(id);
   if (await abandonIfCancelled(env, id)) return;
-  const container = getContainer(env.RENDER, id);
-  const requested = JSON.parse(job.request_json) as { public_base?: string };
+  const container = getContainer(env.RENDER, WARM_ID);
+  const requested = JSON.parse(job.request_json) as { public_base?: string; gather_id?: string; kind?: string };
   const base = (env.NC_PUBLIC_BASE_URL || requested.public_base || "").replace(/\/$/, "");
   const envVars = containerEnv(env, base);
   await container.startAndWaitForPorts({
@@ -570,6 +925,19 @@ async function runContainer(env: Env, id: string): Promise<void> {
   await container.setAllowedHosts(proxyHosts(allowedHosts(env)));
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (env.NC_INTERNAL_TOKEN) headers.authorization = `Bearer ${env.NC_INTERNAL_TOKEN}`;
+  try {
+    await seedNoteIndex(env, container, id, headers);
+    await seedRegistry(env, container, id, headers);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    console.error(JSON.stringify({ event: "note_index", id, detail }));
+  }
+  if (requested.kind === "keep-take" && requested.gather_id) {
+    await seedKeepGather(env, container, id, requested.gather_id, headers);
+    await seedTakeAudio(env, container, id, headers);
+  } else if (requested.gather_id && requested.kind !== "gather") {
+    await seedGatherCache(env, container, id, requested.gather_id, headers);
+  }
   const started = await containerFetch(container, id, "http://container/internal/jobs", {
     method: "POST",
     headers,
@@ -577,6 +945,10 @@ async function runContainer(env: Env, id: string): Promise<void> {
   });
   if (!started.ok && started.status !== 202) {
     throw new Error(`container rejected the job (${started.status})`);
+  }
+  if (await abandonIfCancelled(env, id)) {
+    await signalContainerCancel(env, id);
+    return;
   }
   let last: {
     state?: string;
@@ -587,7 +959,10 @@ async function runContainer(env: Env, id: string): Promise<void> {
     seed?: number | null;
     trimmed?: string | null;
     found_sounds?: FoundSound[];
+    sounds?: GatherSound[];
     stage_line?: string;
+    preview_ready?: boolean;
+    clock?: AssemblyClock | null;
   } = {};
   let loggedFault = false;
   const pageError = (error: string | null | undefined): string | null => {
@@ -599,13 +974,29 @@ async function runContainer(env: Env, id: string): Promise<void> {
     }
     return publicInternalError(id);
   };
-  for (let i = 0; i < 300; i++) {
-    if (await abandonIfCancelled(env, id)) return;
-    await sleep(2000);
-    if (await abandonIfCancelled(env, id)) return;
+  let previewOnR2 = false;
+  const wallAt = Date.now() + JOB_WALL_MS;
+  while (Date.now() < wallAt) {
+    if (await abandonIfCancelled(env, id)) {
+      await signalContainerCancel(env, id);
+      return;
+    }
+    await sleep(POLL_MS);
+    if (await abandonIfCancelled(env, id)) {
+      await signalContainerCancel(env, id);
+      return;
+    }
     const res = await containerFetch(container, id, `http://container/internal/jobs/${id}`, { headers });
     if (!res.ok) continue;
     last = await res.json();
+    if (last.preview_ready === true && !previewOnR2) {
+      try {
+        previewOnR2 = await copyPreviewEarly(env, container, id, headers);
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        console.error(JSON.stringify({ event: "preview_early", id, detail }));
+      }
+    }
     const page = containerPageUpdate(last);
     const patch: Partial<Job> = {
       state: page.state,
@@ -616,27 +1007,63 @@ async function runContainer(env: Env, id: string): Promise<void> {
     if (last.seed != null && Number.isFinite(Number(last.seed))) patch.seed = Number(last.seed);
     if ("trimmed" in last) patch.trimmed = typeof last.trimmed === "string" && last.trimmed.trim() ? last.trimmed : null;
     if (Array.isArray(last.found_sounds)) patch.found_sounds = last.found_sounds;
+    if (Array.isArray(last.sounds)) patch.sounds = last.sounds;
+    if ("clock" in last) patch.clock = last.clock;
     if (page.stage_line) patch.stage_line = page.stage_line;
-    if (await abandonIfCancelled(env, id)) return;
+    if (previewOnR2) patch.preview_ready = true;
+    if (await abandonIfCancelled(env, id)) {
+      await signalContainerCancel(env, id);
+      return;
+    }
+    // Publish gathered only after the files are in R2. Until then the page stays on gathering.
+    if (last.state === "gathered") {
+      await stub.patch({ ...patch, state: "gathering", stage: "gathering", percent: 90, stage_line: "Gathering the sounds…" });
+      break;
+    }
     await stub.patch(patch);
     if (last.state === "done" || last.state === "failed" || last.state === "rejected") break;
   }
-  if (await abandonIfCancelled(env, id)) return;
-  if (last.state === "done") {
+  if (await abandonIfCancelled(env, id)) {
+    await signalContainerCancel(env, id);
+    return;
+  }
+  if (last.state === "gathered") {
+    const doc = await copyGather(env, container, id, headers);
+    last.sounds = Array.isArray(doc.sounds) ? doc.sounds : [];
+    last.clock = ("clock" in doc ? doc.clock ?? null : null) as AssemblyClock | null;
+    last.stage_line = "Gathered.";
+    if (doc.seed != null) last.seed = Number(doc.seed);
+  } else if (last.state === "done") {
     await sleep(400);
-    if (await abandonIfCancelled(env, id)) return;
+    if (await abandonIfCancelled(env, id)) {
+      await signalContainerCancel(env, id);
+      return;
+    }
     const again = await containerFetch(container, id, `http://container/internal/jobs/${id}`, { headers });
     if (again.ok) last = await again.json();
     if (last.state === "done") {
-      if (await abandonIfCancelled(env, id)) return;
+      if (await abandonIfCancelled(env, id)) {
+        await signalContainerCancel(env, id);
+        return;
+      }
       await copyOutputs(env, container, id, headers);
-      if (await abandonIfCancelled(env, id)) return;
+      if (await abandonIfCancelled(env, id)) {
+        await signalContainerCancel(env, id);
+        return;
+      }
       await confirmStored(env, id);
+      if (requested.kind === "keep-take") await env.PERFORMANCES.delete(`jobs/${id}/take-audio`);
     }
   } else if (last.state !== "failed" && last.state !== "rejected") {
     throw new Error("container did not finish within 10 minutes");
   }
-  if (await abandonIfCancelled(env, id)) return;
+  if (await abandonIfCancelled(env, id)) {
+    await signalContainerCancel(env, id);
+    return;
+  }
+  if (requested.kind === "keep-take" && last.state !== "done") {
+    await env.PERFORMANCES.delete(`jobs/${id}/take-audio`);
+  }
   const cost = Number(last.cost_usd || 0);
   const shown = pageError(last.error);
   await budget(env).addSpend(cost);
@@ -644,13 +1071,17 @@ async function runContainer(env: Env, id: string): Promise<void> {
     ? (typeof last.stage_line === "string" && last.stage_line.trim() && last.stage_line !== "Storing the Performance…"
       ? last.stage_line
       : "Done")
-    : undefined;
+    : last.state === "gathered"
+      ? "Gathered."
+      : undefined;
   const updated = await stub.patch({
     state: last.state || "failed",
     stage: last.stage || last.state || "failed",
     percent: 100,
     error: shown,
     cost_usd: cost,
+    ...(Array.isArray(last.sounds) ? { sounds: last.sounds } : {}),
+    ...("clock" in last ? { clock: last.clock } : {}),
     ...(finishedLine ? { stage_line: finishedLine } : {}),
   });
   if (updated) {
@@ -675,9 +1106,16 @@ async function runContainer(env: Env, id: string): Promise<void> {
         trimmed: typeof last.trimmed === "string" && last.trimmed.trim() ? last.trimmed : null,
         found_sounds: Array.isArray(last.found_sounds) ? last.found_sounds : [],
         stage_line: last.stage_line || "Something went wrong.",
+        ...(job.tester ? { tester: true } : {}),
       }),
       { httpMetadata: { contentType: "application/json" } },
     );
+  }
+  try {
+    await pullRegistry(env, container, id, headers);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    console.error(JSON.stringify({ event: "registry", id, detail }));
   }
 }
 
@@ -696,9 +1134,11 @@ function containerEnv(env: Env, base: string): Record<string, string> {
   if (env.NC_LLM_BASE_URL) out.NC_LLM_BASE_URL = env.NC_LLM_BASE_URL;
   if (env.NC_LLM_API_KEY) out.NC_LLM_API_KEY = env.NC_LLM_API_KEY;
   if (env.NC_LLM_EVERY_PERFORM) out.NC_LLM_EVERY_PERFORM = env.NC_LLM_EVERY_PERFORM;
+  if (processedOn(env)) out.NC_PROCESSED = "1";
   if (env.FREESOUND_API_KEY) out.FREESOUND_API_KEY = env.FREESOUND_API_KEY;
   if (env.NC_SIGNING_KEY) out.NC_SIGNING_KEY = env.NC_SIGNING_KEY;
   if (env.NC_INTERNAL_TOKEN) out.NC_INTERNAL_TOKEN = env.NC_INTERNAL_TOKEN;
+  if (env.NC_REGISTRY_RECHECK_DAYS) out.NC_REGISTRY_RECHECK_DAYS = env.NC_REGISTRY_RECHECK_DAYS;
   // Exact names only. Python suffix-matches these. Globs belong to ContainerProxy.
   out.NC_ALLOWED_HOSTS = allowedHosts(env).join(",");
   return out;
@@ -717,6 +1157,48 @@ function allowedHosts(env: Env): string[] {
   return [...hosts];
 }
 
+function warm(env: Env, ctx: ExecutionContext): Response {
+  ctx.waitUntil(warmContainer(env).catch((err) => {
+    const detail = err instanceof Error ? err.message : String(err);
+    console.error(JSON.stringify({ event: "warm", detail }));
+  }));
+  return json({ ok: true, warming: true });
+}
+
+async function warmContainer(env: Env): Promise<void> {
+  const container = getContainer(env.RENDER, WARM_ID);
+  const base = (env.NC_PUBLIC_BASE_URL || "").replace(/\/$/, "");
+  await container.startAndWaitForPorts({
+    startOptions: { envVars: containerEnv(env, base), enableInternet: false },
+    cancellationOptions: { portReadyTimeoutMS: PORT_READY_MS, instanceGetTimeoutMS: PORT_READY_MS },
+  });
+  await container.setAllowedHosts(proxyHosts(allowedHosts(env)));
+  await containerFetch(container, WARM_ID, "http://container/health");
+}
+
+async function signalContainerCancel(env: Env, id: string): Promise<void> {
+  const container = getContainer(env.RENDER, WARM_ID);
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (env.NC_INTERNAL_TOKEN) headers.authorization = `Bearer ${env.NC_INTERNAL_TOKEN}`;
+  try {
+    await containerFetch(container, id, `http://container/internal/jobs/${id}/cancel`, { method: "POST", headers, body: "{}" });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    console.error(JSON.stringify({ event: "cancel_container", id, detail }));
+  }
+}
+
+/** Copy preview.mp3 and advertise it only after one byte comes back from R2. */
+async function copyPreviewEarly(env: Env, container: DurableObjectStub<RenderContainer>, id: string, headers: Record<string, string>): Promise<boolean> {
+  const res = await containerFetch(container, id, `http://container/internal/jobs/${id}/files/preview.mp3`, { headers });
+  if (!res.ok) return false;
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  if (!bytes.byteLength) return false;
+  await putOnce(env, `performances/${id}/preview.mp3`, bytes, "audio/mpeg", false);
+  const obj = await env.PERFORMANCES.get(`performances/${id}/preview.mp3`, { range: { offset: 0, length: 1 } });
+  return objectHasBytes(obj);
+}
+
 async function containerFetch(container: DurableObjectStub<RenderContainer>, id: string, url: string, init?: RequestInit): Promise<Response> {
   let res: Response;
   try {
@@ -732,6 +1214,176 @@ async function containerFetch(container: DurableObjectStub<RenderContainer>, id:
     throw new Error(`container HTTP ${res.status} for ${url}`);
   }
   return res;
+}
+
+function audioType(ext: string | undefined): string {
+  const low = (ext || "").toLowerCase();
+  if (low === ".flac") return "audio/flac";
+  if (low === ".mp3") return "audio/mpeg";
+  if (low === ".wav" || low === ".wave") return "audio/wav";
+  if (low === ".ogg") return "audio/ogg";
+  if (low === ".aif" || low === ".aiff") return "audio/aiff";
+  return "application/octet-stream";
+}
+
+async function seedNoteIndex(env: Env, container: DurableObjectStub<RenderContainer>, id: string, headers: Record<string, string>): Promise<void> {
+  // A newer index in R2 replaces the copy shipped in the image. Metadata only.
+  const obj = await env.PERFORMANCES.get(NOTE_INDEX_KEY);
+  if (!obj || obj.size <= 0 || obj.size > 8 * 1024 * 1024) return;
+  const seeded = await containerFetch(container, id, "http://container/internal/note-index", {
+    method: "POST",
+    headers,
+    body: await obj.arrayBuffer(),
+  });
+  if (!seeded.ok && seeded.status !== 204) {
+    console.error(JSON.stringify({ event: "note_index", id, status: seeded.status }));
+  }
+}
+
+async function seedRegistry(env: Env, container: DurableObjectStub<RenderContainer>, id: string, headers: Record<string, string>): Promise<void> {
+  // The checked-sounds registry is metadata. A newer copy in R2 replaces the bundled file.
+  const obj = await env.PERFORMANCES.get(REGISTRY_KEY);
+  if (!obj || obj.size <= 0 || obj.size > 8 * 1024 * 1024) return;
+  const seeded = await containerFetch(container, id, "http://container/internal/registry", {
+    method: "POST",
+    headers,
+    body: await obj.arrayBuffer(),
+  });
+  if (!seeded.ok && seeded.status !== 204) {
+    console.error(JSON.stringify({ event: "registry", id, status: seeded.status }));
+  }
+}
+
+async function pullRegistry(env: Env, container: DurableObjectStub<RenderContainer>, id: string, headers: Record<string, string>): Promise<void> {
+  const res = await containerFetch(container, id, "http://container/internal/registry", { headers });
+  if (res.status === 204) return;
+  if (!res.ok) return;
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  if (!bytes.byteLength || bytes.byteLength > 8 * 1024 * 1024) return;
+  await putOnce(env, REGISTRY_KEY, bytes, "application/json", false);
+  try {
+    const doc = JSON.parse(new TextDecoder().decode(bytes)) as { stats?: unknown; checker_version?: unknown; recheck_days?: unknown };
+    const stats = registryPublicStats({
+      ...(doc.stats && typeof doc.stats === "object" ? doc.stats as Record<string, unknown> : {}),
+      checker_version: doc.checker_version,
+      recheck_days: doc.recheck_days,
+    });
+    await putOnce(env, REGISTRY_STATS_KEY, new TextEncoder().encode(JSON.stringify(stats)), "application/json", false);
+  } catch {
+    /* the catalog is stored; the stats line can wait for the next pull */
+  }
+  const checked = await containerFetch(container, id, "http://container/internal/registry/check", {
+    method: "POST",
+    headers,
+    body: "{}",
+  });
+  if (!checked.ok && checked.status !== 202) {
+    console.error(JSON.stringify({ event: "registry_check", id, status: checked.status }));
+  }
+}
+
+async function copyGather(env: Env, container: DurableObjectStub<RenderContainer>, id: string, headers: Record<string, string>): Promise<GatherDoc> {
+  const res = await containerFetch(container, id, `http://container/internal/jobs/${id}/collection`, { headers });
+  if (!res.ok) throw new Error("gather collection was not stored");
+  const raw = await res.arrayBuffer();
+  await env.PERFORMANCES.put(`gathers/${id}/collection.json`, raw, { httpMetadata: { contentType: "application/json" } });
+  const doc = JSON.parse(new TextDecoder().decode(raw)) as GatherDoc;
+  for (const file of doc.files || []) {
+    const sid = String(file.sid || "");
+    if (!/^[A-Za-z0-9._-]{1,80}$/.test(sid)) continue;
+    const audio = await containerFetch(container, id, `http://container/internal/jobs/${id}/audio/${sid}`, { headers });
+    if (!audio.ok) continue;
+    await env.PERFORMANCES.put(`gathers/${id}/audio/${sid}`, await audio.arrayBuffer(), {
+      httpMetadata: { contentType: audioType(file.ext), cacheControl: GATHER_CACHE },
+    });
+  }
+  await env.PERFORMANCES.put(`gathers/${id}/meta.json`, JSON.stringify({ id, claim_token_sha256: doc.claim_hash || null }), {
+    httpMetadata: { contentType: "application/json" },
+  });
+  const storedJob = await jobs(env, id).get();
+  await env.PERFORMANCES.put(
+    `gathers/${id}/status.json`,
+    JSON.stringify({
+      id,
+      state: "gathered",
+      seed: doc.seed ?? null,
+      sounds: doc.sounds || [],
+      clock: "clock" in doc ? doc.clock ?? null : null,
+      stage_line: "Gathered.",
+      ...(storedJob?.tester ? { tester: true } : {}),
+    }),
+    { httpMetadata: { contentType: "application/json" } },
+  );
+  return doc;
+}
+
+async function seedTakeAudio(env: Env, container: DurableObjectStub<RenderContainer>, id: string, headers: Record<string, string>): Promise<void> {
+  const obj = await env.PERFORMANCES.get(`jobs/${id}/take-audio`);
+  if (!obj) throw new Error("take audio was not stored");
+  const seeded = await containerFetch(container, id, "http://container/internal/take-audio", {
+    method: "POST",
+    headers: {
+      ...headers,
+      "content-type": obj.httpMetadata?.contentType || "application/octet-stream",
+      "x-take-job": id,
+    },
+    body: await obj.arrayBuffer(),
+  });
+  if (!seeded.ok && seeded.status !== 204) {
+    throw new Error(`could not copy the take (${seeded.status})`);
+  }
+}
+
+async function seedKeepGather(env: Env, container: DurableObjectStub<RenderContainer>, performId: string, gatherId: string, headers: Record<string, string>): Promise<void> {
+  // Keep renders the bytes Gather copied to R2. A fresh container does not have them.
+  let cursor: string | undefined;
+  do {
+    const page = await env.PERFORMANCES.list({ prefix: `gathers/${gatherId}/`, cursor, limit: 100 });
+    for (const item of page.objects) {
+      if (!item.key || item.size <= 0 || item.size > 80 * 1024 * 1024) continue;
+      const obj = await env.PERFORMANCES.get(item.key);
+      if (!obj) continue;
+      const seeded = await containerFetch(container, performId, "http://container/internal/gather-file", {
+        method: "POST",
+        headers: {
+          ...headers,
+          "content-type": obj.httpMetadata?.contentType || "application/octet-stream",
+          "x-gather-key": item.key,
+        },
+        body: await obj.arrayBuffer(),
+      });
+      if (!seeded.ok && seeded.status !== 204) {
+        throw new Error(`could not copy ${item.key} (${seeded.status})`);
+      }
+    }
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+}
+
+async function seedGatherCache(env: Env, container: DurableObjectStub<RenderContainer>, performId: string, gatherId: string, headers: Record<string, string>): Promise<void> {
+  const obj = await env.PERFORMANCES.get(`gathers/${gatherId}/collection.json`);
+  if (!obj) return;
+  const doc = (await obj.json()) as GatherDoc;
+  for (const file of doc.files || []) {
+    if (!file.sid || !file.url) continue;
+    const audio = await env.PERFORMANCES.get(`gathers/${gatherId}/audio/${file.sid}`);
+    if (!audio) continue;
+    const seedHeaders: Record<string, string> = {
+      ...headers,
+      "content-type": "application/octet-stream",
+      "x-audio-url": file.url,
+      "x-audio-ext": file.ext || "",
+    };
+    if (file.range_bytes != null) seedHeaders["x-audio-range"] = String(file.range_bytes);
+    const seeded = await containerFetch(container, performId, "http://container/internal/cache", {
+      method: "POST",
+      headers: seedHeaders,
+      body: await audio.arrayBuffer(),
+    });
+    if (!seeded.ok && seeded.status !== 204) {
+      console.error(JSON.stringify({ event: "gather_seed", id: performId, gather_id: gatherId, sid: file.sid, status: seeded.status }));
+    }
+  }
 }
 
 const READBACK_TRIES = 5;
@@ -842,25 +1494,30 @@ type StatusExtras = {
   seed?: number | null;
   found_sounds?: unknown;
   stage_line?: string;
+  tester?: boolean;
 };
 
 async function jobStatus(env: Env, id: string, base: string): Promise<Response> {
   if (!ID_RE.test(id)) return json({ error: "not found" }, 404);
   const job = await jobs(env, id).get();
   if (!job) {
+    const gatherStatus = id.startsWith("g-") ? await readJsonKey(env, `gathers/${id}/status.json`) : null;
     const meta = await readJsonKey(env, `performances/${id}/meta.json`);
-    const status = (await readJsonKey(env, `performances/${id}/status.json`)) || (await readJsonKey(env, `jobs/${id}/status.json`));
+    const status = gatherStatus || (await readJsonKey(env, `performances/${id}/status.json`)) || (await readJsonKey(env, `jobs/${id}/status.json`));
     if (!meta && !status) return json({ error: "not found" }, 404);
-    const stored = (status || {}) as { state?: string; error?: string | null; trimmed?: string | null; seed?: number | null; found_sounds?: unknown; stage_line?: string; cost_estimate?: unknown };
+    const stored = (status || {}) as { state?: string; error?: string | null; trimmed?: string | null; seed?: number | null; found_sounds?: unknown; sounds?: GatherSound[]; stage_line?: string; cost_estimate?: unknown; tester?: boolean; clock?: AssemblyClock | null };
     const state = String(stored.state || "done");
     const storedMeta = state === "done" ? (meta as Meta | null) : null;
-    return json(publicJob(id, state, state, state === "done" ? 100 : 0, stored.error || null, base, null, {
+    const ghost = Array.isArray(stored.sounds) ? ({ sounds: stored.sounds, ...("clock" in stored ? { clock: stored.clock } : {}) } as Job) : ("clock" in stored ? ({ clock: stored.clock } as Job) : null);
+    const percent = state === "done" || state === "gathered" || state === "cancelled" ? 100 : 0;
+    return json(publicJob(id, state, state, percent, stored.error || null, base, null, {
       trimmed: stored.trimmed ?? null,
       seed: stored.seed ?? null,
       found_sounds: stored.found_sounds ?? [],
       stage_line: stored.stage_line,
       cost_estimate: stored.cost_estimate,
-    }, null, storedMeta));
+      tester: stored.tester === true,
+    }, ghost, storedMeta));
   }
   const pos = job.state === "queued" ? await budget(env).positionOf(id) : null;
   const extras = job.state === "done" ? await doneExtras(env, id) : undefined;
@@ -878,6 +1535,7 @@ async function doneExtras(env: Env, id: string): Promise<StatusExtras | undefine
   if (Array.isArray(status.found_sounds)) out.found_sounds = status.found_sounds;
   if (typeof status.stage_line === "string") out.stage_line = status.stage_line;
   if (status.cost_estimate) out.cost_estimate = status.cost_estimate;
+  if (status.tester === true) out.tester = true;
   return out;
 }
 
@@ -900,6 +1558,7 @@ function publicJob(
     trimmed: extras && "trimmed" in extras ? extras.trimmed : job?.trimmed,
     found_sounds: extras && extras.found_sounds != null ? extras.found_sounds : job?.found_sounds,
     stage_line: extras?.stage_line || job?.stage_line,
+    tester: job?.tester === true || extras?.tester === true,
   });
   const out: Record<string, unknown> = {
     id,
@@ -912,7 +1571,19 @@ function publicJob(
     trimmed: fields.trimmed,
     found_sounds: fields.found_sounds,
     stage_line: fields.stage_line,
+    tester: fields.tester,
   };
+  if (id.startsWith("g-")) {
+    out.gather_id = id;
+    out.sounds = job?.sounds || [];
+    if (job && "clock" in job) out.clock = job.clock ?? null;
+  } else if (job?.sounds && job.sounds.length) {
+    out.sounds = job.sounds;
+  }
+  if (job?.preview_ready === true && state !== "done" && state !== "failed" && state !== "rejected" && state !== "cancelled") {
+    out.preview_ready = true;
+    out.files = { mp3: `${base}/api/jobs/${id}/files/preview.mp3` };
+  }
   if (state === "done") {
     if (extras?.cost_estimate) out.cost_estimate = extras.cost_estimate;
     const files: Record<string, string> = {
@@ -931,6 +1602,38 @@ function publicJob(
     out.files = files;
   }
   return out;
+}
+
+async function gatherAudio(request: Request, env: Env, id: string, sid: string): Promise<Response> {
+  if (!ID_RE.test(id) || !/^[A-Za-z0-9._-]{1,80}$/.test(sid)) return json({ error: "not found" }, 404);
+  let obj = await env.PERFORMANCES.get(`gathers/${id}/audio/${sid}`);
+  const doc = (await readJsonKey(env, `gathers/${id}/collection.json`)) as GatherDoc | null;
+  const row = (doc?.files || []).find((file) => file.sid === sid);
+  if (!obj && row?.url && row.url.startsWith("https://")) {
+    // Gather stored the URL. The first play fetches that one file.
+    try {
+      const upstream = await fetch(row.url);
+      if (upstream.ok) {
+        const bytes = await upstream.arrayBuffer();
+        if (bytes.byteLength > 0 && bytes.byteLength <= 80 * 1024 * 1024) {
+          await env.PERFORMANCES.put(`gathers/${id}/audio/${sid}`, bytes, {
+            httpMetadata: { contentType: audioType(row.ext), cacheControl: GATHER_CACHE },
+          });
+          obj = await env.PERFORMANCES.get(`gathers/${id}/audio/${sid}`);
+        }
+      }
+    } catch {
+      obj = null;
+    }
+  }
+  if (!obj) return json({ error: "not found" }, 404);
+  return new Response(obj.body, {
+    headers: {
+      "content-type": obj.httpMetadata?.contentType || audioType(row?.ext),
+      "cache-control": GATHER_CACHE,
+      ...corsHeaders(request.headers.get("Origin")),
+    },
+  });
 }
 
 async function file(env: Env, id: string, name: string): Promise<Response> {
@@ -1025,7 +1728,8 @@ async function events(env: Env, id: string, base: string): Promise<Response> {
   const stream = new ReadableStream({
     async start(controller) {
       let last = "";
-      for (let i = 0; i < 600; i++) {
+      const end = Date.now() + JOB_WALL_MS;
+      while (Date.now() < end) {
         const job = await jobs(env, id).get();
         if (!job) break;
         const extras = job.state === "done" ? await doneExtras(env, id) : undefined;
@@ -1036,8 +1740,8 @@ async function events(env: Env, id: string, base: string): Promise<Response> {
           controller.enqueue(encoder.encode(`data: ${line}\n\n`));
           last = line;
         }
-        if (job.state === "done" || job.state === "failed" || job.state === "rejected" || job.state === "cancelled") break;
-        await sleep(1000);
+        if (job.state === "done" || job.state === "failed" || job.state === "rejected" || job.state === "cancelled" || job.state === "gathered") break;
+        await sleep(400);
       }
       controller.close();
     },
@@ -1081,12 +1785,7 @@ async function cancelJob(request: Request, env: Env, id: string, base: string): 
     return json(publicJob(id, current.state, current.stage, current.percent, current.error, base, pos, extras, current, doneMeta));
   }
   await budget(env).dequeue(id);
-  try {
-    await getContainer(env.RENDER, id).destroy();
-  } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
-    console.error(JSON.stringify({ event: "cancel_container", id, detail }));
-  }
+  if (job.state !== "queued") await signalContainerCancel(env, id);
   await wipePerformance(env, id);
   await writeCancelledStatus(env, id);
   const fresh = (await stub.get()) || result.job;
@@ -1120,9 +1819,14 @@ async function wipePerformance(env: Env, id: string): Promise<void> {
   const rec = (await readJsonKey(env, `performances/${id}/record.json`)) as { record_hash?: { value?: string } } | null;
   const hash = rec?.record_hash?.value;
   if (typeof hash === "string" && RECORD_HASH.test(hash)) await env.PERFORMANCES.delete(`aliases/sha256/${hash}`);
+  await deletePrefix(env, `performances/${id}/`);
+  await deletePrefix(env, `gathers/${id}/`);
+}
+
+async function deletePrefix(env: Env, prefix: string): Promise<void> {
   let cursor: string | undefined;
   do {
-    const page = await env.PERFORMANCES.list({ prefix: `performances/${id}/`, cursor, limit: 500 });
+    const page = await env.PERFORMANCES.list({ prefix, cursor, limit: 500 });
     const keys = page.objects.map((obj) => obj.key);
     if (keys.length) await env.PERFORMANCES.delete(keys);
     cursor = page.truncated ? page.cursor : undefined;
@@ -1424,17 +2128,23 @@ async function turnstile(env: Env, token: unknown, ip: string): Promise<boolean>
   return Boolean(data.success);
 }
 
-async function rateLimit(env: Env, ipHash: string): Promise<string | null> {
+async function rateLimit(env: Env, ipHash: string, tester: boolean): Promise<RateBlock | null> {
   // Binding period is 10 seconds (Wrangler allows only 10 or 60). It stops a
-  // burst before those requests touch the counters below. The 10-minute and
-  // daily caps always run in BudgetDO, including when the binding is absent.
+  // burst before those requests touch the counters below. A tester pass skips
+  // only the 10-minute and daily counters. The burst, Turnstile, size limits,
+  // and the $3/$5 caps still apply. The token is not logged.
   try {
     const result = await env.PERFORM_RATE.limit({ key: ipHash });
-    if (!result.success) return BURST_MESSAGE;
+    if (!result.success) return burstBlock(Date.now() / 1000);
   } catch {
     // Local tests have no binding. The Durable Object still enforces both windows.
   }
+  if (tester) return null;
   return budget(env).hit(ipHash);
+}
+
+function rateJson(block: RateBlock): Response {
+  return json({ error: block.error, code: "rate", retry_after_s: block.retry_after_s, retry_at: block.retry_at }, 429);
 }
 
 function instrumentProblem(raw: unknown): string | null {
@@ -1656,7 +2366,7 @@ function json(data: unknown, status = 200, extra?: Record<string, string>): Resp
   const headers = new Headers(extra);
   headers.set("content-type", "application/json; charset=utf-8");
   headers.set("access-control-allow-origin", "*");
-  headers.set("access-control-allow-headers", "Content-Type, Authorization");
+  headers.set("access-control-allow-headers", "Content-Type, Authorization, X-NC-Tester");
   headers.set("access-control-allow-methods", "GET, POST, OPTIONS");
   if (!headers.has("cache-control")) headers.set("cache-control", "no-store");
   const body = typeof data === "string" ? data : JSON.stringify(data);

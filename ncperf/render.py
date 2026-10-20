@@ -1,9 +1,10 @@
 """RENDER: deterministic. plan.json in; FLAC + MP3 + uses log out. Same plan + same sources + same seed = same audio.
 Fetch -> license check -> measure pitch -> select by measurement -> place -> hacks -> mix -> master. No pitch-shifting anywhere."""
-import json, os, random, subprocess
+import json, os, random, subprocess, threading
 import numpy as np, soundfile as sf, pyloudnorm as pyln
 from scipy.signal import fftconvolve
 from . import fetch, pitch
+from .parallel import run_all
 from .util import SR, decode, fade, flatten, loop_unaltered, lp, hp, onset
 from . import util, dsp, reverb
 
@@ -16,6 +17,7 @@ class Renderer:
         self.bus = {}; self.uses = []; self.res = {}; self.meas = {}; self.rejected = []; self.sel = {}
         q = plan.get('quality', {}); util.Q.update(resampler=q.get('resampler', 'soxr'), stretch_engine=q.get('stretch_engine', 'auto'))
         util.USED['resampler'].clear(); util.USED['stretch'].clear(); self.reverb_info = None; self.ir_inputs = None; self.master_info = None
+        self._src_lock = threading.Lock()
         for ly in plan.get('layers') or []:
             if ly.get('stretch_to_s'):
                 raise RuntimeError('time-stretch is not allowed')
@@ -26,21 +28,69 @@ class Renderer:
     # ---------- sources ----------
     def source(self, sid):
         """Resolve (fetch + license check) once; for multi-note runs, cut the requested note by silence segmentation."""
-        if sid in self.res: return self.res[sid]
+        with self._src_lock:
+            if sid in self.res: return self.res[sid]
         s = self.P['sources'][sid]; r = fetch.resolve(s); r['id'] = sid
         y = decode(r['path']); r['offset_s'] = 0.0
         if 'segment' in s:
-            segs = pitch.segment_run(y.mean(1), SR, s['segment'].get('drop_db', 40.0)); i = s['segment']['index']
-            t0, t1 = segs[i]; r['segment'] = dict(index=i, t0=round(t0, 3), t1=round(t1, 3), of=len(segs)); r['offset_s'] = t0
+            seg = s['segment']
+            # The note index already stored the slice. Do not scan the file again.
+            if seg.get('t0') is not None and seg.get('t1') is not None:
+                t0, t1 = float(seg['t0']), float(seg['t1'])
+                count = seg.get('of')
+            else:
+                segs = pitch.segment_run(y.mean(1), SR, seg.get('drop_db', 40.0)); i = seg['index']
+                t0, t1 = segs[i]
+                count = len(segs)
+            i = seg['index']
+            r['segment'] = dict(index=i, t0=round(t0, 3), t1=round(t1, 3), of=count); r['offset_s'] = t0
             y = y[int(t0 * SR):int(t1 * SR)]
-        r['y'] = y; self.res[sid] = r
+        r['y'] = y
+        with self._src_lock:
+            if sid in self.res: return self.res[sid]
+            self.res[sid] = r
         self.log(f"  source {sid}: {r['license']['name']} \u00b7 {r['author']} \u00b7 {r['title'][:60]}")
         return r
+
+    def _warm(self):
+        """Decode the kept files together. Gather already checked their pitch."""
+        sids = [sid for sid in (self.P.get('sources') or {})]
+
+        def one(sid):
+            try:
+                self.source(sid)
+            except Exception as exc:
+                self.log(f"  source {sid}: {exc}")
+
+        if len(sids) <= 1:
+            for sid in sids:
+                one(sid)
+            return
+        run_all([lambda sid=sid: one(sid) for sid in sids], workers=min(8, len(sids)))
 
     def measured(self, sid, expect):
         if (sid, expect) not in self.meas:
             r = self.source(sid); s = self.P['sources'][sid]
-            m = pitch.measure_fft(r['y'], expect, hi=s.get('fft_hi_hz', 2000.0)) if s.get('pitch_method') == 'fft' else pitch.measure(r['y'], expect); m['accepted'] = pitch.accept(m, expect, self.P.get('pitch_tolerance_cents', 15.0))
+            checked = s.get('pitch_checked') and s.get('expect_midi') is not None and int(s.get('expect_midi')) == int(expect)
+            if checked:
+                m = {'accepted': True, 'cents': s.get('cents'), 'note': pitch.NOTE(int(expect)), 'checked': 'index'}
+            else:
+                from . import registry
+                supplier = s.get('origin') or ''
+                url = s.get('audio_url') or s.get('url') or s.get('page') or ''
+                known = registry.stored_pitch(supplier, url, int(expect)) if supplier and url else None
+                if known:
+                    m = {'accepted': True, 'cents': known.get('cents'), 'note': pitch.NOTE(int(expect)), 'checked': 'registry'}
+                else:
+                    m = pitch.measure_fft(r['y'], expect, hi=s.get('fft_hi_hz', 2000.0)) if s.get('pitch_method') == 'fft' else pitch.measure(r['y'], expect); m['accepted'] = pitch.accept(m, expect, self.P.get('pitch_tolerance_cents', 15.0))
+                    if m.get('accepted') and supplier and url and s.get('title') and s.get('author') and s.get('license'):
+                        registry.remember_ok(supplier, url, {
+                            'title': s.get('title'),
+                            'author': s.get('author'),
+                            'license': s.get('license'),
+                            'page': s.get('page') or url,
+                            'audio_url': url,
+                        }, pitch_midi=int(expect), cents=m.get('cents'), note=str(int(expect)))
             self.meas[(sid, expect)] = m
             if not m['accepted']: self.rejected.append(dict(source=sid, expected=pitch.NOTE(expect), measured=m))
         return self.meas[(sid, expect)]
@@ -56,12 +106,15 @@ class Renderer:
 
     def note(self, sid, dur=None, pre=0.004):
         r = self.res[sid]; y = r['y']
-        if self.P['sources'][sid].get('segment') is None:
-            o = max(0, onset(y) - int(pre * SR)); z = y[o:] ; so = o / SR
-        else: z = y; so = r['offset_s']
-        if self.P['sources'][sid].get('segment') is None: so = so
+        src = self.P['sources'][sid]
+        if src.get('segment') is not None:
+            z = y; so = r['offset_s']
+        elif src.get('onset_s') is not None:
+            o = max(0, int(round(float(src['onset_s']) * SR)) - int(pre * SR)); z = y[o:]; so = o / SR
+        else:
+            o = max(0, onset(y) - int(pre * SR)); z = y[o:]; so = o / SR
         if dur: z = z[:int(dur * SR)]
-        return z, (so if self.P['sources'][sid].get('segment') is None else r['offset_s'])
+        return z, so
 
     def _lead(self, ly, i, default):
         table = ly.get('lead_by_chord') or {}
@@ -276,6 +329,10 @@ class Renderer:
 
     def run(self, name='performance'):
         os.makedirs(self.out, exist_ok=True)
+        # Download the files this plan kept, together. The note index already
+        # checked their pitch, so this does not measure the libraries.
+        if self.P.get('sources'):
+            self._warm()
         for ly in self.P['layers']:
             self.log(f"layer {ly['id']} ({ly['type']})"); getattr(self, 'L_' + ly['type'])(ly)
         out, before = self.mix(); fl, mp3, p1 = self.master(out, name)
