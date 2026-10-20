@@ -594,6 +594,96 @@ class AssembledStrikeTest(unittest.TestCase):
         self.assertGreater(durs[-1], durs[0] + 0.4)
         self.assertTrue(all(abs(d - durs[0]) < 0.002 for d in durs[:-3]))
         self.assertAlmostEqual(sum(durs), length, delta=0.05)
+        raw_scan = CH.find_full(text)
+        self.assertEqual(len(raw_scan), 52)
+        self.assertNotEqual(raw_scan[1][0], "Dm7")
+        parsed = CH.find_full(comp["composition"])
+        self.assertEqual(len(parsed), 35)
+        self.assertEqual([sym for sym, _bass in parsed[:3]], ["C", "Dm7", "G7"])
+        self.assertEqual(parsed[11][0], "Dbdim7")
+        self.assertEqual(parsed[-1][0], "C")
+        self.assertNotIn("Bach", comp["composition"])
+        self.assertIsNone(take.written_durations(comp["composition"], parsed))
+        self.assertIsNone(take.written_durations(text, table))
+        stub = interpret.stub({"title": comp["title"], "composition": text, "performance": comp["performance"]})
+        self.assertEqual(len(stub["chords"]), 35)
+        self.assertEqual([chord["symbol"] for chord in stub["chords"][:3]], ["C", "Dm7", "G7"])
+        self.assertEqual(stub["chords"][11]["symbol"], "Dbdim7")
+
+    def test_written_lengths_are_exact_and_organic_is_only_the_fallback(self):
+        from ncperf import take
+        pools = {
+            "musicmatter": [
+                _clip("musicmatter", f"Choir {sym}", "choir", f"w-{sym}", kind="supplier", chord=sym)
+                for sym in ("Cm", "F", "G", "Am")
+            ],
+        }
+        searchers = _searchers(pools)
+        clock = "4/4, 60 BPM. [2 bars Cm][1 bar F][4 beats G]. At bar 4, 120 BPM. [1 bar Am]."
+        # Cm occupies bars 1–2 (8 s). F is bar 3 (4 s). The change is at bar 4, so G's bar and Am's bar are at 120.
+        one = discover.plan_for(
+            {"title": "Clock", "composer": "anonymous", "composition": clock, "performance": "Let each chord ring into the next."},
+            seed=3, searchers=searchers, verify_live=False,
+        )
+        two = discover.plan_for(
+            {"title": "Clock", "composer": "anonymous", "composition": clock, "performance": "Let each chord ring into the next."},
+            seed=9, searchers=searchers, verify_live=False,
+        )
+        durs = [chord["dur"] for chord in one["chords"]]
+        self.assertEqual([chord["symbol"] for chord in one["chords"]], ["Cm", "F", "G", "Am"])
+        self.assertEqual(durs, [8.0, 4.0, 2.0, 2.0])
+        self.assertEqual([chord["dur"] for chord in two["chords"]], durs)
+        self.assertAlmostEqual(one["length_s"], 16.0, places=3)
+        self.assertTrue(one["source_mix"]["predictability"]["written_clock"])
+        self.assertTrue(all(row["strikes_at"] == [0.0] for row in one["source_mix"]["arrangement"]))
+        self.assertFalse(any(row["breath"] for row in one["source_mix"]["arrangement"]))
+        short = discover.plan_for(
+            {
+                "title": "Beat",
+                "composer": "anonymous",
+                "composition": "4/4, 60 BPM. Cm (1 bar), F for 1 beat.",
+                "performance": "Let each chord ring into the next.",
+            },
+            seed=1, searchers=searchers, verify_live=False,
+        )
+        self.assertEqual([chord["dur"] for chord in short["chords"]], [4.0, 1.0])
+        self.assertGreater(1.25, short["chords"][1]["dur"])
+        paren = take.written_durations("3/4, quarter = 60. Cm (2 bars), F (3 beats).", [("Cm", None), ("F", None)])
+        self.assertEqual(paren, [6.0, 3.0])
+        eighths = take.written_durations("6/8, 60 BPM. [1 bar Cm][1 bar F]", [("Cm", None), ("F", None)])
+        self.assertEqual(eighths, [3.0, 3.0])
+        crossed = take.written_durations("4/4, 60 BPM. [2 bars Cm]. At bar 2, 120 BPM.", [("Cm", None)])
+        self.assertEqual(crossed, [6.0])
+        self.assertIsNone(take.written_durations("[1 bar Cm][1 bar F]", [("Cm", None), ("F", None)]))
+        changed = take.written_durations(
+            "4/4, 60 BPM. One chord per bar: Cm | F | G. At bar 3, 120 BPM.",
+            [("Cm", None), ("F", None), ("G", None)],
+        )
+        self.assertEqual(changed, [4.0, 4.0, 2.0])
+
+    def test_multicolumn_table_is_not_read_row_by_row(self):
+        from ncperf import take
+        text = """The home key is C major, and a G pedal sits under the last bar.
+4/4, 60 BPM, 8 bars.
+
+| Bar | Chord | Bar | Chord |
+|---|---|---|---|
+| 1 | Cm | 5 | Am |
+| 2 | F | 6 | Dm |
+| 3 | G | 7 | Cm |
+| 4 | Am | 8 | F |
+"""
+        order = ["Cm", "F", "G", "Am", "Am", "Dm", "Cm", "F"]
+        scanned = [sym for sym, _bass in CH.find_full(text)]
+        self.assertNotEqual(scanned, order)
+        self.assertEqual(scanned[0], "C")
+        self.assertEqual([sym for sym, _bass in take.composition_chords(text)], order)
+        pools = {"musicmatter": _chords("musicmatter", "choir")}
+        plan = discover.plan_for(
+            {"title": "Columns", "composer": "anonymous", "composition": text, "performance": "Let each chord ring."},
+            seed=1, searchers=_searchers(pools), verify_live=False,
+        )
+        self.assertEqual([chord["symbol"] for chord in plan["chords"]], order)
 
     def test_durations_vary_unless_the_words_lock_the_pulse(self):
         from ncperf import take

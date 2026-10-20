@@ -67,6 +67,15 @@ def bar_chords(text: str) -> list[tuple] | None:
     return [found[b] for b in bars]
 
 
+def composition_chords(text: str) -> list:
+    """Chords in the order the Composition means.
+
+    A bar table is sorted by bar number. Prose is not scanned once that table
+    is there, so a three-column prelude does not come out row by row.
+    """
+    return bar_chords(text) or CH.find_full(text)
+
+
 _PULSE = re.compile(
     r"steady pulse|keep it even|\bsteady\b|\buniform\b|every downbeat|"
     r"one chord per bar|even changes|"
@@ -108,6 +117,180 @@ def half_sections(text: str) -> tuple[list, list] | None:
     if not left or not right:
         return None
     return left, right
+
+
+# A written clock. Organic rubato is not used once one of these matches every chord.
+#   [2 bars Cm]  [4 beats G7]  [1.5 bars Am7]
+#   Cm (2 bars)  G7 (4 beats)  Cm for 2 bars
+# Tempo: "60 BPM" or "quarter = 60" (a beat is a quarter). Meter: "4/4", "3/4", "6/8", "2/2" (default 4/4).
+# A change: "at bar 12, 80 BPM", "from bar 12, 80 BPM", or "bar 12: 80 BPM" (bar 1 is the opening).
+# "one chord per bar" plus a tempo change gives every chord one bar on that map.
+_BRACKET_LEN = re.compile(r"\[\s*(\d+(?:\.\d+)?)\s*(bars?|beats?)\s+([^\]]+?)\]", re.I)
+_LEN_AFTER = re.compile(
+    r"^\s*(?:\(\s*(\d+(?:\.\d+)?)\s*(bars?|beats?)\s*\)|for\s+(\d+(?:\.\d+)?)\s*(bars?|beats?))",
+    re.I,
+)
+_TEMPO_CHANGE = re.compile(
+    r"\b(?:at|from)\s+bar\s+(\d+)\b[^.\n]{0,40}?(\d+(?:\.\d+)?)\s*BPM\b"
+    r"|\bbar\s+(\d+)\s*:\s*(\d+(?:\.\d+)?)\s*BPM\b",
+    re.I,
+)
+_BPM = re.compile(r"(\d+(?:\.\d+)?)\s*BPM\b", re.I)
+_QUARTER_TEMPO = re.compile(r"quarter(?:\s+note)?\s*[=≈]\s*(\d+(?:\.\d+)?)", re.I)
+_METER = re.compile(r"\b(\d+)\s*/\s*(2|4|8)\b")
+
+
+def _unit(name: str) -> str:
+    return "bar" if name.lower().startswith("bar") else "beat"
+
+
+def _tempo_changes(text: str) -> list[tuple[int, float]]:
+    found: dict[int, float] = {}
+    for match in _TEMPO_CHANGE.finditer(text or ""):
+        if match.group(1):
+            bar, bpm = int(match.group(1)), float(match.group(2))
+        else:
+            bar, bpm = int(match.group(3)), float(match.group(4))
+        if bar >= 1 and bpm > 0:
+            found[bar] = bpm
+    return sorted(found.items())
+
+
+def _opening_bpm(text: str, changes: list[tuple[int, float]]) -> float | None:
+    blank = _TEMPO_CHANGE.sub(" ", text or "")
+    match = _BPM.search(blank) or _QUARTER_TEMPO.search(blank)
+    if match:
+        return float(match.group(1))
+    for bar, bpm in changes:
+        if bar <= 1:
+            return bpm
+    return None
+
+
+def _quarters_per_bar(text: str) -> float:
+    match = _METER.search(text or "")
+    if not match:
+        return 4.0
+    return int(match.group(1)) * (4.0 / int(match.group(2)))
+
+
+def _bracket_lengths(text: str, chords: list) -> list[tuple[float, str]] | None:
+    symbols: list[str] = []
+    specs: list[tuple[float, str]] = []
+    for match in _BRACKET_LEN.finditer(text or ""):
+        hit = CH.find_full(match.group(3))
+        if not hit:
+            continue
+        symbols.append(hit[0][0])
+        specs.append((float(match.group(1)), _unit(match.group(2))))
+    wanted = [sym for sym, _bass in chords]
+    if symbols == wanted and specs:
+        return specs
+    return None
+
+
+def _annotated_lengths(text: str, chords: list) -> list[tuple[float, str]] | None:
+    rows: list[tuple[str, tuple[float, str] | None]] = []
+    body = text or ""
+    for match in CH.TOKEN.finditer(body):
+        if (
+            match.group(1) == "A"
+            and not match.group(2)
+            and not match.group(3)
+            and re.match(r" [a-z]", body[match.end() : match.end() + 2])
+        ):
+            continue
+        sym = CH.spell(match.group(1) + match.group(2).rstrip("(").rstrip(")"))
+        if not sym:
+            continue
+        tail = _LEN_AFTER.match(body[match.end() :])
+        if not tail:
+            rows.append((sym, None))
+            continue
+        amount = float(tail.group(1) or tail.group(3))
+        unit = _unit(tail.group(2) or tail.group(4))
+        rows.append((sym, (amount, unit)))
+    wanted = [sym for sym, _bass in chords]
+    if [sym for sym, _spec in rows] != wanted or any(spec is None for _sym, spec in rows):
+        return None
+    return [spec for _sym, spec in rows if spec is not None]
+
+
+def _seconds_for(
+    start_bar: float,
+    amount: float,
+    unit: str,
+    quarters_per_bar: float,
+    opening: float,
+    changes: list[tuple[int, float]],
+) -> float:
+    quarters = amount * quarters_per_bar if unit == "bar" else amount
+    pos = (start_bar - 1.0) * quarters_per_bar
+    end = pos + quarters
+
+    def bpm_at(q: float) -> float:
+        bar = q / quarters_per_bar + 1.0
+        bpm = opening
+        for change_bar, change_bpm in changes:
+            if change_bar <= bar + 1e-6:
+                bpm = change_bpm
+        return bpm
+
+    points = [pos]
+    for change_bar, _bpm in changes:
+        boundary = (change_bar - 1.0) * quarters_per_bar
+        if pos + 1e-9 < boundary < end - 1e-9:
+            points.append(boundary)
+    points.append(end)
+    total = 0.0
+    for left, right in zip(points, points[1:]):
+        total += (right - left) * (60.0 / bpm_at(left))
+    return total
+
+
+def written_durations(text: str, chords: list) -> list[float] | None:
+    """Seconds for each chord, when the Composition writes the clock.
+
+    None means it did not: the take may use a pulse or organic lengths.
+    A tempo is required (`60 BPM` or `quarter = 60`). A beat is a quarter note.
+    A bar follows the meter (`4/4` by default; `6/8` is six eighths).
+    `at bar 12, 80 BPM` changes the tempo from that bar, including inside a chord.
+    Lengths are kept to the millisecond. The 1.25 s arrangement floor is not applied.
+    plan.json still refuses a chord shorter than 0.1 s; that minimum is the schema.
+    """
+    if not chords:
+        return None
+    changes = [(bar, bpm) for bar, bpm in _tempo_changes(text) if bar > 1]
+    opening = _opening_bpm(text, _tempo_changes(text))
+    specs = _bracket_lengths(text, chords) or _annotated_lengths(text, chords)
+    if specs is None and changes and re.search(r"one chord per bar", text or "", re.I):
+        specs = [(1.0, "bar")] * len(chords)
+    if specs is None or opening is None or opening <= 0:
+        return None
+    quarters = _quarters_per_bar(text) or 4.0
+    exact: list[float] = []
+    start = 1.0
+    for amount, unit in specs:
+        if amount <= 0:
+            return None
+        exact.append(_seconds_for(start, amount, unit, quarters, opening, changes))
+        start += amount if unit == "bar" else amount / quarters
+    if any(value <= 0 for value in exact):
+        return None
+    rounded = [round(value, 3) for value in exact]
+    target = round(sum(exact), 3)
+    rounded[-1] = round(rounded[-1] + (target - sum(rounded)), 3)
+    return rounded
+
+
+def slots_from_durations(durs: list[float]) -> list[dict]:
+    """Place written durations back to back. Nothing is scaled or rebreathed."""
+    slots = []
+    t = 0.0
+    for dur in durs:
+        slots.append({"t": round(t, 3), "dur": round(float(dur), 3)})
+        t = round(t + float(dur), 3)
+    return slots
 
 
 def duration_cv(durs: list[float]) -> float:

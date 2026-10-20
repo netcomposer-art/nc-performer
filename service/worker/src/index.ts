@@ -15,6 +15,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { Container, ContainerProxy, getContainer } from "@cloudflare/containers";
 import pageHtml from "../../web/index.html";
+import { parseComposition } from "./composition";
 import { applyPerformHit, BURST_MESSAGE, claimToken, forPage, isInternalFailure, jobStatusFields, newId, PER_10MIN, PER_DAY, proxyHosts, publicInternalError, rejectPlan, wordsTooLong, type FoundSound } from "./policy";
 
 // @cloudflare/containers 0.3.7 looks up this exact export on ctx.exports when
@@ -1147,24 +1148,6 @@ function compositionFrom(body: Record<string, unknown>): Record<string, unknown>
   const typed = "composer" in body ? body.composer : comp.composer;
   comp.composer = String(typed || "").trim() || "anonymous";
   return comp;
-}
-
-function parseComposition(txt: string): Record<string, unknown> {
-  const title = (txt.match(/^#\s+(.+)$/m) || [null, "Untitled"])[1]?.trim() || "Untitled";
-  const sec = (name: string) => {
-    const m = txt.match(new RegExp(`^##\\s+${name}[^\\n]*\\n(.*?)(?=^##\\s|$)`, "ims"));
-    return m ? m[1].trim() : null;
-  };
-  let composition = sec("Composition");
-  let performance = sec("Performance");
-  if (composition == null) {
-    const words = sec("Composer's words") || txt;
-    const parts = words.split(/\bPerformance\s*[-:\u2013\u2014]/);
-    composition = parts[0].replace(/^\s*Composition\s*[-:\u2013\u2014]\s*/, "").trim();
-    performance = performance || (parts[1] || "").trim();
-  }
-  const composer = (txt.match(/\*\*Composer[^*]*:\*\*\s*([^·\n]+)/) || [null, null])[1];
-  return { title, composition: composition || "", performance: performance || "", file: null, composer: (composer || "").trim() || null };
 }
 
 type Tomb = { record_hash?: string | null; reason?: string; at?: string };

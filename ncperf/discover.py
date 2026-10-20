@@ -1039,7 +1039,7 @@ def assign_strikes(groups: list[list[dict]], seed: int, hint: str | None, mentio
 def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_fn=None, searchers=None, registry_url=None, verify_live: bool = True, note_maps=None, progress_cb=None) -> dict:
     """Build a plan from an even-handed search. Raises ValueError if nothing usable came back."""
     comp_text = comp.get("composition") or ""
-    found = take.bar_chords(comp_text) or CH.find_full(comp_text) or CH.find_full(
+    found = take.composition_chords(comp_text) or CH.find_full(
         f"{comp_text} {comp.get('performance') or ''}"
     )
     if not found:
@@ -1224,12 +1224,31 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
             note_maps = []
     assembly = notemap.assemblies_for(syms, note_maps or [], _EXCLUDE)
 
-    # A written "second half" is a time boundary. Bar tables keep their own clock.
-    halves = None if take.bar_chords(comp_text) else take.half_sections(comp_text)
+    # A written bar or beat length is the clock. Otherwise a "second half" is a time boundary,
+    # and a bar table keeps its own order. Prose chords are not added on top of a table.
+    written = take.written_durations(comp_text, found)
+    halves = None if written or take.bar_chords(comp_text) else take.half_sections(comp_text)
     section_spec: list[tuple[int, float]] = []
     section_harmonies: list[str] = []
     slice_bits: list[str] = []
-    if halves:
+    written_clock = False
+    if written:
+        seq = list(found)
+        if len(seq) > take.CHORD_LIMIT:
+            slice_bits.append(
+                f"The piece had {len(seq)} chords; it was shortened to {take.CHORD_LIMIT} "
+                "so the Performance stays within the chord limit."
+            )
+            seq = seq[: take.CHORD_LIMIT]
+            written = written[: take.CHORD_LIMIT]
+        length = float(sum(written))
+        section_spec = [(len(seq), length)]
+        section_harmonies = [" ".join(sym for sym, _bass in seq)]
+        written_clock = True
+        pulse = True
+        broaden = 0
+        slots = take.slots_from_durations(written)
+    elif halves:
         left, right = halves
         half_len = float(length) / 2.0
         seq = []
@@ -1240,20 +1259,23 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
             section_harmonies.append(" ".join(sym for sym, _bass in group))
             if part_note:
                 slice_bits.append(part_note)
+        pulse = take.stated_pulse(words)
+        broaden = take.broaden_bars(words) if pulse else 0
+        slots = take.chord_slots(section_spec, int(seed), pulse, broaden)
     else:
         seq, one_note = take.expand_sequence(found, length)
         section_spec = [(len(seq), float(length))]
         section_harmonies = [" ".join(syms)]
         if one_note:
             slice_bits.append(one_note)
+        pulse = take.stated_pulse(words)
+        broaden = take.broaden_bars(words) if pulse else 0
+        slots = take.chord_slots(section_spec, int(seed), pulse, broaden)
     slice_note = " ".join(slice_bits) or None
     if not seq:
         raise ValueError('no chord symbols found in the Composition (e.g. "Cm, Am, F")')
     kn = take.phrase(words)
-    pulse = take.stated_pulse(words)
-    broaden = take.broaden_bars(words) if pulse else 0
-    slots = take.chord_slots(section_spec, int(seed), pulse, broaden)
-    if len(slots) != len(seq):
+    if not written_clock and len(slots) != len(seq):
         slots = take.chord_slots([(len(seq), float(length))], int(seed), pulse, broaden)
         section_spec = [(len(seq), float(length))]
     mean_dur = float(length) / len(seq)
@@ -1839,7 +1861,9 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
         cast_labels = seen_ens or ["the ensemble"]
     how = "the same way on every chord" if mode == "orderly" else "a different shape on each chord, seeded"
     duration_cv = take.duration_cv([float(c["dur"]) for c in chords])
-    if pulse and broaden:
+    if written_clock:
+        pacing = "Pacing: each chord lasts as long as the Composition wrote."
+    elif pulse and broaden:
         pacing = f"Pacing: a steady pulse, with the last {broaden} bars let to broaden, as the words asked."
     elif pulse:
         pacing = "Pacing: a steady pulse, as the words asked."
@@ -1947,6 +1971,7 @@ def plan_for(comp: dict, seed: int = 1, instrument: str | None = None, host_ok_f
                 "mode": mode,
                 "duration_cv": duration_cv,
                 "pulse": pulse,
+                "written_clock": written_clock,
             },
             "ensemble": cast_labels,
             "texture": None if not bed else {
