@@ -48,6 +48,14 @@ def _bars(text):
     if b and t: return int(b.group(1)), (int(ts.group(1)) if ts else 4) * 60.0 / float(t.group(1))
     return None, None
 
+def states_length(text) -> bool:
+    """True when the words give a length: bars, minutes, or seconds. Otherwise the 120 s in _length is only a fallback."""
+    nb, _bs = _bars(text)
+    if nb:
+        return True
+    return bool(re.search(r'(\d+(?:\.\d+)?)\s*-?\s*(?:minutes?|mins?|m)\b', text, re.I) or re.search(r'(\d+(?:\.\d+)?)\s*(?:seconds?|secs?|s)\b', text, re.I))
+
+
 def _length(text):
     nb, bs = _bars(text)
     if nb: return nb * bs
