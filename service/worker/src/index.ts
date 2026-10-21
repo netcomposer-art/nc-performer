@@ -15,7 +15,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { Container, ContainerProxy, getContainer } from "@cloudflare/containers";
 import pageHtml from "../../web/index.html";
-import { parseComposition } from "./composition";
+import { parseComposition, performanceFrom } from "./composition";
 import {
   AFTER_SIGNING,
   EXPIRE_AUDIO,
@@ -2263,7 +2263,7 @@ function compositionFrom(body: Record<string, unknown>): Record<string, unknown>
   };
   if (typeof body.title === "string" && body.title) comp.title = body.title;
   if (typeof body.composition === "string") comp.composition = body.composition;
-  if ("performance" in body) comp.performance = body.performance ?? "";
+  comp.performance = performanceFrom(body, String(comp.performance || ""));
   const typed = "composer" in body ? body.composer : comp.composer;
   comp.composer = String(typed || "").trim() || "anonymous";
   return comp;

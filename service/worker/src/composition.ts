@@ -53,3 +53,10 @@ export function parseComposition(txt: string): Record<string, unknown> {
     composer: (composer || "").trim() || null,
   };
 }
+
+/** The Create page posts the performance notes as `prompt`, not `performance`. */
+export function performanceFrom(body: Record<string, unknown>, parsed = ""): string {
+  const written = typeof body.performance === "string" ? body.performance : parsed;
+  if (written.trim()) return written;
+  return typeof body.prompt === "string" ? body.prompt : written;
+}

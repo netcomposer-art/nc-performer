@@ -1325,6 +1325,9 @@ def _composition(body: dict) -> dict:
         comp["composition"] = body["composition"]
     if body.get("performance") is not None and "performance" in body:
         comp["performance"] = body["performance"]
+    # Create posts the performance notes as prompt. A blank performance keeps them.
+    if not str(comp.get("performance") or "").strip() and body.get("prompt"):
+        comp["performance"] = body.get("prompt")
     # Never invent a person's name. Blank stays anonymous.
     typed = body["composer"] if "composer" in body else comp.get("composer")
     comp["composer"] = (typed or "").strip() or "anonymous"

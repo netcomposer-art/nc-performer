@@ -33,19 +33,37 @@ GATHER_S = 8.0
 
 
 def picked_from_plan(plan: dict) -> tuple[list[str], list[str]]:
-    """Keys and sample ids to avoid on the next Gather."""
+    """File identities to avoid on the next Gather.
+
+    A display title such as "piano Cm7" is every voicing of that chord, so it
+    is not an identity. A sliced note is url#note=midi, so the other pitches
+    in that same file stay available.
+    """
     keys: list[str] = []
     samples: list[str] = []
     for src in (plan.get("sources") or {}).values():
         if not isinstance(src, dict):
             continue
-        for field in ("url", "id", "manifest", "title", "page"):
+        url = src.get("audio_url") or src.get("url")
+        pitch = src.get("expect_midi")
+        if pitch is None:
+            pitch = src.get("midi")
+        ident = src.get("id")
+        if url and pitch is not None:
+            text = f"{url}#note={pitch}"
+            keys.append(text)
+            samples.append(text)
+            if ident not in (None, ""):
+                keys.append(str(ident))
+                samples.append(str(ident))
+            continue
+        for field in ("url", "audio_url", "id", "manifest", "page"):
             val = src.get(field)
             if val in (None, ""):
                 continue
             text = str(val)
             keys.append(text)
-            if field in ("url", "id"):
+            if field in ("url", "audio_url", "id"):
                 samples.append(text)
     return list(dict.fromkeys(keys)), list(dict.fromkeys(samples))
 

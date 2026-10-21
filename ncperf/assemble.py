@@ -468,10 +468,16 @@ def _note_opt(row: dict) -> dict:
 
 
 def _kept_out(cand: dict, blocked: set[str]) -> bool:
+    """True when this file itself was used on an earlier Gather.
+
+    The display title is shared by every voicing of that instrument and chord
+    ("piano Cm7", "Choir Cm9"). Matching it would drop the whole family for
+    the chord. The file's url, manifest, and id identify the one recording.
+    """
     src = cand.get("source") or {}
     values = (
         cand.get("key"), src.get("url"), src.get("audio_url"), src.get("id"),
-        src.get("manifest"), src.get("page"), cand.get("title"),
+        src.get("manifest"), src.get("page"),
     )
     return any(str(value) in blocked for value in values if value not in (None, ""))
 
@@ -795,8 +801,14 @@ def _pack(comp, seq, slots, section_spec, chosen, seed, slice_note, prefer, maps
                 )
                 if sample.get("id"):
                     picks.append(str(sample["id"]))
-                if sample.get("url"):
-                    picks.append(str(sample["url"]))
+                bass_url = sample.get("url") or sample.get("audio_url")
+                bass_pitch = sample.get("expect_midi")
+                if bass_pitch is None:
+                    bass_pitch = sample.get("midi")
+                if bass_url and bass_pitch is not None:
+                    picks.append(f"{bass_url}#note={bass_pitch}")
+                elif bass_url:
+                    picks.append(str(bass_url))
         voicing = [n for n in voicing if 21 <= int(n) <= 108] or [60]
         chords.append({
             "t": round(start, 3),
@@ -925,8 +937,14 @@ def _add_samples(sources, picks, opt, index):
         licenses.append(str(keep.get("license")))
         if sample.get("id"):
             picks.append(str(sample["id"]))
-        if sample.get("url"):
-            picks.append(str(sample["url"]))
+        url = sample.get("url") or sample.get("audio_url")
+        pitch = sample.get("expect_midi")
+        if pitch is None:
+            pitch = sample.get("midi")
+        if url and pitch is not None:
+            picks.append(f"{url}#note={pitch}")
+        elif url:
+            picks.append(str(url))
     return sids, titles, authors, pages, licenses
 
 

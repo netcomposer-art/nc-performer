@@ -22,7 +22,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "service"))
 
-from ncperf import assemble, fetch, gather, record, take  # noqa: E402
+from ncperf import assemble, discover, fetch, gather, record, take  # noqa: E402
 from ncperf.schema import validate  # noqa: E402
 from nc_perform.config import Settings  # noqa: E402
 from nc_perform.limits import source_cap  # noqa: E402
@@ -683,3 +683,197 @@ def _render_plan():
             {"id": "c1", "chord": 1, "sids": ["c1"], "dur": 3, "t": 3, "title": "Loud F"},
         ],
     }
+
+
+SURPRISE = "2 min. Cm9, Fm7, Abmaj7, Bb, Cm7, Dm7b5, G7, Cm9, Gm9. Room to ring."
+CANON = (
+    "4/4 · 60 BPM\n"
+    "[2 beats D]\n[2 beats A]\n[2 beats Bm]\n[2 beats F#m]\n[2 beats G]\n"
+    "[2 beats D]\n[2 beats G]\n[2 beats A]\n"
+    "[2 beats D]\n[2 beats A]\n[2 beats Bm]\n[2 beats F#m]\n[2 beats G]\n"
+    "[2 beats D]\n[2 beats G]\n[2 beats A]"
+)
+
+
+def _catalog_searchers():
+    """Whole-chord families the live musicmatter catalog has for these symbols."""
+    families = (
+        ("piano", "piano"),
+        ("choir", "choir"),
+        ("fat synth", "fat"),
+        ("synth arp", "arp"),
+    )
+
+    def run(_terms, _hint, chords, _seed, _host_ok_fn=None, _registry_url=None):
+        rows = []
+        for sym in chords:
+            for inst, prefix in families:
+                rows.append(_clip(
+                    "musicmatter", f"{inst} {sym}", inst, f"{prefix}-{sym}",
+                    kind="supplier", chord=sym,
+                ))
+        return rows
+
+    return {"musicmatter": run}
+
+
+class HostedDrawTest(unittest.TestCase):
+    def test_surprise_and_canon_are_not_one_family(self):
+        """The page posts composition plus prompt, and the draw is plan_raw."""
+        cases = {
+            "surprise": {"title": "Surprise in C minor", "composition": SURPRISE, "performance": ""},
+            "surprise-mood": {
+                "title": "Surprise in C minor",
+                "composition": SURPRISE,
+                "performance": "Dark and patient. Soft attacks, long tails.",
+            },
+            "canon": {"title": "Canon in D (after Pachelbel)", "composition": CANON, "performance": ""},
+            "canon-mood": {
+                "title": "Canon in D (after Pachelbel)",
+                "composition": CANON,
+                "performance": "Warm and unhurried. Let each chord settle.",
+            },
+        }
+        searchers = _catalog_searchers()
+        for name, comp in cases.items():
+            mono = 0
+            distinct = []
+            for seed in range(1, 41):
+                plan = assemble.plan_raw(
+                    comp, seed=seed, searchers=searchers, verify_live=False, note_maps=[],
+                    gather_deadline_s=1, settle_s=0,
+                )
+                families = [clip["family"] for clip in plan["clips"]]
+                distinct.append(len(set(families)))
+                if len(set(families)) == 1:
+                    mono += 1
+            self.assertEqual(mono, 0, name)
+            self.assertGreater(sum(distinct) / len(distinct), 2.5, name)
+
+    def test_gather_again_does_not_drop_a_shared_title(self):
+        tmp = tempfile.mkdtemp(prefix="nc-title-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        previous = os.environ.get("NC_CACHE")
+        os.environ["NC_CACHE"] = tmp
+        url = "https://example.test/suppliers-title.json"
+        offerings = [
+            {
+                "audio": "https://audio.musicmatter.art/fullchords/C/00a_main_Cm_1_root.flac",
+                "manifest": "https://musicmatter.art/sounds/fullchords-v4/C/00a_main_Cm_1_root.nc.json",
+                "collection": "full-chord-set-v4",
+            },
+            {
+                "audio": "https://audio.musicmatter.art/fullchords/C/00a_main_Cm_2_inv1.flac",
+                "manifest": "https://musicmatter.art/sounds/fullchords-v4/C/00a_main_Cm_2_inv1.nc.json",
+                "collection": "full-chord-set-v4",
+            },
+        ]
+        discover._write_index_disk(url, offerings)
+        discover._MM_CACHE.pop(url, None)
+        comp = {"title": "One", "composition": "1 min. Cm.", "performance": ""}
+        try:
+            first = assemble.plan_raw(
+                comp, seed=1, searchers={"musicmatter": discover.search_musicmatter},
+                verify_live=False, note_maps=[], registry_url=url,
+                gather_deadline_s=1, settle_s=0,
+            )
+            used = first["sources"]["c0"]["url"]
+            # The display title is shared. An older gather stored it. It must not block the other file.
+            blocked = ["piano Cm", used]
+            second = assemble.plan_raw(
+                comp, seed=1, searchers={"musicmatter": discover.search_musicmatter},
+                verify_live=False, note_maps=[], registry_url=url,
+                gather_deadline_s=1, settle_s=0, avoid_keys=blocked,
+            )
+        finally:
+            discover._MM_CACHE.pop(url, None)
+            if previous is None:
+                os.environ.pop("NC_CACHE", None)
+            else:
+                os.environ["NC_CACHE"] = previous
+        self.assertEqual(first["clips"][0]["title"], "piano Cm")
+        self.assertEqual(second["clips"][0]["instrument"], "piano")
+        self.assertNotEqual(second["sources"]["c0"]["url"], used)
+        self.assertIn("00a_main_Cm_", second["sources"]["c0"]["url"])
+
+    def test_a_catalog_pack_is_not_the_whole_set(self):
+        tmp = tempfile.mkdtemp(prefix="nc-pack-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        previous = os.environ.get("NC_CACHE")
+        os.environ["NC_CACHE"] = tmp
+        url = "https://example.test/suppliers-pack.json"
+        offerings = [
+            {
+                "audio": "https://audio.musicmatter.art/fullchords/C/00a_main_Cm_1_root.flac",
+                "manifest": "https://musicmatter.art/sounds/fullchords-v4/C/00a_main_Cm_1_root.nc.json",
+                "collection": "full-chord-set-v4",
+            },
+            {
+                "audio": "https://audio.musicmatter.art/fullchords/C/02_ninths_Cm_root.flac",
+                "manifest": "https://musicmatter.art/sounds/fullchords-v4/C/02_ninths_Cm_root.nc.json",
+                "collection": "full-chord-set-v4",
+            },
+        ]
+        discover._write_index_disk(url, offerings)
+        discover._MM_CACHE.pop(url, None)
+        comp = {"title": "One", "composition": "1 min. Cm.", "performance": ""}
+        packs = set()
+        try:
+            for seed in range(1, 24):
+                plan = assemble.plan_raw(
+                    comp, seed=seed, searchers={"musicmatter": discover.search_musicmatter},
+                    verify_live=False, note_maps=[], registry_url=url,
+                    gather_deadline_s=1, settle_s=0,
+                )
+                packs.add(plan["clips"][0]["collection"])
+        finally:
+            discover._MM_CACHE.pop(url, None)
+            if previous is None:
+                os.environ.pop("NC_CACHE", None)
+            else:
+                os.environ["NC_CACHE"] = previous
+        self.assertEqual(packs, {"00a_main", "02_ninths"})
+
+    def test_one_pitch_of_a_shared_file_does_not_drop_the_others(self):
+        url = "https://theremin.music.uiowa.edu/sound%20files/MIS/Strings/cello/Cello.pizz.aiff"
+        sample = {
+            "url": url,
+            "title": "cello",
+            "author": "University of Iowa",
+            "license": "PD",
+            "page": "https://theremin.music.uiowa.edu/MIScello.html",
+        }
+        maps = [{
+            "id": "uiowa-cello-pizz",
+            "origin": "uiowa",
+            "instrument": "cello pizzicato",
+            "notes": {
+                "48": dict(sample, midi=48, expect_midi=48, title="cello pizzicato C3"),
+                "50": dict(sample, midi=50, expect_midi=50, title="cello pizzicato D3"),
+            },
+        }]
+        kept = discover._drop_avoided_notes(maps, {f"{url}#note=48"})
+        self.assertEqual(set(kept[0]["notes"]), {"50"})
+        cleared = discover._drop_avoided_notes(maps, {url})
+        self.assertEqual(cleared[0]["notes"], {})
+
+    def test_the_page_prompt_is_the_performance_text(self):
+        from nc_perform.api import _composition
+
+        comp = _composition({
+            "title": "Surprise in C minor",
+            "composition": SURPRISE,
+            "prompt": "A choir, clear and unhurried.",
+        })
+        self.assertEqual(comp["performance"], "A choir, clear and unhurried.")
+        explicit = _composition({
+            "composition": "1 min. Cm.",
+            "performance": "Warm.",
+            "prompt": "A choir.",
+        })
+        self.assertEqual(explicit["performance"], "Warm.")
+        mood = _composition({
+            "composition": SURPRISE,
+            "prompt": "Dark and patient. Soft attacks, long tails.",
+        })
+        self.assertEqual(take.prefer_from(mood["performance"]), [])

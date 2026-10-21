@@ -389,14 +389,19 @@ def _offering_bass_pc(off: dict):
 
 
 def _collection_id(off: dict) -> str:
-    """One catalog pack. The main set is not ranked ahead of the others."""
-    named = off.get("collection")
-    if isinstance(named, str) and named.strip():
-        return named.strip().lower()
+    """One catalog pack. The main set is not ranked ahead of the others.
+
+    The offering's collection field names the whole set (full-chord-set-v4),
+    which would put every piano pack in one bucket and let 00a_main outweigh
+    the rest. The pack id is in the filename.
+    """
     name = str(off.get("audio") or off.get("manifest") or "").rsplit("/", 1)[-1]
     match = re.match(r"(00[a-z]_main(?:-voicings)?|\d{2}_[a-z]+(?:-[a-z]+)*)_", name, re.I)
     if match:
         return match.group(1).lower()
+    named = off.get("collection")
+    if isinstance(named, str) and named.strip():
+        return named.strip().lower()
     return "catalog"
 
 
@@ -1296,8 +1301,14 @@ def _drop_avoided_notes(maps, blocked: set[str]):
         notes = {}
         for midi, sample in (mp.get("notes") or {}).items():
             ident = str(sample.get("id") or "")
-            url = str(sample.get("url") or "")
-            if ident in blocked or url in blocked:
+            url = str(sample.get("url") or sample.get("audio_url") or "")
+            pitch = sample.get("expect_midi")
+            if pitch is None:
+                pitch = sample.get("midi")
+            # A UIowa file holds several pitches. Excluding one pitch keeps the others.
+            # An older gather stored the bare file URL, which still drops the whole file.
+            slice_key = f"{url}#note={pitch}" if url and pitch is not None else ""
+            if (ident and ident in blocked) or (url and url in blocked) or (slice_key and slice_key in blocked):
                 continue
             notes[midi] = sample
         copy["notes"] = notes
