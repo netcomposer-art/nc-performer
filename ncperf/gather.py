@@ -87,7 +87,7 @@ def source_rows(plan: dict) -> list[dict]:
     return rows
 
 
-def build(comp: dict, *, seed: int = 1, instrument: str | None = None, avoid_keys=None, avoid_sample_ids=None, host_ok_fn=None, registry_url=None, verify_live: bool = True, searchers=None, note_maps=None, progress_cb=None, processed: bool = False) -> dict:
+def build(comp: dict, *, seed: int = 1, instrument: str | None = None, avoid_keys=None, avoid_sample_ids=None, host_ok_fn=None, registry_url=None, verify_live: bool = True, searchers=None, note_maps=None, progress_cb=None, processed: bool = False, step_cb=None) -> dict:
     """Search and pick. The default is one raw clip per chord.
 
     ``processed=True`` keeps the layered plan for the later processing step.
@@ -107,6 +107,7 @@ def build(comp: dict, *, seed: int = 1, instrument: str | None = None, avoid_key
         progress_cb=progress_cb, origin_budget_s=ORIGIN_S, avoid_keys=avoid_keys,
         avoid_sample_ids=avoid_sample_ids, gather_deadline_s=GATHER_S,
         settle_s=assemble.GATHER_SETTLE_S,
+        step_cb=step_cb,
     )
     avoided = bool(avoid_keys or avoid_sample_ids)
     from . import registry
@@ -185,14 +186,27 @@ def _fetch_limit(budget_s: float) -> float:
     return min(budget_s, left)
 
 
-def cache_sources(plan: dict, budget_s: float = FETCH_S) -> list[dict]:
-    """Download the chosen files together. The deadline is one clock for the whole set."""
+def cache_sources(plan: dict, budget_s: float = FETCH_S, on_done=None) -> list[dict]:
+    """Download the chosen files together. The deadline is one clock for the whole set.
+
+    ``on_done()`` is called once per source as it finishes, found or not.
+    """
     sources = plan.get("sources") or {}
     rows: list[dict] = []
     lock = threading.Lock()
     token = _fetch_until.set(time.monotonic() + budget_s)
 
     def one(sid: str, src: dict) -> None:
+        try:
+            fetch_one(sid, src)
+        finally:
+            if on_done:
+                try:
+                    on_done()
+                except Exception:
+                    pass
+
+    def fetch_one(sid: str, src: dict) -> None:
         if not isinstance(src, dict) or not src.get("kind"):
             return
         try:
@@ -306,10 +320,19 @@ def _clip_sounds(clips: list, gather_id: str, base: str, files: list[dict] | Non
     return sounds
 
 
-def save_collection(storage, gather_id: str, doc: dict, files: list[dict]) -> None:
+def save_collection(storage, gather_id: str, doc: dict, files: list[dict], step_cb=None) -> None:
     import json
     body = dict(doc)
     stored = []
+
+    def step(done=None, total=None):
+        if step_cb:
+            try:
+                step_cb("storing", done, total)
+            except Exception:
+                pass
+
+    step(total=sum(1 for row in files or [] if row.get("sid") and isinstance(row.get("data"), (bytes, bytearray)) and row.get("data")))
     for row in files or []:
         sid = str(row.get("sid") or "")
         if not sid:
@@ -317,6 +340,7 @@ def save_collection(storage, gather_id: str, doc: dict, files: list[dict]) -> No
         data = row.get("data")
         if isinstance(data, (bytes, bytearray)) and data:
             storage.put(f"gathers/{gather_id}/audio/{sid}", bytes(data), _audio_type(row.get("ext")))
+            step()
         if not row.get("url") and not (isinstance(data, (bytes, bytearray)) and data):
             continue
         stored.append({

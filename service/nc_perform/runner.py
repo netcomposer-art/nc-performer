@@ -44,7 +44,7 @@ from ncperf import cancel as job_cancel
 from ncperf.fit import fit_plan
 import ncperf.gather as gather
 from ncperf.gather import load_collection, public_sounds, restore_cache, save_collection, wipe_gather
-from ncperf.progress import STAGE_LINES, merge_sounds, sounds_from_sources, with_preview
+from ncperf.progress import STAGE_LINES, GatherMeter, merge_sounds, sounds_from_sources, with_preview
 from .cancel import wipe_performance, write_cancelled_status
 from .planner import PRICE_SOURCE, cache_key, compute_cost, llm_cost, llm_price_card, wants_model
 from .sign import Signer, apply_signature
@@ -139,6 +139,9 @@ class Runner:
         self._stop = threading.Event()
         self._cancel_events: dict[str, threading.Event] = {}
         self._bases: dict[str, str] = {}
+        # Gather progress arrives from search and download threads. One lock,
+        # so two updates never read and write the result over each other.
+        self._progress_lock = threading.Lock()
 
     def _job_settings(self, job_id: str, req: dict | None = None) -> Settings:
         """Settings for one job, with the public base the Worker sent.
@@ -263,8 +266,16 @@ class Runner:
         result = job.get("result")
         return dict(result) if isinstance(result, dict) else {}
 
-    def _progress(self, job_id: str, *, stage: str | None = None, stage_line: str | None = None, sound: dict | None = None, sounds: list | None = None, seed=None, trimmed=_UNSET) -> None:
+    def _progress(self, job_id: str, *, stage: str | None = None, stage_line: str | None = None, sound: dict | None = None, sounds: list | None = None, seed=None, trimmed=_UNSET, progress: dict | None = None) -> None:
+        with self._progress_lock:
+            self._progress_locked(job_id, stage=stage, stage_line=stage_line, sound=sound, sounds=sounds, seed=seed, trimmed=trimmed, progress=progress)
+
+    def _progress_locked(self, job_id: str, *, stage, stage_line, sound, sounds, seed, trimmed, progress) -> None:
         result = self._snapshot(job_id)
+        if progress:
+            # Gather's finer progress (progress.GatherMeter). It never goes down.
+            if int(progress.get("progress") or 0) >= int(result.get("progress") or 0):
+                result.update(progress)
         if stage_line:
             result["stage_line"] = stage_line
         if seed is not None:
@@ -408,6 +419,7 @@ class Runner:
         seed = int(req.get("seed") or 1)
         instrument = (comp.get("instrument") or "").strip() or None
         self._progress(job_id, seed=seed, trimmed=None)
+        meter = GatherMeter(lambda fields: self._progress(job_id, progress=fields))
 
         def progress_cb(line, sound=None):
             if isinstance(sound, dict):
@@ -424,6 +436,7 @@ class Runner:
                 host_ok_fn=settings.host_allowed,
                 registry_url=settings.suppliers_json,
                 progress_cb=progress_cb,
+                step_cb=meter.step_cb,
             )
         except ValueError as exc:
             raise Reject(str(exc)) from exc
@@ -449,7 +462,7 @@ class Runner:
         if plan.get("assembly") == "raw":
             self._progress(job_id, stage_line="Copying the recordings…", seed=seed)
             try:
-                files, measured = assembly.materialize(plan, files, budget_s=gather.FETCH_S)
+                files, measured = assembly.materialize(plan, files, budget_s=gather.FETCH_S, step_cb=meter.step_cb)
             except ValueError as exc:
                 raise Reject(str(exc)) from exc
             clock = assembly.written_clock(comp, plan)
@@ -470,7 +483,8 @@ class Runner:
             "excluded_gather_id": req.get("excluded_gather_id"),
             "clock": clock,
         }
-        save_collection(self.storage, job_id, doc, files)
+        save_collection(self.storage, job_id, doc, files, step_cb=meter.step_cb)
+        meter.finish("storing")
         result = {
             "seed": int(plan.get("seed") or seed),
             "trimmed": trimmed,
@@ -479,6 +493,8 @@ class Runner:
             "stage_line": STAGE_LINES["gathered"],
             "gather_id": job_id,
             "clock": clock,
+            # The container's share ends here. The Worker's copy to R2 takes it to 99, then 100.
+            **meter.fields(),
         }
         self._guard(job_id)
         if not self.store.mark_gathered(job_id, result):
