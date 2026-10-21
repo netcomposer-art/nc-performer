@@ -61,7 +61,6 @@ def plan_raw(
     avoid_sample_ids=None,
     gather_deadline_s: float = GATHER_DEADLINE_S,
     settle_s: float = GATHER_SETTLE_S,
-    step_cb=None,
 ) -> dict:
     """One clip per chord. Whole-chord files first; indexed notes only as a stack.
 
@@ -85,7 +84,7 @@ def plan_raw(
         return _plan(
             comp, found, syms, words, comp_text, seed, hint, host_ok_fn, searchers,
             registry_url, verify_live, note_maps, progress_cb, origin_budget_s,
-            avoid_keys, avoid_sample_ids, gather_deadline_s, settle_s, step_cb,
+            avoid_keys, avoid_sample_ids, gather_deadline_s, settle_s,
         )
     finally:
         discover._EXCLUDE = previous_exclude
@@ -232,16 +231,8 @@ def render(plan: dict, out_dir: str, name: str = "performance", log=print):
 def _plan(
     comp, found, syms, words, comp_text, seed, hint, host_ok_fn, searchers,
     registry_url, verify_live, note_maps, progress_cb, origin_budget_s,
-    avoid_keys, avoid_sample_ids, gather_deadline_s, settle_s, step_cb=None,
+    avoid_keys, avoid_sample_ids, gather_deadline_s, settle_s,
 ) -> dict:
-    # step_cb(step, done, total): progress for the page. See progress.GatherMeter.
-    def step(name, done=None, total=None):
-        if step_cb:
-            try:
-                step_cb(name, done, total)
-            except Exception:
-                pass
-
     query = discover.terms_for(comp, hint, seed)
     named = discover._named_origin(words)
     order = list(discover.ORIGINS)
@@ -287,7 +278,6 @@ def _plan(
                 if hit:
                     live_hits.append(hit)
             pending.discard(origin)
-        step("searching")
 
     def query_origin(fn, origin_seed, budget):
         try:
@@ -309,11 +299,8 @@ def _plan(
             note_box["error"] = str(exc)[:180]
             maps = []
         note_box["maps"] = maps
-        step("searching")
 
     threads = []
-    # One unit per supplier searched, plus the note index.
-    step("searching", total=1 + sum(1 for origin in order if fns.get(origin)))
     for origin in order:
         fn = fns.get(origin)
         if not fn:
@@ -370,16 +357,10 @@ def _plan(
         "deadline_s": round(float(gather_deadline_s), 3),
     }, ensure_ascii=False), flush=True)
 
-    step("searching", done=-1)
     option_groups = _option_groups(seq, pool, assembly, hint, seed, named)
     prefer = take.prefer_from(words)
-    step("picking", total=len(seq))
-    picked: set = set()
 
     def on_pick(index, opt):
-        if index not in picked:
-            picked.add(index)
-            step("picking")
         sym = seq[index][0]
         title = opt.get("title")
         license_id = opt.get("license")
@@ -399,7 +380,6 @@ def _plan(
         })
 
     chosen = _choose_files(option_groups, seq, seed, prefer, verify_live, on_pick=on_pick)
-    step("picking", done=-1)
     if any(row is None for row in chosen):
         missing = [seq[i][0] for i, row in enumerate(chosen) if row is None]
         raise ValueError(

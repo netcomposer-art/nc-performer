@@ -149,7 +149,7 @@ def reference_vectors() -> list[dict]:
     return out
 
 
-def materialize(plan: dict, files: list[dict] | None = None, budget_s: float = 5.0, step_cb=None) -> tuple[list[dict], dict]:
+def materialize(plan: dict, files: list[dict] | None = None, budget_s: float = 5.0) -> tuple[list[dict], dict]:
     """Copy each chosen clip into memory and measure the usable region.
 
     Whole-chord files keep their bytes. A note stack is mixed, without fade
@@ -157,15 +157,6 @@ def materialize(plan: dict, files: list[dict] | None = None, budget_s: float = 5
     page needs besides the URL.
     """
     from . import gather
-
-    # step_cb(step, done, total): one unit per download, then one per clip
-    # copied or note stack mixed. See progress.GatherMeter.
-    def step(name, done=None, total=None):
-        if step_cb:
-            try:
-                step_cb(name, done, total)
-            except Exception:
-                pass
 
     rows = [dict(row) for row in (files or []) if isinstance(row, dict) and row.get("sid")]
     by_sid = {str(row["sid"]): row for row in rows}
@@ -175,14 +166,12 @@ def materialize(plan: dict, files: list[dict] | None = None, budget_s: float = 5
         if not (isinstance(by_sid.get(sid), dict) and isinstance(by_sid[sid].get("data"), (bytes, bytearray)) and by_sid[sid]["data"])
     ]
     if missing:
-        step("downloading", total=len(sources))
-        for row in gather.cache_sources(plan, budget_s, on_done=lambda: step("downloading")):
+        for row in gather.cache_sources(plan, budget_s):
             by_sid[str(row["sid"])] = row
-    step("downloading", done=-1)
-    clips = [clip for clip in plan.get("clips") or [] if isinstance(clip, dict)]
-    step("copying", total=len(clips))
     meta: dict[str, dict] = {}
-    for clip in clips:
+    for clip in plan.get("clips") or []:
+        if not isinstance(clip, dict):
+            continue
         cid = str(clip.get("id") or "")
         sids = [str(sid) for sid in (clip.get("sids") or []) if sid]
         if not cid or not sids:
@@ -207,8 +196,6 @@ def materialize(plan: dict, files: list[dict] | None = None, budget_s: float = 5
         info["author"] = str(clip.get("author") or "")
         info["duration_s"] = round(max(0.0, info["end_s"] - info["start_s"]), 3)
         meta[cid] = info
-        step("copying")
-    step("copying", done=-1)
     out = list(by_sid.values())
     return out, meta
 
