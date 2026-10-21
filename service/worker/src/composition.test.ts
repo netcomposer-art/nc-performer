@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseComposition } from "./composition.ts";
+import { parseComposition, performanceFrom } from "./composition.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = join(here, "..", "..", "..");
@@ -34,6 +34,16 @@ test("bwv846's three-column table is read in bar order, without the prose", () =
   assert.match(performance, /Bach's C major Prelude/);
   assert.match(performance, /slight broadening over the last three bars/);
   assert.equal(performance.includes("| 1 |"), false);
+});
+
+test("Create's prompt is the performance when that field is blank", () => {
+  assert.equal(
+    performanceFrom({ composition: "2 min. Cm9, Gm9.", prompt: "Dark and patient. Soft attacks, long tails." }),
+    "Dark and patient. Soft attacks, long tails.",
+  );
+  assert.equal(performanceFrom({ performance: "Warm.", prompt: "A choir." }), "Warm.");
+  assert.equal(performanceFrom({ performance: "  ", prompt: "A choir, clear and unhurried." }), "A choir, clear and unhurried.");
+  assert.equal(performanceFrom({}, "from the file"), "from the file");
 });
 
 test("a Composition section is kept as written", () => {
