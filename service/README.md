@@ -301,7 +301,7 @@ Save does not render this plan as the take. Web Audio will not match a server mi
 }
 ```
 
-`nc_take_version` may be omitted; if it is present it must be `"1"`. `processing` may be omitted. `chain` is up to 32 short names, in the order the page ran them. `params` is a JSON object. The whole `take_state` is at most 64 KiB. The server stores the chain and the params. It does not re-run them.
+`nc_take_version` may be omitted; omitted means v1. v1 `chain` is up to 32 short names, in the order the page ran them, and `params` is one JSON object. The server stores those two fields and drops any other processing keys. v2 is the hack stack: `processing.schema` is 2 and `chain` is objects `{id, type, version, bypass, params, fixed?}`. At most 10 movable hacks (`lowpass`, `delay`, `plate`) and exactly one fixed `limiter` last. `id` and `type` are short strings, `version` is an integer, `bypass` is a boolean, and each `params` object is flat: finite numbers, short strings, or null (the open filter sends `cutoff_hz` null), at most 32 keys and 2 KiB. Add a type to `HACK_TYPES` in `ncperf/assembly.py`. The signed record keeps the v2 chain as sent. The server does not re-run either chain. The whole `take_state` is at most 64 KiB.
 
 The upload is WAV or FLAC, mono or stereo, 44100 or 48000 Hz, at most 40 MiB. Its duration must match `total_s` within 0.5 s. A longer effect tail belongs in `total_s` (still at most 180). The sample peak must be at least about −60 dBFS and at most about +0.2 dB (1.02). Integrated loudness, when the file is at least 0.4 s, must sit between −45 and −5 LUFS. A file that is not decodable is refused.
 
