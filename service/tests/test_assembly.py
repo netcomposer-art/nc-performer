@@ -277,6 +277,89 @@ class AssemblyPlanTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             assembly.parse_take_state({"plan": self._good(), "processing": {"chain": [";;;"]}}, GATHER)
 
+    def test_take_state_v1_stays_a_list_of_names(self):
+        raw = {
+            "nc_take_version": "1",
+            "plan": self._good(),
+            "processing": {"chain": [" filter ", "dials"], "params": {"wet": 0.2}, "schema": 2},
+        }
+        got = assembly.parse_take_state(raw, GATHER)
+        self.assertEqual(got["nc_take_version"], "1")
+        self.assertEqual(got["processing"], {"chain": ["filter", "dials"], "params": {"wet": 0.2}})
+        with self.assertRaises(ValueError) as objects:
+            assembly.parse_take_state({
+                "nc_take_version": "1",
+                "plan": self._good(),
+                "processing": {"chain": [self._hack("lowpass")]},
+            }, GATHER)
+        self.assertIn("short names", str(objects.exception))
+
+    def test_take_state_v2_keeps_the_hack_stack(self):
+        chain = [
+            self._hack("lowpass", params={"cutoff": 0, "cutoff_hz": None, "q": 0.707}),
+            self._hack("delay", params={"delay_beats": 0.75, "delay_timing": "1/8 dotted", "wet": 0}),
+            self._hack("plate", params={"mix": 0, "decay": 0.5}),
+            self._limiter(),
+        ]
+        got = assembly.parse_take_state({
+            "nc_take_version": "2",
+            "plan": self._good(),
+            "processing": {"schema": 2, "chain": chain},
+        }, GATHER)
+        self.assertEqual(got["nc_take_version"], "2")
+        self.assertEqual(got["processing"], {"schema": 2, "chain": chain})
+        rec = {"performance": {"outputs": [{}]}}
+        assembly.finish_browser_record(rec, got, {"upload_sha256": "ab" * 32}, os.path.join(self.tmp, "missing.flac"))
+        self.assertEqual(rec["take_state"]["nc_take_version"], "2")
+        self.assertEqual(rec["take_state"]["processing"]["chain"], chain)
+        self.assertEqual(rec["take_state"]["processing"]["schema"], 2)
+        self.assertEqual(rec["hacks_chain"][1]["chain"], chain)
+        self.assertTrue(rec["record_hash"]["value"])
+
+    def test_take_state_v2_rejections(self):
+        def parse(chain):
+            assembly.parse_take_state({
+                "nc_take_version": "2",
+                "plan": self._good(),
+                "processing": {"schema": 2, "chain": chain},
+            }, GATHER)
+
+        eleven = [self._hack("lowpass", n) for n in range(11)] + [self._limiter()]
+        with self.assertRaises(ValueError) as too_many:
+            parse(eleven)
+        self.assertIn("10", str(too_many.exception))
+        with self.assertRaises(ValueError) as order:
+            parse([self._limiter(), self._hack("lowpass")])
+        self.assertIn("last", str(order.exception))
+        unknown = self._hack("lowpass")
+        unknown["type"] = "ring"
+        with self.assertRaises(ValueError) as kind:
+            parse([unknown, self._limiter()])
+        self.assertIn("Unknown", str(kind.exception))
+        nan = self._hack("lowpass", params={"cutoff_hz": float("nan")})
+        with self.assertRaises(ValueError) as broken:
+            parse([nan, self._limiter()])
+        self.assertIn("finite", str(broken.exception))
+
+    def _hack(self, type_name, n=1, params=None):
+        return {
+            "id": f"{type_name}-{n}",
+            "type": type_name,
+            "version": 1,
+            "bypass": False,
+            "params": {} if params is None else params,
+        }
+
+    def _limiter(self):
+        return {
+            "id": "limiter",
+            "type": "limiter",
+            "version": 1,
+            "bypass": False,
+            "fixed": True,
+            "params": {"ceiling_db": -1, "lookahead_s": 0.0015},
+        }
+
     def test_save_stores_the_upload_and_signs_the_record(self):
         from nc_perform.storage import FileStorage
         storage = FileStorage(os.path.join(self.tmp, "files"))

@@ -17,6 +17,7 @@ import copy
 import hashlib
 import io
 import json
+import math
 import os
 import re
 import subprocess
@@ -48,6 +49,14 @@ LOUDNESS_MIN_LUFS = -45.0
 LOUDNESS_MAX_LUFS = -5.0
 # 40 MiB. Stereo 16-bit PCM at 48 kHz for 180 s is about 34.6 MB and fits.
 TAKE_AUDIO_MAX = 40 * 1024 * 1024
+TAKE_V2 = "2"
+# Add a hack here. The limiter is not movable: it is the fixed last item.
+HACK_TYPES = ("lowpass", "delay", "plate", "limiter")
+MOVABLE_HACKS = 10
+HACK_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9 _./:+-]{0,63}")
+PARAM_STR_MAX = 64
+PARAM_KEYS_MAX = 32
+PARAMS_BYTES_MAX = 2048
 CACHE_CONTROL = "public, max-age=31536000, immutable"
 _ORIGIN = re.compile(r"^https://([a-z0-9-]+\.)*netcomposer\.art$", re.I)
 _SUPPLIERS = ("musicmatter", "freesound", "uiowa", "uiowa_mis", "philharmonia")
@@ -450,21 +459,31 @@ def render_take(storage, gather_id: str, plan: dict, assembly: dict, out_dir: st
 def parse_take_state(raw, gather_id: str) -> dict:
     """The page's plan plus the processing it applied. Raises ValueError when the shape is wrong.
 
-    ``plan`` is assembly plan v1. ``processing`` may be omitted. The chain is
-    the effect names in the order the page ran them. ``params`` is whatever
-    JSON the page used. This function does not re-run those effects.
+    ``plan`` is assembly plan v1. v1 ``processing`` may be omitted. Its chain is
+    the effect names in the order the page ran them, and ``params`` is whatever
+    JSON the page used. v2 is the hack stack: ``schema`` 2 and a chain of hack
+    objects, with the fixed limiter last. This function does not re-run either.
     """
     if not isinstance(raw, dict):
         raise ValueError("take_state must be a JSON object.")
     version = raw.get("nc_take_version", VERSION)
-    if str(version) != VERSION:
-        raise ValueError("This server reads take_state v1.")
     plan = raw.get("plan")
     if not isinstance(plan, dict):
         raise ValueError("take_state.plan is the assembly plan.")
     if plan.get("gather_id") != gather_id:
         raise ValueError("gather_id does not match this Gather.")
-    processing = raw.get("processing", {})
+    text = str(version)
+    if text == VERSION:
+        processing = _processing_v1(raw.get("processing", {}))
+        return {"nc_take_version": VERSION, "plan": plan, "processing": processing}
+    if text == TAKE_V2:
+        processing = _processing_v2(raw.get("processing", {}))
+        return {"nc_take_version": TAKE_V2, "plan": plan, "processing": processing}
+    raise ValueError("This server reads take_state v1 or v2.")
+
+
+def _processing_v1(processing) -> dict:
+    """v1 stores the names and the one params object. Other keys are dropped."""
     if processing is None:
         processing = {}
     if not isinstance(processing, dict):
@@ -488,11 +507,89 @@ def parse_take_state(raw, gather_id: str) -> dict:
         params = json.loads(json.dumps(params))
     except (TypeError, ValueError) as exc:
         raise ValueError("processing.params must be a JSON object.") from exc
-    return {
-        "nc_take_version": VERSION,
-        "plan": plan,
-        "processing": {"chain": names, "params": params},
+    return {"chain": names, "params": params}
+
+
+def _processing_v2(processing) -> dict:
+    """v2 keeps each hack object. The limiter is fixed and last, and is not one of the ten."""
+    if not isinstance(processing, dict):
+        raise ValueError("processing must be a JSON object.")
+    schema = processing.get("schema")
+    if isinstance(schema, bool) or not isinstance(schema, int) or schema != 2:
+        raise ValueError("processing.schema must be 2.")
+    chain = processing.get("chain")
+    if not isinstance(chain, list) or not chain:
+        raise ValueError("The limiter stays last.")
+    if len(chain) > MOVABLE_HACKS + 1:
+        raise ValueError("A hack stack has at most 10 hacks, plus the limiter.")
+    items = [_hack(item, last=index == len(chain) - 1) for index, item in enumerate(chain)]
+    return {"schema": 2, "chain": items}
+
+
+def _hack(item, last: bool) -> dict:
+    if not isinstance(item, dict):
+        raise ValueError("Each hack is an object.")
+    type_name = item.get("type")
+    if not isinstance(type_name, str) or type_name not in HACK_TYPES:
+        raise ValueError("Unknown hack type.")
+    fixed = item.get("fixed", False)
+    if fixed is not True and fixed is not False:
+        raise ValueError("fixed must be true or false.")
+    if last:
+        if type_name != "limiter" or fixed is not True:
+            raise ValueError("The limiter stays last.")
+    elif type_name == "limiter" or fixed is True:
+        raise ValueError("The limiter stays last.")
+    ident = item.get("id")
+    if not isinstance(ident, str) or not HACK_NAME.fullmatch(ident):
+        raise ValueError("Each hack needs a short id.")
+    version = item.get("version")
+    if isinstance(version, bool) or not isinstance(version, int):
+        raise ValueError("Each hack version must be an integer.")
+    bypass = item.get("bypass")
+    if bypass is not True and bypass is not False:
+        raise ValueError("Each hack bypass must be true or false.")
+    kept = {
+        "id": ident,
+        "type": type_name,
+        "version": version,
+        "bypass": bypass,
+        "params": _hack_params(item.get("params", {})),
     }
+    if fixed is True:
+        kept["fixed"] = True
+    return kept
+
+
+def _hack_params(params) -> dict:
+    if not isinstance(params, dict):
+        raise ValueError("Hack params must be a flat object.")
+    if len(params) > PARAM_KEYS_MAX:
+        raise ValueError("Hack params are too large.")
+    out = {}
+    for key, value in params.items():
+        if not isinstance(key, str) or not HACK_NAME.fullmatch(key):
+            raise ValueError("Hack params must be a flat object.")
+        out[key] = _param_value(value)
+    raw = json.dumps(out, separators=(",", ":"), ensure_ascii=False).encode()
+    if len(raw) > PARAMS_BYTES_MAX:
+        raise ValueError("Hack params are too large.")
+    return out
+
+
+def _param_value(value):
+    """A finite number, a short string, or null. Null is the open filter. NaN is not a number here."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError("Hack params must be finite numbers, short strings, or null.")
+    if isinstance(value, (int, float)):
+        if isinstance(value, float) and not math.isfinite(value):
+            raise ValueError("Hack params must be finite numbers, short strings, or null.")
+        return value
+    if isinstance(value, str) and len(value) <= PARAM_STR_MAX:
+        return value
+    raise ValueError("Hack params must be finite numbers, short strings, or null.")
 
 
 def inspect_upload(data: bytes, total_s: float) -> dict:
@@ -595,9 +692,9 @@ def finish_browser_record(rec: dict, take_state: dict, info: dict, flac_path: st
     """
     from . import record
 
-    processing = take_state.get("processing") or {"chain": [], "params": {}}
+    processing = json.loads(json.dumps(take_state.get("processing") or {"chain": [], "params": {}}))
     rec["take_state"] = {
-        "nc_take_version": VERSION,
+        "nc_take_version": str(take_state.get("nc_take_version") or VERSION),
         "plan": take_state.get("plan"),
         "processing": processing,
     }
