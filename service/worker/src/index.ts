@@ -42,7 +42,6 @@ import {
 import { CANCELLED_MESSAGE, cancelToken, queueErrorIsCancel } from "./cancel";
 import { REQUIRED_OUTPUTS, containerPageUpdate, missingOutputs, readableBytes } from "./outputs";
 import { mapPool } from "./pool";
-import { PROGRESS_KEYS, SaveMeter, doneProgress, keepForward, progressFields, type GatherProgress } from "./progress";
 import { containerBase } from "./base";
 import { lostStacks, missingStacksMessage, recoverGatherAudio, stackParts, withRetry } from "./stacks";
 import { applyPerformHit, burstBlock, claimToken, corsHeaders, failureForPage, forPage, GATHER_CACHE, isInternalFailure, jobStatusFields, newId, pageGatherState, PER_10MIN, PER_DAY, proxyHosts, publicInternalError, publishedRegistryStats, queuedGatherFields, registryPublicStats, rejectPlan, siteverifyRequest, testerPass, turnstileDeniedBody, turnstileFailure, turnstileToken, wordsTooLong, type FoundSound, type RateBlock, type RegistryStats, type TurnstileFailure } from "./policy";
@@ -165,7 +164,7 @@ type Job = {
   tester?: boolean;
   preview_ready?: boolean;
   clock?: AssemblyClock | null;
-} & GatherProgress;
+};
 
 type GatherSound = {
   id: string;
@@ -227,8 +226,7 @@ export class JobDO extends DurableObject<Env> {
       await this.ctx.storage.put("job", next);
       return next;
     }
-    // Gather progress never moves back, even if two patches arrive out of order.
-    const next = { ...job, ...keepForward(job, fields) };
+    const next = { ...job, ...fields };
     await this.ctx.storage.put("job", next);
     return next;
   }
@@ -1021,8 +1019,6 @@ async function runContainer(env: Env, id: string): Promise<void> {
     if (Array.isArray(last.found_sounds)) patch.found_sounds = last.found_sounds;
     if (Array.isArray(last.sounds)) patch.sounds = last.sounds;
     if ("clock" in last) patch.clock = last.clock;
-    // Gather's finer progress, as each unit finishes on the container.
-    Object.assign(patch, progressFields(last));
     if (page.stage_line) patch.stage_line = page.stage_line;
     if (previewOnR2) patch.preview_ready = true;
     if (await abandonIfCancelled(env, id)) {
@@ -1045,9 +1041,7 @@ async function runContainer(env: Env, id: string): Promise<void> {
   if (last.state === "gathered") {
     let doc: GatherDoc | null = null;
     try {
-      doc = await copyGather(env, container, id, headers, progressFields(last).progress, async (fields) => {
-        await stub.patch(fields);
-      });
+      doc = await copyGather(env, container, id, headers);
     } catch (err) {
       if (!(err instanceof GatherStoreError)) throw err;
       last.state = "failed";
@@ -1111,7 +1105,6 @@ async function runContainer(env: Env, id: string): Promise<void> {
     ...(Array.isArray(last.sounds) ? { sounds: last.sounds } : {}),
     ...("clock" in last ? { clock: last.clock } : {}),
     ...(finishedLine ? { stage_line: finishedLine } : {}),
-    ...(last.state === "gathered" ? doneProgress() : {}),
   });
   if (updated) {
     await budget(env).note({
@@ -1333,14 +1326,7 @@ async function pullRegistry(env: Env, container: DurableObjectStub<RenderContain
   }
 }
 
-async function copyGather(
-  env: Env,
-  container: DurableObjectStub<RenderContainer>,
-  id: string,
-  headers: Record<string, string>,
-  from?: number,
-  onProgress?: (fields: GatherProgress) => Promise<void>,
-): Promise<GatherDoc> {
+async function copyGather(env: Env, container: DurableObjectStub<RenderContainer>, id: string, headers: Record<string, string>): Promise<GatherDoc> {
   const res = await containerFetch(container, id, `http://container/internal/jobs/${id}/collection`, { headers });
   if (!res.ok) throw new Error("gather collection was not stored");
   const raw = await res.arrayBuffer();
@@ -1351,17 +1337,6 @@ async function copyGather(
   // Each copy is tried three times. A note stack has no source URL, so a skipped
   // copy used to become a 404 the page could not recover from.
   const failed: string[] = [];
-  // One unit per file copied (or given up on), then one per note stack mixed again.
-  const meter = new SaveMeter(files.length, typeof from === "number" ? from : undefined);
-  const report = async (fields: GatherProgress) => {
-    if (!onProgress) return;
-    try {
-      await onProgress(fields);
-    } catch {
-      /* progress is a courtesy; the copy goes on */
-    }
-  };
-  await report(meter.fields());
   await mapPool(files, 8, async (file) => {
     const sid = String(file.sid || "");
     const got = await withRetry(async () => {
@@ -1378,13 +1353,10 @@ async function copyGather(
       failed.push(sid);
       console.error(JSON.stringify({ event: "gather_copy", id, sid, tries: got.tries, error: got.error }));
     }
-    await report(meter.tick());
   });
   // A stack still missing is mixed again on the container, which has its notes.
   const lost: string[] = [];
-  const again = lostStacks(doc, failed);
-  meter.grow(again.length);
-  for (const cid of again) {
+  for (const cid of lostStacks(doc, failed)) {
     const got = await withRetry(async () => {
       const res = await containerFetch(container, id, `http://container/internal/jobs/${id}/stack/${cid}`, { method: "POST", headers, body: "{}" });
       if (!res.ok) return false;
@@ -1399,7 +1371,6 @@ async function copyGather(
       lost.push(cid);
       console.error(JSON.stringify({ event: "gather_stack_lost", id, cid, tries: got.tries, error: got.error }));
     }
-    await report(meter.tick());
   }
   if (lost.length) {
     // Tell the page now, at Gather, instead of a 404 when it plays.
@@ -1733,10 +1704,6 @@ function publicJob(
     out.gather_id = id;
     out.sounds = job?.sounds || [];
     if (job && "clock" in job) out.clock = job.clock ?? null;
-    // Gather's finer progress, when this job has it. The page falls back to found/total.
-    if (job && typeof job.progress === "number") {
-      for (const key of PROGRESS_KEYS) if (job[key] !== undefined) out[key] = job[key];
-    }
   } else if (job?.sounds && job.sounds.length) {
     out.sounds = job.sounds;
   }

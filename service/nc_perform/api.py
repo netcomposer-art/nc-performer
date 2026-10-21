@@ -1106,7 +1106,6 @@ def make_handler(app: App):
                 }
                 if "clock" in result:
                     payload["clock"] = result.get("clock")
-                payload.update(_gather_progress(result))
                 return self._send(200, payload)
             m = re.fullmatch(r"/internal/jobs/([hkg]-[0-9a-z]+)/collection", path)
             if m:
@@ -1444,20 +1443,6 @@ def _was_tester(job, status) -> bool:
     return isinstance(status, dict) and status.get("tester") is True
 
 
-GATHER_PROGRESS_KEYS = ("progress", "progress_stage", "progress_label", "progress_done", "progress_total")
-
-
-def _gather_progress(result: dict | None, finished: bool = False) -> dict:
-    """Gather's finer progress fields, when the job has them. 100 only when finished."""
-    result = result if isinstance(result, dict) else {}
-    out = {key: result[key] for key in GATHER_PROGRESS_KEYS if key in result}
-    if finished:
-        out.update({"progress": 100, "progress_stage": "done", "progress_label": "Gathered"})
-        if "progress_total" in out:
-            out["progress_done"] = out["progress_total"]
-    return out
-
-
 def _public_job(job_id, state, stage, percent, error, app: App, position=None, job=None, status=None) -> dict:
     from ncperf.progress import public_fields
 
@@ -1486,7 +1471,6 @@ def _public_job(job_id, state, stage, percent, error, app: App, position=None, j
     if str(job_id).startswith("g-"):
         out["gather_id"] = job_id
         out["sounds"] = sounds or []
-        out.update(_gather_progress(result, finished=state in ("gathered", "done")))
         if "clock" in result:
             out["clock"] = result.get("clock")
         elif isinstance(status, dict) and "clock" in status:
