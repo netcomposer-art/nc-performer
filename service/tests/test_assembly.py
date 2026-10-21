@@ -486,3 +486,128 @@ class ClipCorsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StackRebuildTest(unittest.TestCase):
+    """A note stack whose mixed clip went missing is mixed again from its notes."""
+
+    def setUp(self):
+        from nc_perform.storage import FileStorage
+        self.tmp = tempfile.mkdtemp(prefix="nc-stack-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.reg = os.environ.get("NC_REGISTRY")
+        path = os.path.join(self.tmp, "registry.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump({"sounds": {}}, fh)
+        os.environ["NC_REGISTRY"] = path
+        registry.reset()
+        self.addCleanup(self._restore_registry)
+
+        def note(sid, midi):
+            return {
+                "kind": "uiowa",
+                "url": f"http://127.0.0.1/guitar.aif#note={midi}",
+                "page": "http://127.0.0.1/guitar",
+                "license": "PD",
+                "title": f"guitar note {midi}",
+                "author": "University of Iowa",
+            }
+
+        self.plan = _plan()
+        self.plan["sources"]["c1n0"] = note("c1n0", 50)
+        self.plan["sources"]["c1n1"] = note("c1n1", 57)
+        self.plan["sources"]["c1n2"] = note("c1n2", 65)
+        self.plan["sources"].pop("c1", None)
+        self.plan["clips"][1]["sids"] = ["c1n0", "c1n1", "c1n2"]
+        self.notes = {"c1n0": _tone(freq=146.8), "c1n1": _tone(seconds=1.1, freq=220.0), "c1n2": _tone(freq=349.2)}
+        files = [{"sid": "c0", "url": "http://127.0.0.1/c0.wav", "ext": ".wav", "data": _tone()}]
+        for sid, data in self.notes.items():
+            files.append({"sid": sid, "url": self.plan["sources"][sid]["url"], "ext": ".wav", "data": data})
+        self.files, self.meta = assembly.materialize(self.plan, files)
+        self.sounds = gather.public_sounds(self.plan, GATHER, "https://perform.example", self.files)
+        assembly.annotate_sounds(self.sounds, self.meta)
+        doc = {"id": GATHER, "seed": 4, "plan": self.plan, "sounds": self.sounds, "clock": None}
+        self.storage = FileStorage(os.path.join(self.tmp, "files"))
+        gather.save_collection(self.storage, GATHER, doc, self.files)
+        self.mixed = bytes(self.storage.get(f"gathers/{GATHER}/audio/c1"))
+
+    def _restore_registry(self):
+        registry.reset()
+        if self.reg is None:
+            os.environ.pop("NC_REGISTRY", None)
+        else:
+            os.environ["NC_REGISTRY"] = self.reg
+
+    def _drop(self, sid):
+        os.remove(os.path.join(self.tmp, "files", "gathers", GATHER, "audio", sid))
+
+    def test_collection_keeps_what_a_rebuild_needs(self):
+        doc = gather.load_collection(self.storage, GATHER)
+        self.assertEqual(assembly.stack_parts(doc["plan"], "c1"), ["c1n0", "c1n1", "c1n2"])
+        self.assertEqual(assembly.stack_parts(doc["plan"], "c0"), [])
+        stored = {row["sid"]: row for row in doc["files"]}
+        for sid in ("c1n0", "c1n1", "c1n2"):
+            self.assertIn(sid, stored)
+            self.assertTrue(doc["plan"]["sources"][sid]["url"].endswith(stored[sid]["url"].split("/")[-1]))
+
+    def test_rebuild_from_stored_notes_matches_gather(self):
+        self._drop("c1")
+        self.assertIsNone(self.storage.get(f"gathers/{GATHER}/audio/c1"))
+        wav = assembly.rebuild_stack(self.storage, GATHER, "c1")
+        self.assertEqual(wav, self.mixed)
+        self.assertEqual(bytes(self.storage.get(f"gathers/{GATHER}/audio/c1")), self.mixed)
+
+    def test_rebuild_downloads_a_missing_note(self):
+        self._drop("c1")
+        self._drop("c1n1")
+        asked = []
+        real = gather.cache_sources
+
+        def fake(plan, budget_s=5.0):
+            asked.append(sorted((plan.get("sources") or {}).keys()))
+            return [{"sid": "c1n1", "url": "http://127.0.0.1/guitar.aif", "ext": ".wav", "data": self.notes["c1n1"]}]
+
+        gather.cache_sources = fake
+        self.addCleanup(setattr, gather, "cache_sources", real)
+        wav = assembly.rebuild_stack(self.storage, GATHER, "c1")
+        self.assertEqual(asked, [["c1n1"]])
+        self.assertEqual(wav, self.mixed)
+
+    def test_rebuild_refuses_when_a_note_cannot_be_found(self):
+        self._drop("c1")
+        self._drop("c1n2")
+        real = gather.cache_sources
+        gather.cache_sources = lambda plan, budget_s=5.0: []
+        self.addCleanup(setattr, gather, "cache_sources", real)
+        with self.assertRaises(ValueError):
+            assembly.rebuild_stack(self.storage, GATHER, "c1")
+        with self.assertRaises(ValueError):
+            assembly.rebuild_stack(self.storage, GATHER, "c0")
+
+    def test_internal_stack_route(self):
+        self._drop("c1")
+        settings = _settings(self.tmp, suppliers="http://127.0.0.1/suppliers.json", llm_base="", llm_model="")
+        settings.internal_token = "inside"
+        app, httpd = _api(settings)
+        self.addCleanup(_close, httpd)
+        app.storage = self.storage
+        app.runner.storage = self.storage
+        origin = f"http://127.0.0.1:{httpd.server_address[1]}"
+
+        def post(path, token):
+            req = urllib.request.Request(origin + path, data=b"{}", method="POST", headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"})
+            try:
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    return r.status, r.read(), r.headers.get("Content-Type")
+            except urllib.error.HTTPError as e:
+                return e.code, e.read(), e.headers.get("Content-Type")
+
+        code, _body, _ctype = post(f"/internal/jobs/{GATHER}/stack/c1", "wrong")
+        self.assertEqual(code, 401)
+        code, body, ctype = post(f"/internal/jobs/{GATHER}/stack/c1", "inside")
+        self.assertEqual(code, 200, body[:200])
+        self.assertEqual(ctype, "audio/wav")
+        self.assertEqual(body, self.mixed)
+        code, body, _ctype = post(f"/internal/jobs/{GATHER}/stack/c0", "inside")
+        self.assertEqual(code, 422)
+        self.assertIn("not a note stack", json.loads(body)["error"])

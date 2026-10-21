@@ -191,17 +191,71 @@ def materialize(plan: dict, files: list[dict] | None = None, budget_s: float = 5
             info["start_s"] = start_s
             info["end_s"] = end_s
         else:
-            stacked = _mix_parts([part[1] for part in parts])
-            info = _measure(stacked, {})
-            info["start_s"] = 0.0
-            info["end_s"] = info["duration_s"]
-            wav = _wav_bytes(stacked)
+            wav, info = _stack_wav(parts)
             by_sid[cid] = {"sid": cid, "ext": ".wav", "data": wav, "url": None, "range_bytes": None}
         info["author"] = str(clip.get("author") or "")
         info["duration_s"] = round(max(0.0, info["end_s"] - info["start_s"]), 3)
         meta[cid] = info
     out = list(by_sid.values())
     return out, meta
+
+
+def _stack_wav(parts: list) -> tuple[bytes, dict]:
+    """Mix decoded note parts into the clip wav. Gather and a rebuild share this."""
+    stacked = _mix_parts([part[1] for part in parts])
+    info = _measure(stacked, {})
+    info["start_s"] = 0.0
+    info["end_s"] = info["duration_s"]
+    return _wav_bytes(stacked), info
+
+
+def stack_parts(plan: dict, cid: str) -> list[str]:
+    """The note sids of a stacked clip, or [] when the clip is one file."""
+    for clip in (plan or {}).get("clips") or []:
+        if isinstance(clip, dict) and str(clip.get("id") or "") == cid:
+            sids = [str(sid) for sid in (clip.get("sids") or []) if sid]
+            return sids if len(sids) > 1 else []
+    return []
+
+
+def rebuild_stack(storage, gather_id: str, cid: str, budget_s: float = 8.0) -> bytes:
+    """Mix a note stack again from its parts, the same way Gather did.
+
+    The collection keeps what this needs: plan.clips[].sids names the notes and
+    plan.sources[sid] says where each note came from. Parts already in storage
+    are used as they are. A missing part is downloaded from its source again.
+    Raises ValueError when the clip is not a stack or a part cannot be found.
+    """
+    from . import gather
+
+    doc = gather.load_collection(storage, gather_id) or {}
+    plan = doc.get("plan") if isinstance(doc.get("plan"), dict) else {}
+    sids = stack_parts(plan, cid)
+    if not sids:
+        raise ValueError(f"{cid} is not a note stack in this Gather.")
+    sources = plan.get("sources") or {}
+    exts = {str(row.get("sid")): row.get("ext") for row in (doc.get("files") or []) if isinstance(row, dict)}
+    rows: dict[str, dict] = {}
+    for sid in sids:
+        data = storage.get(f"gathers/{gather_id}/audio/{sid}")
+        if data:
+            rows[sid] = {"sid": sid, "ext": exts.get(sid), "data": bytes(data)}
+    missing = [sid for sid in sids if sid not in rows]
+    if missing:
+        sub = {"sources": {sid: sources[sid] for sid in missing if isinstance(sources.get(sid), dict)}}
+        for row in gather.cache_sources(sub, budget_s):
+            rows[str(row["sid"])] = row
+    parts = []
+    for sid in sids:
+        row = rows.get(sid)
+        data = (row or {}).get("data")
+        if not isinstance(data, (bytes, bytearray)) or not data:
+            raise ValueError(f"Could not copy the recording for {cid}.")
+        src = sources.get(sid) if isinstance(sources.get(sid), dict) else {}
+        parts.append(_usable_audio(bytes(data), (row or {}).get("ext"), src))
+    wav, _info = _stack_wav(parts)
+    storage.put(f"gathers/{gather_id}/audio/{cid}", wav, "audio/wav")
+    return wav
 
 
 def annotate_sounds(sounds: list[dict], meta: dict) -> list[dict]:

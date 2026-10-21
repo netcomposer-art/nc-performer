@@ -378,6 +378,9 @@ def make_handler(app: App):
                 return self._internal_registry()
             if path == "/internal/registry/check":
                 return self._internal_registry_check()
+            m = re.fullmatch(r"/internal/jobs/(g-[0-9a-z]+)/stack/([A-Za-z0-9._-]{1,80})", path)
+            if m:
+                return self._internal_stack(m.group(1), m.group(2))
             m = re.fullmatch(r"/internal/jobs/([hkg]-[0-9a-z]+)/cancel", path)
             if m:
                 return self._internal_cancel(m.group(1))
@@ -1134,6 +1137,22 @@ def make_handler(app: App):
             from ncperf import fetch as kit_fetch
             kit_fetch.seed_file(url, data, ext=ext, range_bytes=range_bytes)
             self._send(204, b"")
+
+        def _internal_stack(self, gather_id, cid):
+            """Mix a note stack again from its parts (the Worker seeds them first)."""
+            # Drain the (empty) body, or closing the socket with unread bytes resets the reply.
+            n = int(self.headers.get("Content-Length") or 0)
+            if 0 < n <= 64 * 1024:
+                self.rfile.read(n)
+            if not _internal_ok(app, self):
+                return self._send(401, {"error": "internal token required"})
+            from ncperf import assembly as kit_assembly
+            from ncperf.gather import FETCH_S
+            try:
+                wav = kit_assembly.rebuild_stack(app.storage, gather_id, cid, budget_s=FETCH_S)
+            except ValueError as exc:
+                return self._send(422, {"error": str(exc)})
+            self._send(200, wav, "audio/wav")
 
         def _internal_gather_file(self):
             """Copy one gathered object from R2 into this container before Keep renders it."""
