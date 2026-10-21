@@ -51,7 +51,8 @@ LOUDNESS_MAX_LUFS = -5.0
 TAKE_AUDIO_MAX = 40 * 1024 * 1024
 TAKE_V2 = "2"
 # Add a hack here. The limiter is not movable: it is the fixed last item.
-HACK_TYPES = ("lowpass", "delay", "plate", "limiter")
+HACK_TYPES = ("lowpass", "delay", "plate", "eq", "drive", "compressor", "width", "limiter")
+# The same type may appear more than once (two delays). Each hack keeps its own id.
 MOVABLE_HACKS = 10
 HACK_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9 _./:+-]{0,63}")
 PARAM_STR_MAX = 64

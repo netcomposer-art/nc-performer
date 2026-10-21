@@ -42,6 +42,7 @@ import {
 import { CANCELLED_MESSAGE, cancelToken, queueErrorIsCancel } from "./cancel";
 import { REQUIRED_OUTPUTS, containerPageUpdate, missingOutputs, readableBytes } from "./outputs";
 import { mapPool } from "./pool";
+import { containerBase } from "./base";
 import { lostStacks, missingStacksMessage, recoverGatherAudio, stackParts, withRetry } from "./stacks";
 import { applyPerformHit, burstBlock, claimToken, corsHeaders, failureForPage, forPage, GATHER_CACHE, isInternalFailure, jobStatusFields, newId, pageGatherState, PER_10MIN, PER_DAY, proxyHosts, publicInternalError, publishedRegistryStats, queuedGatherFields, registryPublicStats, rejectPlan, siteverifyRequest, testerPass, turnstileDeniedBody, turnstileFailure, turnstileToken, wordsTooLong, type FoundSound, type RateBlock, type RegistryStats, type TurnstileFailure } from "./policy";
 
@@ -442,7 +443,7 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
   if (request.method === "GET" && path === "/health") {
     return json({ ok: true, service: "nc-perform", version: "0.2.0", registry: await readRegistryStats(env) });
   }
-  if (request.method === "GET" && path === "/api/warm") return warm(env, ctx);
+  if (request.method === "GET" && path === "/api/warm") return warm(env, ctx, base);
   if (request.method === "GET" && path === "/api/config") return config(env);
   if (request.method === "GET" && path === "/.well-known/nc-record-keys.json") return keys(env);
   if (request.method === "GET" && path === "/api/feed") return feed(env, base);
@@ -927,7 +928,7 @@ async function runContainer(env: Env, id: string): Promise<void> {
   if (await abandonIfCancelled(env, id)) return;
   const container = getContainer(env.RENDER, WARM_ID);
   const requested = JSON.parse(job.request_json) as { public_base?: string; gather_id?: string; kind?: string };
-  const base = (env.NC_PUBLIC_BASE_URL || requested.public_base || "").replace(/\/$/, "");
+  const base = containerBase(env.NC_PUBLIC_BASE_URL, requested.public_base);
   const envVars = containerEnv(env, base);
   await container.startAndWaitForPorts({
     startOptions: { envVars, enableInternet: false },
@@ -1178,17 +1179,19 @@ function allowedHosts(env: Env): string[] {
   return [...hosts];
 }
 
-function warm(env: Env, ctx: ExecutionContext): Response {
-  ctx.waitUntil(warmContainer(env).catch((err) => {
+function warm(env: Env, ctx: ExecutionContext, base: string): Response {
+  ctx.waitUntil(warmContainer(env, base).catch((err) => {
     const detail = err instanceof Error ? err.message : String(err);
     console.error(JSON.stringify({ event: "warm", detail }));
   }));
   return json({ ok: true, warming: true });
 }
 
-async function warmContainer(env: Env): Promise<void> {
+async function warmContainer(env: Env, requestBase: string): Promise<void> {
   const container = getContainer(env.RENDER, WARM_ID);
-  const base = (env.NC_PUBLIC_BASE_URL || "").replace(/\/$/, "");
+  // The first start fixes the shared container's environment. Without a base the
+  // container wrote http://localhost:8080 into every clip URL until it slept.
+  const base = containerBase(env.NC_PUBLIC_BASE_URL, requestBase);
   await container.startAndWaitForPorts({
     startOptions: { envVars: containerEnv(env, base), enableInternet: false },
     cancellationOptions: { portReadyTimeoutMS: PORT_READY_MS, instanceGetTimeoutMS: PORT_READY_MS },
@@ -2473,9 +2476,7 @@ function adminGate(request: Request, env: Env): Response | null {
 }
 
 function publicBase(request: Request, env: Env): string {
-  const set = (env.NC_PUBLIC_BASE_URL || "").replace(/\/$/, "");
-  if (set) return set;
-  return new URL(request.url).origin;
+  return containerBase(env.NC_PUBLIC_BASE_URL, new URL(request.url).origin);
 }
 
 function logInternal(id: string | null, err: unknown): string {
