@@ -42,6 +42,7 @@ import {
 import { CANCELLED_MESSAGE, cancelToken, queueErrorIsCancel } from "./cancel";
 import { REQUIRED_OUTPUTS, containerPageUpdate, missingOutputs, readableBytes } from "./outputs";
 import { mapPool } from "./pool";
+import { lostStacks, missingStacksMessage, recoverGatherAudio, stackParts, withRetry } from "./stacks";
 import { applyPerformHit, burstBlock, claimToken, corsHeaders, failureForPage, forPage, GATHER_CACHE, isInternalFailure, jobStatusFields, newId, pageGatherState, PER_10MIN, PER_DAY, proxyHosts, publicInternalError, publishedRegistryStats, queuedGatherFields, registryPublicStats, rejectPlan, siteverifyRequest, testerPass, turnstileDeniedBody, turnstileFailure, turnstileToken, wordsTooLong, type FoundSound, type RateBlock, type RegistryStats, type TurnstileFailure } from "./policy";
 
 // @cloudflare/containers 0.3.7 looks up this exact export on ctx.exports when
@@ -1037,11 +1038,22 @@ async function runContainer(env: Env, id: string): Promise<void> {
     return;
   }
   if (last.state === "gathered") {
-    const doc = await copyGather(env, container, id, headers);
-    last.sounds = Array.isArray(doc.sounds) ? doc.sounds : [];
-    last.clock = ("clock" in doc ? doc.clock ?? null : null) as AssemblyClock | null;
-    last.stage_line = "Gathered.";
-    if (doc.seed != null) last.seed = Number(doc.seed);
+    let doc: GatherDoc | null = null;
+    try {
+      doc = await copyGather(env, container, id, headers);
+    } catch (err) {
+      if (!(err instanceof GatherStoreError)) throw err;
+      last.state = "failed";
+      last.stage = "failed";
+      last.error = err.message;
+      last.stage_line = err.message;
+    }
+    if (doc) {
+      last.sounds = Array.isArray(doc.sounds) ? doc.sounds : [];
+      last.clock = ("clock" in doc ? doc.clock ?? null : null) as AssemblyClock | null;
+      last.stage_line = "Gathered.";
+      if (doc.seed != null) last.seed = Number(doc.seed);
+    }
   } else if (last.state === "done") {
     await sleep(400);
     if (await abandonIfCancelled(env, id)) {
@@ -1319,14 +1331,48 @@ async function copyGather(env: Env, container: DurableObjectStub<RenderContainer
   const doc = JSON.parse(new TextDecoder().decode(raw)) as GatherDoc;
   const files = (doc.files || []).filter((file) => /^[A-Za-z0-9._-]{1,80}$/.test(String(file.sid || "")));
   // One wave of copies. Sixteen serial container-to-R2 hops were the long tail of a Canon Gather.
+  // Each copy is tried three times. A note stack has no source URL, so a skipped
+  // copy used to become a 404 the page could not recover from.
+  const failed: string[] = [];
   await mapPool(files, 8, async (file) => {
     const sid = String(file.sid || "");
-    const audio = await containerFetch(container, id, `http://container/internal/jobs/${id}/audio/${sid}`, { headers });
-    if (!audio.ok) return;
-    await env.PERFORMANCES.put(`gathers/${id}/audio/${sid}`, await audio.arrayBuffer(), {
-      httpMetadata: { contentType: audioType(file.ext), cacheControl: GATHER_CACHE },
+    const got = await withRetry(async () => {
+      const audio = await containerFetch(container, id, `http://container/internal/jobs/${id}/audio/${sid}`, { headers });
+      if (!audio.ok) return false;
+      const bytes = await audio.arrayBuffer();
+      if (!bytes.byteLength) return false;
+      await env.PERFORMANCES.put(`gathers/${id}/audio/${sid}`, bytes, {
+        httpMetadata: { contentType: audioType(file.ext), cacheControl: GATHER_CACHE },
+      });
+      return true;
     });
+    if (!got.ok) {
+      failed.push(sid);
+      console.error(JSON.stringify({ event: "gather_copy", id, sid, tries: got.tries, error: got.error }));
+    }
   });
+  // A stack still missing is mixed again on the container, which has its notes.
+  const lost: string[] = [];
+  for (const cid of lostStacks(doc, failed)) {
+    const got = await withRetry(async () => {
+      const res = await containerFetch(container, id, `http://container/internal/jobs/${id}/stack/${cid}`, { method: "POST", headers, body: "{}" });
+      if (!res.ok) return false;
+      const bytes = await res.arrayBuffer();
+      if (!bytes.byteLength) return false;
+      await env.PERFORMANCES.put(`gathers/${id}/audio/${cid}`, bytes, {
+        httpMetadata: { contentType: "audio/wav", cacheControl: GATHER_CACHE },
+      });
+      return true;
+    }, [500]);
+    if (!got.ok) {
+      lost.push(cid);
+      console.error(JSON.stringify({ event: "gather_stack_lost", id, cid, tries: got.tries, error: got.error }));
+    }
+  }
+  if (lost.length) {
+    // Tell the page now, at Gather, instead of a 404 when it plays.
+    throw new GatherStoreError(missingStacksMessage(doc, lost));
+  }
   await env.PERFORMANCES.put(`gathers/${id}/meta.json`, JSON.stringify({ id, claim_token_sha256: doc.claim_hash || null }), {
     httpMetadata: { contentType: "application/json" },
   });
@@ -1345,6 +1391,13 @@ async function copyGather(env: Env, container: DurableObjectStub<RenderContainer
     { httpMetadata: { contentType: "application/json" } },
   );
   return doc;
+}
+
+class GatherStoreError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "GatherStoreError";
+  }
 }
 
 class ContainerCopyError extends Error {
@@ -1680,21 +1733,35 @@ async function gatherAudio(request: Request, env: Env, id: string, sid: string):
   let obj = await env.PERFORMANCES.get(`gathers/${id}/audio/${sid}`);
   const doc = (await readJsonKey(env, `gathers/${id}/collection.json`)) as GatherDoc | null;
   const row = (doc?.files || []).find((file) => file.sid === sid);
-  if (!obj && row?.url && row.url.startsWith("https://")) {
-    // Gather stored the URL. The first play fetches that one file.
-    try {
-      const upstream = await fetch(row.url);
-      if (upstream.ok) {
-        const bytes = await upstream.arrayBuffer();
-        if (bytes.byteLength > 0 && bytes.byteLength <= 80 * 1024 * 1024) {
-          await env.PERFORMANCES.put(`gathers/${id}/audio/${sid}`, bytes, {
-            httpMetadata: { contentType: audioType(row.ext), cacheControl: GATHER_CACHE },
-          });
-          obj = await env.PERFORMANCES.get(`gathers/${id}/audio/${sid}`);
-        }
-      }
-    } catch {
-      obj = null;
+  if (!obj && doc) {
+    // A single file: the first play fetches it from the URL Gather stored.
+    // A note stack has no URL: the container mixes it again from its notes.
+    const stack = stackParts(doc.plan, sid).length > 0;
+    const got = await recoverGatherAudio(doc, sid, {
+      upstream: async (url) => {
+        const upstream = await fetch(url);
+        return upstream.ok ? await upstream.arrayBuffer() : null;
+      },
+      rebuild: async (cid) => {
+        // Only a finished Gather. While it is still copying, the copy itself is on the way.
+        if (!(await env.PERFORMANCES.head(`gathers/${id}/status.json`))) return null;
+        return rebuildStack(env, request, id, cid);
+      },
+      store: async (bytes) => {
+        await env.PERFORMANCES.put(`gathers/${id}/audio/${sid}`, bytes, {
+          httpMetadata: { contentType: stack ? "audio/wav" : audioType(row?.ext), cacheControl: GATHER_CACHE },
+        });
+      },
+    });
+    if (got) {
+      if (got.via === "rebuilt") console.error(JSON.stringify({ event: "gather_stack_rebuilt", id, sid }));
+      return new Response(got.bytes, {
+        headers: {
+          "content-type": stack ? "audio/wav" : audioType(row?.ext),
+          "cache-control": GATHER_CACHE,
+          ...corsHeaders(request.headers.get("Origin")),
+        },
+      });
     }
   }
   if (!obj) return json({ error: "not found" }, 404);
@@ -1705,6 +1772,38 @@ async function gatherAudio(request: Request, env: Env, id: string, sid: string):
       ...corsHeaders(request.headers.get("Origin")),
     },
   });
+}
+
+/**
+ * Mix a stacked clip again on the warm container. The container's disk may be
+ * fresh, so the collection and the notes R2 has are copied in first. A note R2
+ * lacks is downloaded from its source by the container.
+ */
+async function rebuildStack(env: Env, request: Request, gatherId: string, cid: string): Promise<ArrayBuffer | null> {
+  const container = getContainer(env.RENDER, WARM_ID);
+  const base = publicBase(request, env);
+  await container.startAndWaitForPorts({
+    startOptions: { envVars: containerEnv(env, base), enableInternet: false },
+    cancellationOptions: { portReadyTimeoutMS: PORT_READY_MS, instanceGetTimeoutMS: PORT_READY_MS },
+  });
+  await container.setAllowedHosts(proxyHosts(allowedHosts(env)));
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (env.NC_INTERNAL_TOKEN) headers.authorization = `Bearer ${env.NC_INTERNAL_TOKEN}`;
+  const doc = (await readJsonKey(env, `gathers/${gatherId}/collection.json`)) as GatherDoc | null;
+  if (!doc) return null;
+  const keys = [`gathers/${gatherId}/collection.json`, ...stackParts(doc.plan, cid).map((sid) => `gathers/${gatherId}/audio/${sid}`)];
+  for (const key of keys) {
+    const obj = await env.PERFORMANCES.get(key);
+    if (!obj) continue;
+    const seeded = await postContainerBytes(container, gatherId, "http://container/internal/gather-file", headers, await obj.arrayBuffer(), {
+      "content-type": obj.httpMetadata?.contentType || "application/octet-stream",
+      "x-gather-key": key,
+    });
+    if (!seeded.ok && seeded.status !== 204) return null;
+  }
+  const res = await containerFetch(container, gatherId, `http://container/internal/jobs/${gatherId}/stack/${cid}`, { method: "POST", headers, body: "{}" });
+  if (!res.ok) return null;
+  return await res.arrayBuffer();
 }
 
 async function file(env: Env, id: string, name: string): Promise<Response> {
