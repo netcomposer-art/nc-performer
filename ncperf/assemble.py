@@ -392,6 +392,9 @@ def _plan(
 
 def _clock(comp_text, words, found, seed):
     length = interpret._length(words)
+    # No stated length: play the progression once. The piece is as long as its
+    # clips (Petrus, 2026-10-21). The 120 s fallback no longer repeats chords.
+    fill = float(length) if interpret.states_length(words) else 0.0
     written = take.written_durations(comp_text, found)
     halves = None if written or take.bar_chords(comp_text) else take.half_sections(comp_text)
     slice_bits = []
@@ -413,7 +416,7 @@ def _clock(comp_text, words, found, seed):
         seq = []
         section_spec = []
         for group, seconds in ((left, half_len), (right, half_len)):
-            part, part_note = take.expand_sequence(group, seconds)
+            part, part_note = take.expand_sequence(group, seconds if fill else 0.0)
             seq.extend(part)
             section_spec.append((len(part), seconds))
             if part_note:
@@ -422,7 +425,7 @@ def _clock(comp_text, words, found, seed):
         broaden = take.broaden_bars(words) if pulse else 0
         slots = take.chord_slots(section_spec, int(seed), pulse, broaden)
     else:
-        seq, one_note = take.expand_sequence(found, length)
+        seq, one_note = take.expand_sequence(found, fill)
         section_spec = [(len(seq), float(length))]
         if one_note:
             slice_bits.append(one_note)

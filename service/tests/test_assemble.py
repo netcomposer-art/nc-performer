@@ -83,6 +83,16 @@ class RawPlanTest(unittest.TestCase):
         second = _plan(2, avoid_keys=first["gather_picks"])
         self.assertFalse(set(first["gather_picks"]) & set(second["gather_picks"]))
 
+    def test_no_stated_length_plays_the_progression_once(self):
+        comp = dict(COMP, composition="Cmaj7, Am9, Fmaj7, G13. Unhurried.", performance="")
+        plan = _plan(1, comp=comp)
+        self.assertEqual([chord["symbol"] for chord in plan["chords"]], ["Cmaj7", "Am9", "Fmaj7", "G13"])
+
+    def test_a_stated_length_still_repeats_the_progression(self):
+        comp = dict(COMP, composition="2 min. Cmaj7, Am9, Fmaj7, G13.", performance="")
+        plan = _plan(1, comp=comp)
+        self.assertGreater(len(plan["chords"]), 4)
+
     def test_a_written_tempo_is_the_clock(self):
         comp = dict(COMP, composition="4/4. quarter = 60. one chord per bar. at bar 3, 90 BPM. Cm, F, G, Am, Dm.")
         plan = _plan(1, comp=comp)
