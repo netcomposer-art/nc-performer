@@ -316,6 +316,31 @@ class AssemblyPlanTest(unittest.TestCase):
         self.assertEqual(rec["hacks_chain"][1]["chain"], chain)
         self.assertTrue(rec["record_hash"]["value"])
 
+    def test_take_state_v2_new_hacks_and_duplicates(self):
+        chain = [
+            self._hack("delay", 1, params={"delay_s": 0.25, "feedback": 0.4, "wet": 0.3}),
+            self._hack("delay", 2, params={"delay_s": 0.5, "feedback": 0.2, "wet": 0.2}),
+            self._hack("eq", params={"low_db": 3, "mid_db": -2, "mid_hz": 1200, "high_db": 0}),
+            self._hack("drive", params={"drive_db": 9, "output_db": 0, "mix": 1}),
+            self._hack("compressor", params={"threshold_db": -24, "ratio": 4, "attack_ms": 10, "release_ms": 150, "makeup_db": 6}),
+            self._hack("width", params={"width": 1.4, "balance": 0}),
+            self._hack("eq", 2, params={"low_db": 0, "mid_db": 0, "mid_hz": 1000, "high_db": -3}),
+            self._limiter(),
+        ]
+        got = assembly.parse_take_state({
+            "nc_take_version": "2",
+            "plan": self._good(),
+            "processing": {"schema": 2, "chain": chain},
+        }, GATHER)
+        self.assertEqual(got["processing"]["chain"], chain)
+        ten = [self._hack("delay", n) for n in range(1, 11)] + [self._limiter()]
+        got = assembly.parse_take_state({
+            "nc_take_version": "2",
+            "plan": self._good(),
+            "processing": {"schema": 2, "chain": ten},
+        }, GATHER)
+        self.assertEqual(len(got["processing"]["chain"]), 11)
+
     def test_take_state_v2_rejections(self):
         def parse(chain):
             assembly.parse_take_state({
