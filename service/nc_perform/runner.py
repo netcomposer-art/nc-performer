@@ -10,6 +10,8 @@ never shifted: the kit has no field for it, and verify-record checks.
 from __future__ import annotations
 
 import contextlib
+import dataclasses
+import re
 import json
 import os
 import resource
@@ -116,6 +118,18 @@ def egress_guard(settings: Settings):
         urllib.request.urlopen = orig_urlopen
 
 
+_BASE_RE = re.compile(r"https?://[A-Za-z0-9.-]+(?::\d{1,5})?")
+
+
+def request_base(req: dict | None) -> str:
+    """The job's public origin from the Worker, or '' when it sent none or junk."""
+    raw = (req or {}).get("public_base") if isinstance(req, dict) else None
+    if not isinstance(raw, str):
+        return ""
+    base = raw.strip().rstrip("/")
+    return base if _BASE_RE.fullmatch(base) else ""
+
+
 class Runner:
     def __init__(self, settings: Settings, store: Store, storage: Storage, signer: Signer | None):
         self.settings = settings
@@ -124,6 +138,21 @@ class Runner:
         self.signer = signer
         self._stop = threading.Event()
         self._cancel_events: dict[str, threading.Event] = {}
+        self._bases: dict[str, str] = {}
+
+    def _job_settings(self, job_id: str, req: dict | None = None) -> Settings:
+        """Settings for one job, with the public base the Worker sent.
+
+        One warm container serves every job, and its environment is whatever
+        the first start passed. A start without NC_PUBLIC_BASE_URL left the
+        default http://localhost:8080 in every clip URL. The Worker names its
+        own origin in request.public_base, so that wins for this job.
+        """
+        base = request_base(req) or self._bases.get(job_id) or ""
+        if not base:
+            return self.settings
+        self._bases[job_id] = base
+        return dataclasses.replace(self.settings, public_base_url=base)
 
     def stop(self):
         self._stop.set()
@@ -195,6 +224,7 @@ class Runner:
                 self._fail(job_id, "failed", "error", str(e) or e.__class__.__name__)
         finally:
             reset_cancel(token)
+            self._bases.pop(job_id, None)
             wall = time.perf_counter() - t0
             ru1 = resource.getrusage(resource.RUSAGE_SELF)
             cpu = max(0.0, (ru1.ru_utime + ru1.ru_stime) - (ru0.ru_utime + ru0.ru_stime))
@@ -251,9 +281,9 @@ class Runner:
         self.store.update(job_id, **fields)
 
     def _run(self, job: dict, stage_t: dict, usage: dict) -> None:
-        settings = self.settings
         job_id = job["id"]
         req = job["request"]
+        settings = self._job_settings(job_id, req)
         if self.store.spend_today() >= settings.daily_hard_usd or self.store.flag("perform_enabled", "1" if settings.perform_enabled else "0") == "0":
             raise Reject("Perform is resting until tomorrow.", "resting")
 
@@ -369,9 +399,9 @@ class Runner:
             self._settle_cancelled(job_id)
 
     def _gather_job(self, job: dict, stage_t: dict) -> None:
-        settings = self.settings
         job_id = job["id"]
         req = job["request"]
+        settings = self._job_settings(job_id, req)
         mark = ["gathering", time.perf_counter()]
         self._stage(job_id, "gathering", stage_t, mark)
         comp = req["composition"]
@@ -456,9 +486,9 @@ class Runner:
 
     def _keep_job(self, job: dict, stage_t: dict) -> None:
         """Check the page's plan, store its audio, and sign that take."""
-        settings = self.settings
         job_id = job["id"]
         req = job["request"]
+        settings = self._job_settings(job_id, req)
         mark = ["fetching", time.perf_counter()]
         self._stage(job_id, "fetching", stage_t, mark)
         gather_id = str(req.get("gather_id") or "")
@@ -512,7 +542,7 @@ class Runner:
 
     def _store_uploaded(self, job_id, plan, take_state, upload, info, gather_id, comp, stage_t, mark) -> dict:
         """Confirm the raw plan, then store the browser's file as the take."""
-        settings = self.settings
+        settings = self._job_settings(job_id)
         work = tempfile.mkdtemp(prefix="nc-keep-")
         try:
             os.environ["NC_PERFORMER"] = settings.instance_name
@@ -639,7 +669,7 @@ class Runner:
         raise Reject(discover_error or "No licensed sounds came back from the sources that were queried.")
 
     def _render(self, job_id, plan, comp, req, stage_t, mark) -> dict:
-        settings = self.settings
+        settings = self._job_settings(job_id)
         work = tempfile.mkdtemp(prefix="nc-perform-")
         try:
             os.environ["NC_PERFORMER"] = settings.instance_name
