@@ -341,6 +341,26 @@ class AssemblyPlanTest(unittest.TestCase):
         }, GATHER)
         self.assertEqual(len(got["processing"]["chain"]), 11)
 
+    def test_take_state_v2_filters_and_eq_v2(self):
+        eq2 = self._hack("eq", params={"low_db": 18, "mid_db": -18, "mid_hz": 1000, "high_db": 6,
+                                       "low_hz": 150, "high_hz": 6000, "mid_q": 0.99})
+        eq2["version"] = 2
+        chain = [
+            self._hack("highpass", params={"cutoff": 0, "cutoff_hz": None, "q": 0.707}),
+            self._hack("highpass", 2, params={"cutoff": 40, "cutoff_hz": 126, "q": 1.464}),
+            self._hack("bandpass", params={"centre_hz": 1020, "q": 0.4, "mix": 1}),
+            eq2,
+            self._hack("eq", 2, params={"low_db": 3, "mid_db": 0, "mid_hz": 1000, "high_db": 0}),
+            self._hack("plate", params={"mix": 0.2, "decay": 0.5}),
+            self._limiter(),
+        ]
+        got = assembly.parse_take_state({
+            "nc_take_version": "2",
+            "plan": self._good(),
+            "processing": {"schema": 2, "chain": chain},
+        }, GATHER)
+        self.assertEqual(got["processing"]["chain"], chain)
+
     def test_take_state_v2_rejections(self):
         def parse(chain):
             assembly.parse_take_state({
