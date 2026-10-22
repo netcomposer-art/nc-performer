@@ -44,7 +44,8 @@ import { REQUIRED_OUTPUTS, containerPageUpdate, missingOutputs, readableBytes } 
 import { mapPool } from "./pool";
 import { containerBase } from "./base";
 import { lostStacks, missingStacksMessage, recoverGatherAudio, stackParts, withRetry } from "./stacks";
-import { applyPerformHit, burstBlock, claimToken, corsHeaders, failureForPage, forPage, GATHER_CACHE, isInternalFailure, jobStatusFields, newId, pageGatherState, PER_10MIN, PER_DAY, proxyHosts, publicInternalError, publishedRegistryStats, queuedGatherFields, registryPublicStats, rejectPlan, siteverifyRequest, testerPass, turnstileDeniedBody, turnstileFailure, turnstileToken, wordsTooLong, type FoundSound, type RateBlock, type RegistryStats, type TurnstileFailure } from "./policy";
+import { carriedCopies, chordInPlan, containerFiles, regatherProblem, regatherRequest, withTimeout, type RegatherSpec } from "./regather";
+import { applyPerformHit, applyRegatherHit, burstBlock, claimToken, corsHeaders, failureForPage, forPage, GATHER_CACHE, isInternalFailure, jobStatusFields, newId, pageGatherState, PER_10MIN, PER_DAY, proxyHosts, publicInternalError, publishedRegistryStats, queuedGatherFields, registryPublicStats, rejectPlan, siteverifyRequest, testerPass, turnstileDeniedBody, turnstileFailure, turnstileToken, wordsTooLong, type FoundSound, type RateBlock, type RegistryStats, type TurnstileFailure } from "./policy";
 
 // @cloudflare/containers 0.3.7 looks up this exact export on ctx.exports when
 // allowedHosts is set. It is a WorkerEntrypoint, not a Durable Object, so it
@@ -189,6 +190,7 @@ type GatherDoc = {
   picked_sample_ids?: string[];
   files?: GatherFile[];
   clock?: AssemblyClock | null;
+  regather?: { from?: string; chord?: number; sids?: string[] };
 };
 
 export class RenderContainer extends Container<Env> {
@@ -260,6 +262,7 @@ export class BudgetDO extends DurableObject<Env> {
       "CREATE TABLE IF NOT EXISTS day_hits (ip TEXT, day TEXT, n INTEGER NOT NULL, PRIMARY KEY (ip, day))",
       "CREATE TABLE IF NOT EXISTS win_hits (ip TEXT PRIMARY KEY, start REAL NOT NULL, n INTEGER NOT NULL)",
       "CREATE TABLE IF NOT EXISTS ip_hits (ip TEXT, ts REAL)",
+      "CREATE TABLE IF NOT EXISTS regather_hits (ip TEXT, ts REAL)",
       "CREATE TABLE IF NOT EXISTS queued (id TEXT PRIMARY KEY, created TEXT NOT NULL)",
       "CREATE TABLE IF NOT EXISTS flags (k TEXT PRIMARY KEY, v TEXT NOT NULL)",
       "CREATE TABLE IF NOT EXISTS seen (id TEXT PRIMARY KEY, state TEXT, cost_usd REAL, ip_hash TEXT, error_code TEXT, created_at TEXT)",
@@ -302,15 +305,22 @@ export class BudgetDO extends DurableObject<Env> {
    * 3 Performs per 10 minutes and 10 per rolling 24 hours for one network.
    * Checked together so a rejection does not consume either window.
    */
-  async hit(ip: string, per10min = PER_10MIN, perDay = PER_DAY): Promise<RateBlock | null> {
+  async hit(ip: string, per10min = PER_10MIN, perDay = PER_DAY, kind: "perform" | "regather" = "perform"): Promise<RateBlock | null> {
     const now = Date.now() / 1000;
     this.ctx.storage.sql.exec("DELETE FROM ip_hits WHERE ts < ?", now - 86400);
+    this.ctx.storage.sql.exec("DELETE FROM regather_hits WHERE ts < ?", now - 600);
     const rows = this.ctx.storage.sql.exec("SELECT ts FROM ip_hits WHERE ip = ? AND ts >= ?", ip, now - 86400).toArray();
-    const decision = applyPerformHit(now, rows.map((row) => Number(row.ts)), per10min, perDay);
+    const again = this.ctx.storage.sql.exec("SELECT ts FROM regather_hits WHERE ip = ? AND ts >= ?", ip, now - 600).toArray();
+    const hits = rows.map((row) => Number(row.ts));
+    const regathers = again.map((row) => Number(row.ts));
+    // A re-gather (Peter, 2026-10-21): the 10-minute window, not the daily count.
+    const decision = kind === "regather"
+      ? applyRegatherHit(now, hits, regathers, per10min)
+      : applyPerformHit(now, hits, per10min, perDay, regathers);
     if (decision.error) {
       return { error: decision.error, retry_after_s: decision.retry_after_s || 1, retry_at: decision.retry_at || "" };
     }
-    this.ctx.storage.sql.exec("INSERT INTO ip_hits (ip, ts) VALUES (?, ?)", ip, now);
+    this.ctx.storage.sql.exec(kind === "regather" ? "INSERT INTO regather_hits (ip, ts) VALUES (?, ?)" : "INSERT INTO ip_hits (ip, ts) VALUES (?, ?)", ip, now);
     return null;
   }
 
@@ -502,6 +512,8 @@ async function config(env: Env): Promise<Response> {
         "fresh prompt tokens times the input price, plus cached prompt tokens times the cached price, plus completion tokens times the output price",
     },
     browser_assembly: true,
+    // One gathered sound can be gathered again (regather_gather_id + regather_chord).
+    regather: true,
     registry: await readRegistryStats(env),
   });
 }
@@ -530,10 +542,32 @@ async function gather(request: Request, env: Env, base: string): Promise<Respons
   const ip = clientIp(request);
   const gate = await turnstile(env, turnstileToken(body));
   if (!gate.ok) return json(turnstileDeniedBody(gate), 403);
-  const comp = compositionFrom(body);
-  const instrumentError = instrumentProblem(body.instrument);
+  // Re-gather one sound: the previous Gather's words, every other sound kept.
+  const again = regatherRequest(body);
+  if (again && "error" in again) {
+    return json(again.status === 404 ? { error: again.error } : { error: again.error, code: "rejected" }, again.status);
+  }
+  let regather: RegatherSpec | null = null;
+  let previousComp: Record<string, unknown> | null = null;
+  if (again) {
+    const claimed = typeof body.claim_token === "string" ? body.claim_token.trim() : "";
+    if (!claimed) return json({ error: "claim_token is required.", code: "rejected" }, 400);
+    const previous = await readJsonKey(env, `gathers/${again.gather_id}/collection.json`) as GatherDoc | null;
+    const previousJob = await jobs(env, again.gather_id).get();
+    if (!previous) return json({ error: "not found" }, 404);
+    if (!(await claimMatches(previous.claim_hash || previousJob?.claim_hash, claimed))) {
+      return json({ error: "claim_token does not match this Gather." }, 403);
+    }
+    if (!chordInPlan(previous.plan, again.chord) || !previous.composition || typeof previous.composition !== "object") {
+      return json({ error: "regather_chord must name a chord in that Gather.", code: "rejected" }, 400);
+    }
+    regather = again;
+    previousComp = { ...previous.composition };
+  }
+  const comp = previousComp || compositionFrom(body);
+  const instrumentError = regather ? null : instrumentProblem(body.instrument);
   if (instrumentError) return json({ error: instrumentError, code: "rejected" }, 400);
-  const instrument = typeof body.instrument === "string" && body.instrument.trim() ? body.instrument.trim() : null;
+  const instrument = !regather && typeof body.instrument === "string" && body.instrument.trim() ? body.instrument.trim() : null;
   if (instrument) comp.instrument = instrument;
   const words = `${comp.composition || ""}\n${comp.performance || ""}`;
   const wordErr = wordsTooLong(words);
@@ -541,7 +575,7 @@ async function gather(request: Request, env: Env, base: string): Promise<Respons
   let excluded: string | null = null;
   let avoidKeys: string[] | null = null;
   let avoidSamples: string[] | null = null;
-  if (typeof body.exclude_gather_id === "string" && body.exclude_gather_id.trim()) {
+  if (!regather && typeof body.exclude_gather_id === "string" && body.exclude_gather_id.trim()) {
     excluded = body.exclude_gather_id.trim();
     if (!ID_RE.test(excluded) || !excluded.startsWith("g-")) return json({ error: "not found" }, 404);
     const token = typeof body.claim_token === "string" ? body.claim_token.trim() : "";
@@ -558,7 +592,7 @@ async function gather(request: Request, env: Env, base: string): Promise<Respons
   }
   const ipHash = await sha256Text(`${env.NC_IP_HASH_SALT || "nc-perform"}:${ip}`);
   const tester = await testerPass(request.headers.get("X-NC-Tester"), env.NC_TESTER_TOKEN);
-  const limited = await rateLimit(env, ipHash, tester);
+  const limited = await rateLimit(env, ipHash, tester, regather ? "regather" : "perform");
   if (limited) return rateJson(limited);
   const randomSeed = () => crypto.getRandomValues(new Uint32Array(1))[0] % 2147483646 || 1;
   const seed = body.seed == null ? randomSeed() : (Number(body.seed) || 1);
@@ -578,6 +612,7 @@ async function gather(request: Request, env: Env, base: string): Promise<Respons
     excluded_gather_id: excluded,
     force_stub: spend >= 3,
     tester,
+    ...(regather ? { regather } : {}),
   };
   const job: Job = {
     id,
@@ -927,7 +962,7 @@ async function runContainer(env: Env, id: string): Promise<void> {
   await budget(env).dequeue(id);
   if (await abandonIfCancelled(env, id)) return;
   const container = getContainer(env.RENDER, WARM_ID);
-  const requested = JSON.parse(job.request_json) as { public_base?: string; gather_id?: string; kind?: string };
+  const requested = JSON.parse(job.request_json) as { public_base?: string; gather_id?: string; kind?: string; regather?: RegatherSpec };
   const base = containerBase(env.NC_PUBLIC_BASE_URL, requested.public_base);
   const envVars = containerEnv(env, base);
   await container.startAndWaitForPorts({
@@ -949,6 +984,9 @@ async function runContainer(env: Env, id: string): Promise<void> {
     await seedTakeAudio(env, container, id, headers);
   } else if (requested.gather_id && requested.kind !== "gather") {
     await seedGatherCache(env, container, id, requested.gather_id, headers);
+  }
+  if (requested.kind === "gather" && requested.regather) {
+    await seedRegather(env, container, id, requested.regather.gather_id, headers);
   }
   const started = await containerFetch(container, id, "http://container/internal/jobs", {
     method: "POST",
@@ -1041,7 +1079,7 @@ async function runContainer(env: Env, id: string): Promise<void> {
   if (last.state === "gathered") {
     let doc: GatherDoc | null = null;
     try {
-      doc = await copyGather(env, container, id, headers);
+      doc = await copyGather(env, container, id, headers, requested.regather);
     } catch (err) {
       if (!(err instanceof GatherStoreError)) throw err;
       last.state = "failed";
@@ -1326,13 +1364,49 @@ async function pullRegistry(env: Env, container: DurableObjectStub<RenderContain
   }
 }
 
-async function copyGather(env: Env, container: DurableObjectStub<RenderContainer>, id: string, headers: Record<string, string>): Promise<GatherDoc> {
+async function copyGather(env: Env, container: DurableObjectStub<RenderContainer>, id: string, headers: Record<string, string>, asked?: RegatherSpec): Promise<GatherDoc> {
   const res = await containerFetch(container, id, `http://container/internal/jobs/${id}/collection`, { headers });
   if (!res.ok) throw new Error("gather collection was not stored");
   const raw = await res.arrayBuffer();
-  await env.PERFORMANCES.put(`gathers/${id}/collection.json`, raw, { httpMetadata: { contentType: "application/json" } });
   const doc = JSON.parse(new TextDecoder().decode(raw)) as GatherDoc;
-  const files = (doc.files || []).filter((file) => /^[A-Za-z0-9._-]{1,80}$/.test(String(file.sid || "")));
+  if (asked || doc.regather) {
+    // Outside the daily count, so it must be the Gather it names with one chord changed.
+    const parent = asked ? await readJsonKey(env, `gathers/${asked.gather_id}/collection.json`) : null;
+    const problem = regatherProblem(asked || null, parent, doc);
+    if (problem) {
+      console.error(JSON.stringify({ event: "regather_refused", id, problem }));
+      throw new GatherStoreError("A re-gather changes exactly one chord. Gather again.");
+    }
+  }
+  await env.PERFORMANCES.put(`gathers/${id}/collection.json`, raw, { httpMetadata: { contentType: "application/json" } });
+  const files = containerFiles(doc, (doc.files || []).filter((file) => /^[A-Za-z0-9._-]{1,80}$/.test(String(file.sid || ""))));
+  if (doc.regather?.from && typeof doc.regather.chord === "number") {
+    // Every other chord is the previous Gather's audio, copied inside R2.
+    const fromId = doc.regather.from;
+    const keys: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await env.PERFORMANCES.list({ prefix: `gathers/${fromId}/audio/`, cursor, limit: 500 });
+      for (const item of page.objects) if (item.key) keys.push(item.key);
+      cursor = page.truncated ? page.cursor : undefined;
+    } while (cursor);
+    const missed: string[] = [];
+    await mapPool(carriedCopies(keys, fromId, id, doc.regather.chord), 8, async ([from, to]) => {
+      const got = await withRetry(async () => {
+        const obj = await env.PERFORMANCES.get(from);
+        if (!obj) return false;
+        await env.PERFORMANCES.put(to, await obj.arrayBuffer(), {
+          httpMetadata: { contentType: obj.httpMetadata?.contentType || "application/octet-stream", cacheControl: GATHER_CACHE },
+        });
+        return true;
+      });
+      if (!got.ok) missed.push(from);
+    });
+    if (missed.length) {
+      console.error(JSON.stringify({ event: "regather_copy", id, from: fromId, missed: missed.length }));
+      throw new GatherStoreError("The other sounds could not be copied. The old sound stays. Try again.");
+    }
+  }
   // One wave of copies. Sixteen serial container-to-R2 hops were the long tail of a Canon Gather.
   // Each copy is tried three times. A note stack has no source URL, so a skipped
   // copy used to become a 404 the page could not recover from.
@@ -1481,6 +1555,20 @@ async function seedKeepGather(env: Env, container: DurableObjectStub<RenderConta
     }
     cursor = page.truncated ? page.cursor : undefined;
   } while (cursor);
+}
+
+// One small JSON copy so the container can read the previous collection. Bounded: never an open wait.
+const REGATHER_SEED_MS = 20_000;
+async function seedRegather(env: Env, container: DurableObjectStub<RenderContainer>, jobId: string, fromId: string, headers: Record<string, string>): Promise<void> {
+  const key = `gathers/${fromId}/collection.json`;
+  const obj = await env.PERFORMANCES.get(key);
+  if (!obj) throw new Error("That Gather is not here any more. Gather again.");
+  const bytes = await obj.arrayBuffer();
+  const seeded = await withTimeout(postContainerBytes(container, jobId, "http://container/internal/gather-file", headers, bytes, {
+    "content-type": "application/json",
+    "x-gather-key": key,
+  }), REGATHER_SEED_MS, "copying the previous Gather");
+  await refuseCopy(seeded, `could not copy ${key} (${seeded.status})`);
 }
 
 async function seedGatherCache(env: Env, container: DurableObjectStub<RenderContainer>, performId: string, gatherId: string, headers: Record<string, string>): Promise<void> {
@@ -2327,7 +2415,7 @@ async function turnstile(env: Env, token: string): Promise<TurnstileGate> {
   return { ok: false, ...failure };
 }
 
-async function rateLimit(env: Env, ipHash: string, tester: boolean): Promise<RateBlock | null> {
+async function rateLimit(env: Env, ipHash: string, tester: boolean, kind: "perform" | "regather" = "perform"): Promise<RateBlock | null> {
   // Binding period is 10 seconds (Wrangler allows only 10 or 60). It stops a
   // burst before those requests touch the counters below. A tester pass skips
   // only the 10-minute and daily counters. The burst, Turnstile, size limits,
@@ -2339,7 +2427,7 @@ async function rateLimit(env: Env, ipHash: string, tester: boolean): Promise<Rat
     // Local tests have no binding. The Durable Object still enforces both windows.
   }
   if (tester) return null;
-  return budget(env).hit(ipHash);
+  return budget(env).hit(ipHash, PER_10MIN, PER_DAY, kind);
 }
 
 function rateJson(block: RateBlock): Response {

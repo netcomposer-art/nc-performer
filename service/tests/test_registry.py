@@ -209,6 +209,7 @@ class RegistryTest(unittest.TestCase):
         self.assertEqual(config["registry"]["rejected"], 1)
         self.assertEqual(health["registry"], config["registry"])
         self.assertIs(config["browser_assembly"], True)
+        self.assertIs(config["regather"], True)
         self.assertNotIn("NC_TESTER_TOKEN", json.dumps(config))
 
     def test_the_worker_seed_matches_the_bundled_registry(self):

@@ -61,8 +61,13 @@ def plan_raw(
     avoid_sample_ids=None,
     gather_deadline_s: float = GATHER_DEADLINE_S,
     settle_s: float = GATHER_SETTLE_S,
+    only_chords=None,
 ) -> dict:
     """One clip per chord. Whole-chord files first; indexed notes only as a stack.
+
+    ``only_chords`` is a list of (symbol, bass) to gather instead of the
+    Composition's chords, once each, in that order. The words still choose
+    the family and the exclusions. Re-gathering one sound uses it.
 
     ``instrument`` is ignored. The words choose the family when they name one
     other than piano. Otherwise each chord draws its own family, source, and
@@ -70,9 +75,12 @@ def plan_raw(
     """
     del instrument
     comp_text = comp.get("composition") or ""
-    found = take.composition_chords(comp_text) or CH.find_full(
-        f"{comp_text} {comp.get('performance') or ''}"
-    )
+    if only_chords:
+        found = [(str(sym), bass) for sym, bass in only_chords]
+    else:
+        found = take.composition_chords(comp_text) or CH.find_full(
+            f"{comp_text} {comp.get('performance') or ''}"
+        )
     if not found:
         raise ValueError('no chord symbols found in the Composition (e.g. "Cm, Am, F")')
     words = f"{comp.get('composition') or ''} {comp.get('performance') or ''}"
@@ -85,6 +93,7 @@ def plan_raw(
             comp, found, syms, words, comp_text, seed, hint, host_ok_fn, searchers,
             registry_url, verify_live, note_maps, progress_cb, origin_budget_s,
             avoid_keys, avoid_sample_ids, gather_deadline_s, settle_s,
+            once=bool(only_chords),
         )
     finally:
         discover._EXCLUDE = previous_exclude
@@ -231,7 +240,7 @@ def render(plan: dict, out_dir: str, name: str = "performance", log=print):
 def _plan(
     comp, found, syms, words, comp_text, seed, hint, host_ok_fn, searchers,
     registry_url, verify_live, note_maps, progress_cb, origin_budget_s,
-    avoid_keys, avoid_sample_ids, gather_deadline_s, settle_s,
+    avoid_keys, avoid_sample_ids, gather_deadline_s, settle_s, once=False,
 ) -> dict:
     query = discover.terms_for(comp, hint, seed)
     named = discover._named_origin(words)
@@ -319,7 +328,7 @@ def _plan(
     index_thread = threading.Thread(target=load_index, name="nc-gather-notes", daemon=True)
     index_thread.start()
 
-    seq, slots, section_spec, slice_note = _clock(comp_text, words, found, seed)
+    seq, slots, section_spec, slice_note = _clock(comp_text, words, found, seed, once=once)
     if not seq:
         raise ValueError('no chord symbols found in the Composition (e.g. "Cm, Am, F")')
     blocked = {str(item) for item in (avoid_keys or []) if item}
@@ -390,8 +399,13 @@ def _plan(
     return _pack(comp, seq, slots, section_spec, chosen, seed, slice_note, prefer, maps)
 
 
-def _clock(comp_text, words, found, seed):
+def _clock(comp_text, words, found, seed, once=False):
     length = interpret._length(words)
+    if once:
+        # These chords, once each, on a plain organic clock. Nothing is repeated or written.
+        seq = list(found)
+        spec = [(len(seq), float(length))]
+        return seq, take.chord_slots(spec, int(seed), False, 0), spec, None
     # No stated length: play the progression once. The piece is as long as its
     # clips (Petrus, 2026-10-21). The 120 s fallback no longer repeats chords.
     fill = float(length) if interpret.states_length(words) else 0.0

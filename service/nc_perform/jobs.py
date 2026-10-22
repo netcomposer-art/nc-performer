@@ -83,6 +83,10 @@ class Store:
           ip_hash TEXT,
           ts REAL
         );
+        CREATE TABLE IF NOT EXISTS regather_hits (
+          ip_hash TEXT,
+          ts REAL
+        );
         CREATE TABLE IF NOT EXISTS flags (
           k TEXT PRIMARY KEY,
           v TEXT
@@ -223,18 +227,25 @@ class Store:
             self.db.commit()
         return self.spend_today()
 
-    def hit(self, ip_hash: str, per_10min: int, per_day: int) -> RateBlock | None:
-        """Record a submit. The day is a rolling 24 hours, not the next calendar date."""
+    def hit(self, ip_hash: str, per_10min: int, per_day: int, kind: str = "perform") -> RateBlock | None:
+        """Record a submit. The day is a rolling 24 hours, not the next calendar date.
+
+        kind "regather" (one sound gathered again; Peter, 2026-10-21) counts in
+        the 10-minute window with everything else, but not in the daily count.
+        """
         now = time.time()
         with self._lock:
             self.db.execute("DELETE FROM ip_hits WHERE ts < ?", (now - _DAY_S,))
+            self.db.execute("DELETE FROM regather_hits WHERE ts < ?", (now - _WIN_S,))
             day = self.db.execute(
                 "SELECT COUNT(*) c, MIN(ts) oldest FROM ip_hits WHERE ip_hash=? AND ts >= ?",
                 (ip_hash, now - _DAY_S),
             ).fetchone()
             win = self.db.execute(
-                "SELECT COUNT(*) c, MIN(ts) oldest FROM ip_hits WHERE ip_hash=? AND ts >= ?",
-                (ip_hash, now - _WIN_S),
+                "SELECT COUNT(*) c, MIN(ts) oldest FROM ("
+                "SELECT ts FROM ip_hits WHERE ip_hash=? AND ts >= ? "
+                "UNION ALL SELECT ts FROM regather_hits WHERE ip_hash=? AND ts >= ?)",
+                (ip_hash, now - _WIN_S, ip_hash, now - _WIN_S),
             ).fetchone()
             if win["c"] >= per_10min:
                 return _rate_block(
@@ -242,6 +253,10 @@ class Store:
                     float(win["oldest"]) + _WIN_S,
                     f"Too many Performs from this network ({per_10min} every 10 minutes). Try again after {{when}}.",
                 )
+            if kind == "regather":
+                self.db.execute("INSERT INTO regather_hits (ip_hash, ts) VALUES (?, ?)", (ip_hash, now))
+                self.db.commit()
+                return None
             if day["c"] >= per_day:
                 return _rate_block(
                     now,

@@ -414,6 +414,8 @@ class Runner:
                 sound = with_preview(sound, job_id, settings.public_base_url)
             self._progress(job_id, stage_line=line, sound=sound, seed=seed)
 
+        if isinstance(req.get("regather"), dict):
+            return self._regather_job(job, req, settings, seed, stage_t)
         try:
             built = gather.build(
                 comp,
@@ -479,6 +481,60 @@ class Runner:
             "stage_line": STAGE_LINES["gathered"],
             "gather_id": job_id,
             "clock": clock,
+        }
+        self._guard(job_id)
+        if not self.store.mark_gathered(job_id, result):
+            self._settle_cancelled(job_id)
+
+    def _regather_job(self, job: dict, req: dict, settings, seed: int, stage_t: dict) -> None:
+        """A new recording for one chord. Every other chord is the previous Gather's.
+
+        One search, one copy, no per-file progress writes. The Worker copies the
+        other chords' files from R2, so this container only holds the new one.
+        """
+        job_id = job["id"]
+        spec = req["regather"]
+        from_id = str(spec.get("gather_id") or "")
+        index = int(spec.get("chord"))
+        prev = load_collection(self.storage, from_id)
+        if not prev or not isinstance(prev.get("plan"), dict):
+            raise Reject("That Gather is not here any more. Gather again.")
+        self._progress(job_id, seed=seed, trimmed=None, stage_line="Finding another recording…")
+        try:
+            built = gather.build_slot(
+                prev, index, seed=seed,
+                host_ok_fn=settings.host_allowed, registry_url=settings.suppliers_json,
+            )
+        except ValueError as exc:
+            raise Reject(str(exc)) from exc
+        one = built["plan"]
+        suppliers = None
+        try:
+            suppliers = load_suppliers(settings)
+        except Exception as e:
+            if any((s or {}).get("kind") == "supplier" for s in (one.get("sources") or {}).values()):
+                raise Reject(f"Could not read the Supplier registry: {e}") from e
+        check_plan(one, settings, suppliers)
+        try:
+            files, measured = assembly.materialize(one, built["files"], budget_s=gather.FETCH_S)
+        except ValueError as exc:
+            raise Reject(str(exc)) from exc
+        base = settings.public_base_url.rstrip("/")
+        one_sounds = assembly.annotate_sounds(public_sounds(one, job_id, base, files), measured)
+        doc, all_files = gather.merge_slot(prev, index, one, one_sounds, files, built, job_id, req.get("claim_hash"))
+        if gather.changed_slots(prev, doc) != [index]:
+            raise Reject("A re-gather changes exactly one chord. Gather again.")
+        check_plan(doc["plan"], settings, suppliers)
+        save_collection(self.storage, job_id, doc, all_files)
+        result = {
+            "seed": doc.get("seed"),
+            "trimmed": None,
+            "found_sounds": doc["sounds"],
+            "sounds": doc["sounds"],
+            "stage_line": STAGE_LINES["gathered"],
+            "gather_id": job_id,
+            "clock": doc.get("clock"),
+            "regather": doc["regather"],
         }
         self._guard(job_id)
         if not self.store.mark_gathered(job_id, result):
