@@ -633,3 +633,38 @@ def merge_slot(prev: dict, index: int, one_plan: dict, one_sounds: list[dict], o
         "regather": {"from": old_id, "chord": int(index), "sids": slot_ids},
     }
     return doc, files
+
+
+_URL_FIELDS = {"url", "preview_url", "cache", "gather_id"}
+
+
+def changed_slots(prev: dict, doc: dict) -> list[int]:
+    """Chord indexes whose recordings differ between two collections.
+
+    A re-gather must return exactly [index]: it sits outside the daily count,
+    so it may not become a whole new Gather. A different chord count, or other
+    words, counts as every chord changed.
+    """
+    a_plan, b_plan = prev.get("plan") or {}, doc.get("plan") or {}
+    a_clips, b_clips = a_plan.get("clips") or [], b_plan.get("clips") or []
+    if len(a_clips) != len(b_clips) or (prev.get("composition") or {}) != (doc.get("composition") or {}):
+        return list(range(max(len(a_clips), len(b_clips))))
+    a_src, b_src = a_plan.get("sources") or {}, b_plan.get("sources") or {}
+    a_snd, b_snd = prev.get("sounds") or [], doc.get("sounds") or []
+    out = []
+    for i in range(len(a_clips)):
+        pat = slot_pattern(i)
+        same = {k: v for k, v in a_src.items() if pat.match(str(k))} == {k: v for k, v in b_src.items() if pat.match(str(k))}
+        ca = {k: v for k, v in (a_clips[i] or {}).items()}
+        cb = {k: v for k, v in (b_clips[i] or {}).items()}
+        same = same and ca == cb
+        if i < len(a_snd) or i < len(b_snd):
+            sa = {k: v for k, v in (a_snd[i] if i < len(a_snd) else {}).items() if k not in _URL_FIELDS}
+            sb = {k: v for k, v in (b_snd[i] if i < len(b_snd) else {}).items() if k not in _URL_FIELDS}
+            same = same and sa == sb
+        if not same:
+            out.append(i)
+    extra = [k for k in set(a_src) | set(b_src) if not any(slot_pattern(i).match(str(k)) for i in range(len(a_clips)))]
+    if any(a_src.get(k) != b_src.get(k) for k in extra):
+        return list(range(len(a_clips)))
+    return out

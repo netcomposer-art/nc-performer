@@ -232,6 +232,97 @@ class RegatherApiTest(unittest.TestCase):
         self.assertEqual(doc["regather"]["from"], OLD)
         self.assertEqual(doc["composition"], self.prev["composition"])
 
+    def _again(self, chord=3, **extra):
+        body = {"regather_gather_id": OLD, "regather_chord": chord, "claim_token": "old-secret"}
+        body.update(extra)
+        return _post(self.origin + "/api/gather", body)
+
+    def test_a_regather_does_not_use_the_daily_count(self):
+        # Peter (2026-10-21): re-gathers are outside the 10 per 24 h count.
+        import hashlib
+        self.app.settings.rate_per_ip_day = 1
+        ip = hashlib.sha256(f"{self.app.settings.ip_hash_salt}:127.0.0.1".encode()).hexdigest()
+        self.assertIsNone(self.app.store.hit(ip, 100, 1))  # today's one Gather
+        code, body = _post(self.origin + "/api/gather", {"composition": "Dm9 G13 Cadd9"})
+        self.assertEqual((code, body.get("code")), (429, "rate"))
+        self.assertIn("Daily limit", body["error"])
+        code, body = self._again()
+        self.assertEqual(code, 200, body)
+        self.assertEqual(self._again()[0], 200)
+        rows = self.app.store.db.execute("SELECT COUNT(*) c FROM ip_hits").fetchone()["c"]
+        self.assertEqual(rows, 1)
+
+    def test_the_ten_minute_limit_still_applies(self):
+        self.app.settings.rate_per_10min = 2
+        self.assertEqual(self._again()[0], 200)
+        self.assertEqual(self._again()[0], 200)
+        code, body = self._again()
+        self.assertEqual((code, body.get("code")), (429, "rate"))
+        self.assertIn("every 10 minutes", body["error"])
+        # Re-gathers fill the same window as a full Gather.
+        code, body = _post(self.origin + "/api/gather", {"composition": "Dm9 G13 Cadd9"})
+        self.assertEqual(code, 429)
+
+    def test_the_bot_check_is_still_required(self):
+        self.app.settings.turnstile_secret = "2x0000000000000000000000000000000AA"
+        code, body = self._again()
+        self.assertEqual((code, body.get("code")), (403, "turnstile"))
+        self.app.settings.turnstile_secret = "1x0000000000000000000000000000000AA"
+        self.assertEqual(self._again()[0], 403)
+        self.assertEqual(self._again(turnstile_token="XXXX.DUMMY.TOKEN.XXXX")[0], 200)
+
+    def test_a_full_gather_cannot_pass_as_a_regather(self):
+        for key, value in (("composition", "Am F C G Am F C G"), ("words", "Am F C G"), ("exclude_gather_id", OLD), ("instrument", "choir"), ("seed", 7)):
+            code, body = self._again(**{key: value})
+            self.assertEqual((code, body.get("code")), (400, "rejected"), key)
+        self.assertEqual(self.app.store.db.execute("SELECT COUNT(*) c FROM regather_hits").fetchone()["c"], 0)
+        # A container that changes more than one chord is refused, whatever it found.
+        real = gather.merge_slot
+
+        def two(prev, index, *a, **k):
+            doc, files = real(prev, index, *a, **k)
+            doc["sounds"][0] = dict(doc["sounds"][0], title="something else")
+            return doc, files
+
+        gather.merge_slot = two
+        self.addCleanup(lambda: setattr(gather, "merge_slot", real))
+        code, body = self._again()
+        self.assertNotEqual(code, 200)
+        self.assertIn("exactly one chord", json.dumps(body))
+
+
+class ChangedSlotsTest(unittest.TestCase):
+    def test_one_two_and_other_words(self):
+        prev, _files = _previous()
+        doc, _ = _regather(prev, 2)
+        self.assertEqual(gather.changed_slots(prev, doc), [2])
+        two = json.loads(json.dumps(doc))
+        two["plan"]["sources"]["c0"] = dict(two["plan"]["sources"]["c0"], url="https://example.org/other.flac")
+        self.assertEqual(gather.changed_slots(prev, two), [0, 2])
+        words = json.loads(json.dumps(doc))
+        words["composition"] = {"composition": "Am F C G"}
+        self.assertEqual(gather.changed_slots(prev, words), list(range(len(prev["plan"]["clips"]))))
+        self.assertEqual(gather.changed_slots(prev, prev), [])
+
+
+class StoreRegatherHitTest(unittest.TestCase):
+    def test_regather_hits_count_in_the_window_only(self):
+        from nc_perform.jobs import Store as JobStore
+        tmp = tempfile.mkdtemp(prefix="nc-hits-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        store = JobStore(os.path.join(tmp, "jobs.db"))
+        for _ in range(5):
+            self.assertIsNone(store.hit("ip", 100, 2, "regather"))
+        self.assertIsNone(store.hit("ip", 100, 2))
+        self.assertIsNone(store.hit("ip", 100, 2))
+        self.assertIn("Daily limit", store.hit("ip", 100, 2).error)
+        self.assertIsNone(store.hit("ip", 100, 2, "regather"))
+        other = JobStore(os.path.join(tmp, "b.db"))
+        self.assertIsNone(other.hit("ip", 2, 100, "regather"))
+        self.assertIsNone(other.hit("ip", 2, 100))
+        self.assertIn("every 10 minutes", other.hit("ip", 2, 100, "regather").error)
+        self.assertIn("every 10 minutes", other.hit("ip", 2, 100).error)
+
 
 if __name__ == "__main__":
     unittest.main()

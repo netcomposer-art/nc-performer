@@ -44,8 +44,8 @@ import { REQUIRED_OUTPUTS, containerPageUpdate, missingOutputs, readableBytes } 
 import { mapPool } from "./pool";
 import { containerBase } from "./base";
 import { lostStacks, missingStacksMessage, recoverGatherAudio, stackParts, withRetry } from "./stacks";
-import { carriedCopies, chordInPlan, containerFiles, regatherRequest, withTimeout, type RegatherSpec } from "./regather";
-import { applyPerformHit, burstBlock, claimToken, corsHeaders, failureForPage, forPage, GATHER_CACHE, isInternalFailure, jobStatusFields, newId, pageGatherState, PER_10MIN, PER_DAY, proxyHosts, publicInternalError, publishedRegistryStats, queuedGatherFields, registryPublicStats, rejectPlan, siteverifyRequest, testerPass, turnstileDeniedBody, turnstileFailure, turnstileToken, wordsTooLong, type FoundSound, type RateBlock, type RegistryStats, type TurnstileFailure } from "./policy";
+import { carriedCopies, chordInPlan, containerFiles, regatherProblem, regatherRequest, withTimeout, type RegatherSpec } from "./regather";
+import { applyPerformHit, applyRegatherHit, burstBlock, claimToken, corsHeaders, failureForPage, forPage, GATHER_CACHE, isInternalFailure, jobStatusFields, newId, pageGatherState, PER_10MIN, PER_DAY, proxyHosts, publicInternalError, publishedRegistryStats, queuedGatherFields, registryPublicStats, rejectPlan, siteverifyRequest, testerPass, turnstileDeniedBody, turnstileFailure, turnstileToken, wordsTooLong, type FoundSound, type RateBlock, type RegistryStats, type TurnstileFailure } from "./policy";
 
 // @cloudflare/containers 0.3.7 looks up this exact export on ctx.exports when
 // allowedHosts is set. It is a WorkerEntrypoint, not a Durable Object, so it
@@ -262,6 +262,7 @@ export class BudgetDO extends DurableObject<Env> {
       "CREATE TABLE IF NOT EXISTS day_hits (ip TEXT, day TEXT, n INTEGER NOT NULL, PRIMARY KEY (ip, day))",
       "CREATE TABLE IF NOT EXISTS win_hits (ip TEXT PRIMARY KEY, start REAL NOT NULL, n INTEGER NOT NULL)",
       "CREATE TABLE IF NOT EXISTS ip_hits (ip TEXT, ts REAL)",
+      "CREATE TABLE IF NOT EXISTS regather_hits (ip TEXT, ts REAL)",
       "CREATE TABLE IF NOT EXISTS queued (id TEXT PRIMARY KEY, created TEXT NOT NULL)",
       "CREATE TABLE IF NOT EXISTS flags (k TEXT PRIMARY KEY, v TEXT NOT NULL)",
       "CREATE TABLE IF NOT EXISTS seen (id TEXT PRIMARY KEY, state TEXT, cost_usd REAL, ip_hash TEXT, error_code TEXT, created_at TEXT)",
@@ -304,15 +305,22 @@ export class BudgetDO extends DurableObject<Env> {
    * 3 Performs per 10 minutes and 10 per rolling 24 hours for one network.
    * Checked together so a rejection does not consume either window.
    */
-  async hit(ip: string, per10min = PER_10MIN, perDay = PER_DAY): Promise<RateBlock | null> {
+  async hit(ip: string, per10min = PER_10MIN, perDay = PER_DAY, kind: "perform" | "regather" = "perform"): Promise<RateBlock | null> {
     const now = Date.now() / 1000;
     this.ctx.storage.sql.exec("DELETE FROM ip_hits WHERE ts < ?", now - 86400);
+    this.ctx.storage.sql.exec("DELETE FROM regather_hits WHERE ts < ?", now - 600);
     const rows = this.ctx.storage.sql.exec("SELECT ts FROM ip_hits WHERE ip = ? AND ts >= ?", ip, now - 86400).toArray();
-    const decision = applyPerformHit(now, rows.map((row) => Number(row.ts)), per10min, perDay);
+    const again = this.ctx.storage.sql.exec("SELECT ts FROM regather_hits WHERE ip = ? AND ts >= ?", ip, now - 600).toArray();
+    const hits = rows.map((row) => Number(row.ts));
+    const regathers = again.map((row) => Number(row.ts));
+    // A re-gather (Peter, 2026-10-21): the 10-minute window, not the daily count.
+    const decision = kind === "regather"
+      ? applyRegatherHit(now, hits, regathers, per10min)
+      : applyPerformHit(now, hits, per10min, perDay, regathers);
     if (decision.error) {
       return { error: decision.error, retry_after_s: decision.retry_after_s || 1, retry_at: decision.retry_at || "" };
     }
-    this.ctx.storage.sql.exec("INSERT INTO ip_hits (ip, ts) VALUES (?, ?)", ip, now);
+    this.ctx.storage.sql.exec(kind === "regather" ? "INSERT INTO regather_hits (ip, ts) VALUES (?, ?)" : "INSERT INTO ip_hits (ip, ts) VALUES (?, ?)", ip, now);
     return null;
   }
 
@@ -584,7 +592,7 @@ async function gather(request: Request, env: Env, base: string): Promise<Respons
   }
   const ipHash = await sha256Text(`${env.NC_IP_HASH_SALT || "nc-perform"}:${ip}`);
   const tester = await testerPass(request.headers.get("X-NC-Tester"), env.NC_TESTER_TOKEN);
-  const limited = await rateLimit(env, ipHash, tester);
+  const limited = await rateLimit(env, ipHash, tester, regather ? "regather" : "perform");
   if (limited) return rateJson(limited);
   const randomSeed = () => crypto.getRandomValues(new Uint32Array(1))[0] % 2147483646 || 1;
   const seed = body.seed == null ? randomSeed() : (Number(body.seed) || 1);
@@ -1071,7 +1079,7 @@ async function runContainer(env: Env, id: string): Promise<void> {
   if (last.state === "gathered") {
     let doc: GatherDoc | null = null;
     try {
-      doc = await copyGather(env, container, id, headers);
+      doc = await copyGather(env, container, id, headers, requested.regather);
     } catch (err) {
       if (!(err instanceof GatherStoreError)) throw err;
       last.state = "failed";
@@ -1356,12 +1364,21 @@ async function pullRegistry(env: Env, container: DurableObjectStub<RenderContain
   }
 }
 
-async function copyGather(env: Env, container: DurableObjectStub<RenderContainer>, id: string, headers: Record<string, string>): Promise<GatherDoc> {
+async function copyGather(env: Env, container: DurableObjectStub<RenderContainer>, id: string, headers: Record<string, string>, asked?: RegatherSpec): Promise<GatherDoc> {
   const res = await containerFetch(container, id, `http://container/internal/jobs/${id}/collection`, { headers });
   if (!res.ok) throw new Error("gather collection was not stored");
   const raw = await res.arrayBuffer();
-  await env.PERFORMANCES.put(`gathers/${id}/collection.json`, raw, { httpMetadata: { contentType: "application/json" } });
   const doc = JSON.parse(new TextDecoder().decode(raw)) as GatherDoc;
+  if (asked || doc.regather) {
+    // Outside the daily count, so it must be the Gather it names with one chord changed.
+    const parent = asked ? await readJsonKey(env, `gathers/${asked.gather_id}/collection.json`) : null;
+    const problem = regatherProblem(asked || null, parent, doc);
+    if (problem) {
+      console.error(JSON.stringify({ event: "regather_refused", id, problem }));
+      throw new GatherStoreError("A re-gather changes exactly one chord. Gather again.");
+    }
+  }
+  await env.PERFORMANCES.put(`gathers/${id}/collection.json`, raw, { httpMetadata: { contentType: "application/json" } });
   const files = containerFiles(doc, (doc.files || []).filter((file) => /^[A-Za-z0-9._-]{1,80}$/.test(String(file.sid || ""))));
   if (doc.regather?.from && typeof doc.regather.chord === "number") {
     // Every other chord is the previous Gather's audio, copied inside R2.
@@ -2398,7 +2415,7 @@ async function turnstile(env: Env, token: string): Promise<TurnstileGate> {
   return { ok: false, ...failure };
 }
 
-async function rateLimit(env: Env, ipHash: string, tester: boolean): Promise<RateBlock | null> {
+async function rateLimit(env: Env, ipHash: string, tester: boolean, kind: "perform" | "regather" = "perform"): Promise<RateBlock | null> {
   // Binding period is 10 seconds (Wrangler allows only 10 or 60). It stops a
   // burst before those requests touch the counters below. A tester pass skips
   // only the 10-minute and daily counters. The burst, Turnstile, size limits,
@@ -2410,7 +2427,7 @@ async function rateLimit(env: Env, ipHash: string, tester: boolean): Promise<Rat
     // Local tests have no binding. The Durable Object still enforces both windows.
   }
   if (tester) return null;
-  return budget(env).hit(ipHash);
+  return budget(env).hit(ipHash, PER_10MIN, PER_DAY, kind);
 }
 
 function rateJson(block: RateBlock): Response {

@@ -218,9 +218,11 @@ export function applyPerformHit(
   hits: readonly number[] | null,
   per10min = PER_10MIN,
   perDay = PER_DAY,
+  regathers: readonly number[] | null = null,
 ): RateDecision {
   const kept = (hits || []).filter((ts) => ts >= now - DAY_S).sort((a, b) => a - b);
-  const win = kept.filter((ts) => ts >= now - WINDOW_S);
+  // Re-gathers fill the 10-minute window, never the day.
+  const win = [...kept, ...(regathers || [])].filter((ts) => ts >= now - WINDOW_S).sort((a, b) => a - b);
   if (win.length >= per10min) {
     return blocked(now, win[0] + WINDOW_S, windowMessage(per10min, clockUtc(win[0] + WINDOW_S)), kept);
   }
@@ -228,6 +230,25 @@ export function applyPerformHit(
     return blocked(now, kept[0] + DAY_S, dayMessage(perDay, clockUtc(kept[0] + DAY_S)), kept);
   }
   return { error: null, retry_after_s: null, retry_at: null, hits: [...kept, now] };
+}
+
+/**
+ * One re-gather (one sound gathered again). Peter (2026-10-21): it is not in
+ * the daily count, but it shares the 10-minute window with every Gather and
+ * Perform. `hits` are the counted hits, `regathers` the re-gathers so far.
+ * A full Gather's window check passes both lists to applyPerformHit.
+ */
+export function applyRegatherHit(
+  now: number,
+  hits: readonly number[] | null,
+  regathers: readonly number[] | null,
+  per10min = PER_10MIN,
+): RateDecision {
+  const win = [...(hits || []), ...(regathers || [])].filter((ts) => ts >= now - WINDOW_S).sort((a, b) => a - b);
+  if (win.length >= per10min) {
+    return blocked(now, win[0] + WINDOW_S, windowMessage(per10min, clockUtc(win[0] + WINDOW_S)), win);
+  }
+  return { error: null, retry_after_s: null, retry_at: null, hits: [...win, now] };
 }
 
 function blocked(now: number, freeAt: number, error: string, hits: number[]): RateDecision {

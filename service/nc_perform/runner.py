@@ -522,6 +522,8 @@ class Runner:
         base = settings.public_base_url.rstrip("/")
         one_sounds = assembly.annotate_sounds(public_sounds(one, job_id, base, files), measured)
         doc, all_files = gather.merge_slot(prev, index, one, one_sounds, files, built, job_id, req.get("claim_hash"))
+        if gather.changed_slots(prev, doc) != [index]:
+            raise Reject("A re-gather changes exactly one chord. Gather again.")
         check_plan(doc["plan"], settings, suppliers)
         save_collection(self.storage, job_id, doc, all_files)
         result = {

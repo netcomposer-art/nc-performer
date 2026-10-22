@@ -16,10 +16,16 @@ export function slotPattern(index: number): RegExp {
   return new RegExp(`^c${Math.trunc(index)}(?:b|n\\d+)?$`);
 }
 
+/** Fields that would make a re-gather a new Gather. It uses its Gather's words. */
+export const REGATHER_FORBIDDEN = ["words", "composition", "performance", "prompt", "title", "composer", "instrument", "exclude_gather_id", "seed"];
+export const REGATHER_WORDS_ERROR = "A re-gather uses its Gather's words. Send only regather_gather_id, regather_chord and claim_token.";
+
 /** The body's re-gather request, an error sentence, or null when it is a plain Gather. */
 export function regatherRequest(body: Record<string, unknown>): RegatherSpec | { error: string; status: number } | null {
   const raw = body.regather_gather_id;
   if (raw == null || raw === "") return null;
+  // A re-gather is outside the daily count (Peter, 2026-10-21), so it may not carry its own words.
+  if (REGATHER_FORBIDDEN.some((key) => body[key] != null && body[key] !== "")) return { error: REGATHER_WORDS_ERROR, status: 400 };
   const id = typeof raw === "string" ? raw.trim() : "";
   if (!ID.test(id)) return { error: "not found", status: 404 };
   const chord = body.regather_chord;
@@ -69,3 +75,45 @@ export async function withTimeout<T>(work: Promise<T>, ms: number, what: string)
   }
 }
 
+
+type Row = Record<string, unknown>;
+type Collection = { composition?: unknown; plan?: unknown; sounds?: unknown; regather?: { from?: string; chord?: number } };
+const URL_FIELDS = new Set(["url", "preview_url", "cache", "gather_id"]);
+
+function same(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+}
+function rowsOf(value: unknown): Row[] {
+  return Array.isArray(value) ? (value as Row[]) : [];
+}
+function planOf(doc: Collection | null): { clips: Row[]; sources: Record<string, unknown> } {
+  const plan = (doc?.plan && typeof doc.plan === "object" ? doc.plan : {}) as { clips?: unknown; sources?: unknown };
+  const sources = plan.sources && typeof plan.sources === "object" ? (plan.sources as Record<string, unknown>) : {};
+  return { clips: rowsOf(plan.clips), sources };
+}
+
+/**
+ * Why this collection is not a one-chord re-gather of `parent`, or null.
+ * Same words, same chord count, the chord asked for, and every other chord's
+ * sources, clip and sound row unchanged (sound urls move to the new id).
+ */
+export function regatherProblem(asked: RegatherSpec | null, parent: Collection | null, doc: Collection): string | null {
+  if (!asked) return "a re-gather collection on a plain Gather";
+  if (!parent) return "the parent Gather is gone";
+  if (!doc.regather || doc.regather.from !== asked.gather_id || doc.regather.chord !== asked.chord) return "not the re-gather that was asked for";
+  if (!same(parent.composition, doc.composition)) return "other words";
+  const a = planOf(parent), b = planOf(doc);
+  if (a.clips.length !== b.clips.length || a.clips.length === 0) return "another chord count";
+  for (let i = 0; i < a.clips.length; i++) {
+    if (i === asked.chord) continue;
+    const slot = slotPattern(i);
+    const pick = (src: Record<string, unknown>) => Object.keys(src).filter((k) => slot.test(k)).sort().map((k) => [k, src[k]]);
+    if (!same(pick(a.sources), pick(b.sources)) || !same(a.clips[i], b.clips[i])) return `chord ${i + 1} changed`;
+    const strip = (row: Row | undefined) => Object.fromEntries(Object.entries(row || {}).filter(([k]) => !URL_FIELDS.has(k)).sort());
+    if (!same(strip(rowsOf(parent.sounds)[i]), strip(rowsOf(doc.sounds)[i]))) return `chord ${i + 1} changed`;
+  }
+  const slots = a.clips.map((_c, i) => slotPattern(i));
+  const loose = new Set([...Object.keys(a.sources), ...Object.keys(b.sources)].filter((k) => !slots.some((p) => p.test(k))));
+  for (const k of loose) if (!same(a.sources[k], b.sources[k])) return "other sources changed";
+  return null;
+}

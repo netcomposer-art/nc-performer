@@ -65,6 +65,10 @@ _TURNSTILE_TEST = {
 }
 _DUMMY_TOKEN = "XXXX.DUMMY.TOKEN.XXXX"
 
+# A re-gather uses its Gather's words and changes one chord. These would make it a new Gather.
+REGATHER_FORBIDDEN = ("words", "composition", "performance", "prompt", "title", "composer", "instrument", "exclude_gather_id", "seed")
+REGATHER_WORDS_ERROR = "A re-gather uses its Gather's words. Send only regather_gather_id, regather_chord and claim_token."
+
 FILE_TYPES = {
     "performance.flac": "audio/flac",
     "preview.mp3": "audio/mpeg",
@@ -225,7 +229,7 @@ def make_handler(app: App):
             import hashlib
             return hashlib.sha256(f"{app.settings.ip_hash_salt}:{self._ip()}".encode()).hexdigest()
 
-        def _rate_block_or_tester(self) -> tuple[bool, bool]:
+        def _rate_block_or_tester(self, kind: str = "perform") -> tuple[bool, bool]:
             """(allowed, tester). A matching X-NC-Tester skips the 10-minute and daily counters.
 
             Turnstile, size limits, and the daily cost caps are checked by the caller.
@@ -235,7 +239,7 @@ def make_handler(app: App):
             if tester:
                 return True, True
             s = app.settings
-            block = app.store.hit(self._ip_hash(), s.rate_per_10min, s.rate_per_ip_day)
+            block = app.store.hit(self._ip_hash(), s.rate_per_10min, s.rate_per_ip_day, kind)
             if not block:
                 return True, False
             self._send(429, {
@@ -399,6 +403,10 @@ def make_handler(app: App):
             again_id = body.get("regather_gather_id")
             if again_id not in (None, ""):
                 # One chord again: the previous Gather's words, its other sounds kept.
+                # It is outside the daily count, so it may not carry words of its own.
+                extra = sorted(k for k in REGATHER_FORBIDDEN if body.get(k) not in (None, ""))
+                if extra:
+                    return self._send(400, {"error": REGATHER_WORDS_ERROR, "code": "rejected"})
                 again_id = str(again_id)
                 if not ID_RE.match(again_id) or not again_id.startswith("g-"):
                     return self._send(404, {"error": "not found"})
@@ -442,7 +450,7 @@ def make_handler(app: App):
                 avoid_samples = previous.get("picked_sample_ids") or []
             else:
                 excluded = None
-            allowed, tester = self._rate_block_or_tester()
+            allowed, tester = self._rate_block_or_tester("regather" if regather is not None else "perform")
             if not allowed:
                 return
             if app.store.queued_count() >= s.max_queue or app.store.running_count() >= s.max_concurrency:
