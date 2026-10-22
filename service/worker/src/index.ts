@@ -44,6 +44,7 @@ import { REQUIRED_OUTPUTS, containerPageUpdate, missingOutputs, readableBytes } 
 import { mapPool } from "./pool";
 import { containerBase } from "./base";
 import { lostStacks, missingStacksMessage, recoverGatherAudio, stackParts, withRetry } from "./stacks";
+import { carriedCopies, chordInPlan, containerFiles, regatherRequest, withTimeout, type RegatherSpec } from "./regather";
 import { applyPerformHit, burstBlock, claimToken, corsHeaders, failureForPage, forPage, GATHER_CACHE, isInternalFailure, jobStatusFields, newId, pageGatherState, PER_10MIN, PER_DAY, proxyHosts, publicInternalError, publishedRegistryStats, queuedGatherFields, registryPublicStats, rejectPlan, siteverifyRequest, testerPass, turnstileDeniedBody, turnstileFailure, turnstileToken, wordsTooLong, type FoundSound, type RateBlock, type RegistryStats, type TurnstileFailure } from "./policy";
 
 // @cloudflare/containers 0.3.7 looks up this exact export on ctx.exports when
@@ -189,6 +190,7 @@ type GatherDoc = {
   picked_sample_ids?: string[];
   files?: GatherFile[];
   clock?: AssemblyClock | null;
+  regather?: { from?: string; chord?: number; sids?: string[] };
 };
 
 export class RenderContainer extends Container<Env> {
@@ -502,6 +504,8 @@ async function config(env: Env): Promise<Response> {
         "fresh prompt tokens times the input price, plus cached prompt tokens times the cached price, plus completion tokens times the output price",
     },
     browser_assembly: true,
+    // One gathered sound can be gathered again (regather_gather_id + regather_chord).
+    regather: true,
     registry: await readRegistryStats(env),
   });
 }
@@ -530,10 +534,32 @@ async function gather(request: Request, env: Env, base: string): Promise<Respons
   const ip = clientIp(request);
   const gate = await turnstile(env, turnstileToken(body));
   if (!gate.ok) return json(turnstileDeniedBody(gate), 403);
-  const comp = compositionFrom(body);
-  const instrumentError = instrumentProblem(body.instrument);
+  // Re-gather one sound: the previous Gather's words, every other sound kept.
+  const again = regatherRequest(body);
+  if (again && "error" in again) {
+    return json(again.status === 404 ? { error: again.error } : { error: again.error, code: "rejected" }, again.status);
+  }
+  let regather: RegatherSpec | null = null;
+  let previousComp: Record<string, unknown> | null = null;
+  if (again) {
+    const claimed = typeof body.claim_token === "string" ? body.claim_token.trim() : "";
+    if (!claimed) return json({ error: "claim_token is required.", code: "rejected" }, 400);
+    const previous = await readJsonKey(env, `gathers/${again.gather_id}/collection.json`) as GatherDoc | null;
+    const previousJob = await jobs(env, again.gather_id).get();
+    if (!previous) return json({ error: "not found" }, 404);
+    if (!(await claimMatches(previous.claim_hash || previousJob?.claim_hash, claimed))) {
+      return json({ error: "claim_token does not match this Gather." }, 403);
+    }
+    if (!chordInPlan(previous.plan, again.chord) || !previous.composition || typeof previous.composition !== "object") {
+      return json({ error: "regather_chord must name a chord in that Gather.", code: "rejected" }, 400);
+    }
+    regather = again;
+    previousComp = { ...previous.composition };
+  }
+  const comp = previousComp || compositionFrom(body);
+  const instrumentError = regather ? null : instrumentProblem(body.instrument);
   if (instrumentError) return json({ error: instrumentError, code: "rejected" }, 400);
-  const instrument = typeof body.instrument === "string" && body.instrument.trim() ? body.instrument.trim() : null;
+  const instrument = !regather && typeof body.instrument === "string" && body.instrument.trim() ? body.instrument.trim() : null;
   if (instrument) comp.instrument = instrument;
   const words = `${comp.composition || ""}\n${comp.performance || ""}`;
   const wordErr = wordsTooLong(words);
@@ -541,7 +567,7 @@ async function gather(request: Request, env: Env, base: string): Promise<Respons
   let excluded: string | null = null;
   let avoidKeys: string[] | null = null;
   let avoidSamples: string[] | null = null;
-  if (typeof body.exclude_gather_id === "string" && body.exclude_gather_id.trim()) {
+  if (!regather && typeof body.exclude_gather_id === "string" && body.exclude_gather_id.trim()) {
     excluded = body.exclude_gather_id.trim();
     if (!ID_RE.test(excluded) || !excluded.startsWith("g-")) return json({ error: "not found" }, 404);
     const token = typeof body.claim_token === "string" ? body.claim_token.trim() : "";
@@ -578,6 +604,7 @@ async function gather(request: Request, env: Env, base: string): Promise<Respons
     excluded_gather_id: excluded,
     force_stub: spend >= 3,
     tester,
+    ...(regather ? { regather } : {}),
   };
   const job: Job = {
     id,
@@ -927,7 +954,7 @@ async function runContainer(env: Env, id: string): Promise<void> {
   await budget(env).dequeue(id);
   if (await abandonIfCancelled(env, id)) return;
   const container = getContainer(env.RENDER, WARM_ID);
-  const requested = JSON.parse(job.request_json) as { public_base?: string; gather_id?: string; kind?: string };
+  const requested = JSON.parse(job.request_json) as { public_base?: string; gather_id?: string; kind?: string; regather?: RegatherSpec };
   const base = containerBase(env.NC_PUBLIC_BASE_URL, requested.public_base);
   const envVars = containerEnv(env, base);
   await container.startAndWaitForPorts({
@@ -949,6 +976,9 @@ async function runContainer(env: Env, id: string): Promise<void> {
     await seedTakeAudio(env, container, id, headers);
   } else if (requested.gather_id && requested.kind !== "gather") {
     await seedGatherCache(env, container, id, requested.gather_id, headers);
+  }
+  if (requested.kind === "gather" && requested.regather) {
+    await seedRegather(env, container, id, requested.regather.gather_id, headers);
   }
   const started = await containerFetch(container, id, "http://container/internal/jobs", {
     method: "POST",
@@ -1332,7 +1362,34 @@ async function copyGather(env: Env, container: DurableObjectStub<RenderContainer
   const raw = await res.arrayBuffer();
   await env.PERFORMANCES.put(`gathers/${id}/collection.json`, raw, { httpMetadata: { contentType: "application/json" } });
   const doc = JSON.parse(new TextDecoder().decode(raw)) as GatherDoc;
-  const files = (doc.files || []).filter((file) => /^[A-Za-z0-9._-]{1,80}$/.test(String(file.sid || "")));
+  const files = containerFiles(doc, (doc.files || []).filter((file) => /^[A-Za-z0-9._-]{1,80}$/.test(String(file.sid || ""))));
+  if (doc.regather?.from && typeof doc.regather.chord === "number") {
+    // Every other chord is the previous Gather's audio, copied inside R2.
+    const fromId = doc.regather.from;
+    const keys: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await env.PERFORMANCES.list({ prefix: `gathers/${fromId}/audio/`, cursor, limit: 500 });
+      for (const item of page.objects) if (item.key) keys.push(item.key);
+      cursor = page.truncated ? page.cursor : undefined;
+    } while (cursor);
+    const missed: string[] = [];
+    await mapPool(carriedCopies(keys, fromId, id, doc.regather.chord), 8, async ([from, to]) => {
+      const got = await withRetry(async () => {
+        const obj = await env.PERFORMANCES.get(from);
+        if (!obj) return false;
+        await env.PERFORMANCES.put(to, await obj.arrayBuffer(), {
+          httpMetadata: { contentType: obj.httpMetadata?.contentType || "application/octet-stream", cacheControl: GATHER_CACHE },
+        });
+        return true;
+      });
+      if (!got.ok) missed.push(from);
+    });
+    if (missed.length) {
+      console.error(JSON.stringify({ event: "regather_copy", id, from: fromId, missed: missed.length }));
+      throw new GatherStoreError("The other sounds could not be copied. The old sound stays. Try again.");
+    }
+  }
   // One wave of copies. Sixteen serial container-to-R2 hops were the long tail of a Canon Gather.
   // Each copy is tried three times. A note stack has no source URL, so a skipped
   // copy used to become a 404 the page could not recover from.
@@ -1481,6 +1538,20 @@ async function seedKeepGather(env: Env, container: DurableObjectStub<RenderConta
     }
     cursor = page.truncated ? page.cursor : undefined;
   } while (cursor);
+}
+
+// One small JSON copy so the container can read the previous collection. Bounded: never an open wait.
+const REGATHER_SEED_MS = 20_000;
+async function seedRegather(env: Env, container: DurableObjectStub<RenderContainer>, jobId: string, fromId: string, headers: Record<string, string>): Promise<void> {
+  const key = `gathers/${fromId}/collection.json`;
+  const obj = await env.PERFORMANCES.get(key);
+  if (!obj) throw new Error("That Gather is not here any more. Gather again.");
+  const bytes = await obj.arrayBuffer();
+  const seeded = await withTimeout(postContainerBytes(container, jobId, "http://container/internal/gather-file", headers, bytes, {
+    "content-type": "application/json",
+    "x-gather-key": key,
+  }), REGATHER_SEED_MS, "copying the previous Gather");
+  await refuseCopy(seeded, `could not copy ${key} (${seeded.status})`);
 }
 
 async function seedGatherCache(env: Env, container: DurableObjectStub<RenderContainer>, performId: string, gatherId: string, headers: Record<string, string>): Promise<void> {

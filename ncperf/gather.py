@@ -9,7 +9,9 @@ The layered engine remains available as build(..., processed=True).
 from __future__ import annotations
 
 import contextvars
+import copy
 import os
+import re
 import threading
 import time
 
@@ -87,7 +89,7 @@ def source_rows(plan: dict) -> list[dict]:
     return rows
 
 
-def build(comp: dict, *, seed: int = 1, instrument: str | None = None, avoid_keys=None, avoid_sample_ids=None, host_ok_fn=None, registry_url=None, verify_live: bool = True, searchers=None, note_maps=None, progress_cb=None, processed: bool = False) -> dict:
+def build(comp: dict, *, seed: int = 1, instrument: str | None = None, avoid_keys=None, avoid_sample_ids=None, host_ok_fn=None, registry_url=None, verify_live: bool = True, searchers=None, note_maps=None, progress_cb=None, processed: bool = False, only_chords=None, strict_avoid: bool = False) -> dict:
     """Search and pick. The default is one raw clip per chord.
 
     ``processed=True`` keeps the layered plan for the later processing step.
@@ -106,7 +108,7 @@ def build(comp: dict, *, seed: int = 1, instrument: str | None = None, avoid_key
         registry_url=registry_url, verify_live=verify_live, note_maps=note_maps,
         progress_cb=progress_cb, origin_budget_s=ORIGIN_S, avoid_keys=avoid_keys,
         avoid_sample_ids=avoid_sample_ids, gather_deadline_s=GATHER_S,
-        settle_s=assemble.GATHER_SETTLE_S,
+        settle_s=assemble.GATHER_SETTLE_S, only_chords=only_chords,
     )
     avoided = bool(avoid_keys or avoid_sample_ids)
     from . import registry
@@ -116,7 +118,8 @@ def build(comp: dict, *, seed: int = 1, instrument: str | None = None, avoid_key
         try:
             plan = assemble.plan_raw(comp, **kwargs)
         except ValueError:
-            if not avoided:
+            # A re-gather must not fall back to the files it was asked to replace.
+            if not avoided or strict_avoid:
                 raise
             kwargs["avoid_keys"] = None
             kwargs["avoid_sample_ids"] = None
@@ -317,13 +320,14 @@ def save_collection(storage, gather_id: str, doc: dict, files: list[dict]) -> No
         data = row.get("data")
         if isinstance(data, (bytes, bytearray)) and data:
             storage.put(f"gathers/{gather_id}/audio/{sid}", bytes(data), _audio_type(row.get("ext")))
-        if not row.get("url") and not (isinstance(data, (bytes, bytearray)) and data):
+        if not row.get("url") and not (isinstance(data, (bytes, bytearray)) and data) and not row.get("carried"):
             continue
         stored.append({
             "sid": sid,
             "url": row.get("url"),
             "ext": row.get("ext") or ".bin",
             "range_bytes": row.get("range_bytes"),
+            **({"carried": True} if row.get("carried") else {}),
         })
     body["files"] = stored
     storage.put(
@@ -475,3 +479,157 @@ def _audio_type(ext: str | None) -> str:
     if low in (".aif", ".aiff"):
         return "audio/aiff"
     return "application/octet-stream"
+
+
+# ---------- Re-gather one sound ----------
+# The page keeps every other sound and asks for a new recording of one chord.
+# The new Gather is a whole collection under its own id: the other chords are
+# the previous Gather's, unchanged, and only this chord is searched again.
+
+def slot_pattern(index: int):
+    """Every source id that belongs to chord ``index``: c3, c3b (bass), c3n0… (notes)."""
+    return re.compile(rf"^c{int(index)}(?:b|n\d+)?$")
+
+
+def _remap_sid(sid: str, index: int) -> str:
+    return re.sub(r"^c0(?=b$|n\d|$)", f"c{int(index)}", str(sid))
+
+
+def slot_chord(prev: dict, index: int) -> tuple[str, int | None]:
+    """The symbol and written bass of chord ``index`` in a previous Gather."""
+    plan = prev.get("plan") or {}
+    clips = plan.get("clips") or []
+    if not (0 <= index < len(clips)) or not isinstance(clips[index], dict):
+        raise ValueError("That chord is not in this Gather.")
+    symbol = str(clips[index].get("symbol") or "")
+    if not symbol:
+        raise ValueError("That chord is not in this Gather.")
+    bass = None
+    comp = prev.get("composition") or {}
+    text = str(comp.get("composition") or "")
+    words = f"{text} {comp.get('performance') or ''}"
+    try:
+        from . import take
+        found = take.composition_chords(text) or []
+        seq, _slots, _spec, _note = assemble._clock(text, words, found, int(prev.get("seed") or 1))
+        if index < len(seq) and seq[index][0] == symbol:
+            bass = seq[index][1]
+    except Exception:
+        bass = None
+    return symbol, bass
+
+
+def remap_slot(plan: dict, files: list[dict], index: int) -> tuple[dict, list[dict]]:
+    """A one-chord plan's ids (c0…) become chord ``index``'s ids (c<index>…)."""
+    plan = copy.deepcopy(plan)
+    plan["sources"] = {_remap_sid(sid, index): src for sid, src in (plan.get("sources") or {}).items()}
+    for clip in plan.get("clips") or []:
+        clip["id"] = _remap_sid(clip.get("id") or "c0", index)
+        clip["sids"] = [_remap_sid(sid, index) for sid in clip.get("sids") or []]
+        clip["chord"] = int(index)
+    for layer in plan.get("layers") or []:
+        for event in layer.get("events") or []:
+            if "source" in event:
+                event["source"] = _remap_sid(event["source"], index)
+            if "chord_index" in event:
+                event["chord_index"] = int(index)
+    rows = []
+    for row in files or []:
+        row = dict(row)
+        row["sid"] = _remap_sid(row.get("sid") or "", index)
+        rows.append(row)
+    return plan, rows
+
+
+def _slot_keys(plan: dict, index: int) -> set[str]:
+    pattern = slot_pattern(index)
+    sources = {sid: src for sid, src in (plan.get("sources") or {}).items() if pattern.match(str(sid))}
+    keys, samples = picked_from_plan({"sources": sources})
+    return set(keys) | set(samples)
+
+
+def build_slot(prev: dict, index: int, *, seed: int, host_ok_fn=None, registry_url=None, verify_live: bool = True, searchers=None, note_maps=None) -> dict:
+    """Search one chord again, never reusing a file this Gather (or its parents) already picked."""
+    symbol, bass = slot_chord(prev, index)
+    comp = dict(prev.get("composition") or {})
+    avoid = [str(item) for item in (prev.get("picked_keys") or []) if item]
+    avoid_samples = [str(item) for item in (prev.get("picked_sample_ids") or []) if item]
+    try:
+        built = build(
+            comp, seed=seed, avoid_keys=avoid, avoid_sample_ids=avoid_samples,
+            host_ok_fn=host_ok_fn, registry_url=registry_url, verify_live=verify_live,
+            searchers=searchers, note_maps=note_maps, only_chords=[(symbol, bass)], strict_avoid=True,
+        )
+    except ValueError as exc:
+        raise ValueError(f"No other recording of {symbol} was found. The old one stays.") from exc
+    plan, files = remap_slot(built["plan"], built["files"], index)
+    new_keys = _slot_keys(plan, index)
+    old_keys = _slot_keys(prev.get("plan") or {}, index)
+    if not new_keys or new_keys == old_keys:
+        raise ValueError(f"No other recording of {symbol} was found. The old one stays.")
+    built = dict(built)
+    built["plan"] = plan
+    built["files"] = files
+    built["symbol"] = symbol
+    return built
+
+
+def merge_slot(prev: dict, index: int, one_plan: dict, one_sounds: list[dict], one_files: list[dict], built: dict, job_id: str, claim_hash: str | None) -> tuple[dict, list[dict]]:
+    """The previous collection with chord ``index`` replaced. Returns (doc, files)."""
+    pattern = slot_pattern(index)
+    old_id = str(prev.get("id") or "")
+    plan = copy.deepcopy(prev.get("plan") or {})
+    sources = {sid: src for sid, src in (plan.get("sources") or {}).items() if not pattern.match(str(sid))}
+    sources.update(one_plan.get("sources") or {})
+    plan["sources"] = sources
+    new_clip = copy.deepcopy((one_plan.get("clips") or [None])[0])
+    if not isinstance(new_clip, dict):
+        raise ValueError("The new recording could not be read.")
+    old_clip = plan["clips"][index]
+    for key in ("t", "dur", "chord", "id", "symbol"):
+        if key in old_clip:
+            new_clip[key] = old_clip[key]
+    plan["clips"][index] = new_clip
+    new_chord = (one_plan.get("chords") or [{}])[0]
+    if index < len(plan.get("chords") or []) and new_chord.get("voicing"):
+        plan["chords"][index]["voicing"] = new_chord["voicing"]
+    for layer in plan.get("layers") or []:
+        for event in layer.get("events") or []:
+            if event.get("chord_index") == index and new_clip.get("sids"):
+                event["source"] = new_clip["sids"][0]
+    sounds = []
+    for pos, row in enumerate(prev.get("sounds") or []):
+        row = dict(row)
+        if old_id:
+            for key in ("preview_url", "url"):
+                if isinstance(row.get(key), str):
+                    row[key] = row[key].replace(f"/api/jobs/{old_id}/", f"/api/jobs/{job_id}/")
+        if pos == index and one_sounds:
+            row = dict(one_sounds[0])
+            row["pos"] = index
+            row["chord"] = index
+            row["symbol"] = old_clip.get("symbol") or row.get("symbol") or ""
+        sounds.append(row)
+    carried = []
+    for row in prev.get("files") or []:
+        if not isinstance(row, dict) or pattern.match(str(row.get("sid") or "")):
+            continue
+        row = {k: v for k, v in row.items() if k != "data"}
+        row["carried"] = True
+        carried.append(row)
+    files = carried + [dict(row) for row in one_files or []]
+    slot_ids = sorted({str(row.get("sid")) for row in one_files or [] if row.get("sid")} | {str(new_clip.get("id") or f"c{index}")})
+    doc = {
+        "id": job_id,
+        "seed": prev.get("seed"),
+        "claim_hash": claim_hash,
+        "composition": prev.get("composition"),
+        "plan": plan,
+        "sounds": sounds,
+        "picked_keys": list(dict.fromkeys([*(prev.get("picked_keys") or []), *built.get("picked_keys", [])])),
+        "picked_sample_ids": list(dict.fromkeys([*(prev.get("picked_sample_ids") or []), *built.get("picked_sample_ids", [])])),
+        "excluded_gather_id": prev.get("excluded_gather_id"),
+        "clock": prev.get("clock"),
+        "regather": {"from": old_id, "chord": int(index), "sids": slot_ids},
+    }
+    return doc, files
