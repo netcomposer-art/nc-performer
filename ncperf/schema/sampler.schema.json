@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://netcomposer.art/schema/nc-sampler-1.json",
+  "title": "NC sampler instrument manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format", "kind", "id", "instrument", "slug", "sustain", "velocity",
+    "credit", "license_in", "license_out", "page", "author", "playback"
+  ],
+  "properties": {
+    "format": {"const": "nc-sampler/1"},
+    "kind": {"enum": ["notes", "chords"]},
+    "id": {"type": "string", "minLength": 1},
+    "instrument": {"type": "string", "minLength": 1},
+    "slug": {"type": "string", "pattern": "^[a-z0-9-]+$"},
+    "sustain": {"enum": ["rings", "plucked"]},
+    "velocity": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lo", "hi"],
+      "properties": {
+        "lo": {"type": "integer", "minimum": 0, "maximum": 127},
+        "hi": {"type": "integer", "minimum": 0, "maximum": 127}
+      }
+    },
+    "credit": {"type": "string", "minLength": 1},
+    "license_in": {"type": "string", "minLength": 1},
+    "license_out": {"const": "CC-BY-SA-4.0"},
+    "page": {"type": "string", "minLength": 1},
+    "author": {"type": "string", "minLength": 1},
+    "playback": {"$ref": "#/$defs/playback"},
+    "notes": {
+      "type": "object",
+      "additionalProperties": {"$ref": "#/$defs/note"}
+    },
+    "chords": {
+      "type": "object",
+      "additionalProperties": {"$ref": "#/$defs/chord"}
+    },
+    "gaps": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/gap"}
+    },
+    "recovered": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/recovered"}
+    }
+  },
+  "$defs": {
+    "playback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pitch_shift", "time_stretch", "octave_substitution", "missing",
+        "ring_cap_s", "slice_fade_s", "chord_change_fade_s"
+      ],
+      "properties": {
+        "pitch_shift": {"const": false},
+        "time_stretch": {"const": false},
+        "octave_substitution": {"const": false},
+        "missing": {"const": "omit"},
+        "ring_cap_s": {"const": 8.0},
+        "slice_fade_s": {"const": 0.08},
+        "chord_change_fade_s": {"const": 0.12}
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "t0", "t1", "license"],
+      "properties": {
+        "url": {"type": "string", "minLength": 8},
+        "t0": {"type": "number", "minimum": 0},
+        "t1": {"type": "number", "minimum": 0},
+        "license": {"type": "string", "minLength": 1}
+      }
+    },
+    "note": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["midi", "name", "file", "master", "cents", "dur_s", "lufs", "peak_db", "sr", "source"],
+      "properties": {
+        "midi": {"type": "integer", "minimum": 0, "maximum": 127},
+        "name": {"type": "string", "minLength": 1},
+        "file": {"type": "string", "pattern": "^notes/[a-z0-9-]+/[0-9]+\\.opus$"},
+        "master": {"type": "string", "pattern": "^notes/[a-z0-9-]+/[0-9]+\\.flac$"},
+        "cents": {"type": "number", "minimum": -100, "maximum": 100},
+        "cents_method": {"enum": ["fft", "pyin", "index"]},
+        "dur_s": {"type": "number", "minimum": 0, "maximum": 8},
+        "lufs": {"type": ["number", "null"]},
+        "peak_db": {"type": "number"},
+        "sr": {"type": "integer", "minimum": 8000, "maximum": 192000},
+        "channels": {"type": "integer", "minimum": 1, "maximum": 2},
+        "recovered": {"type": "boolean"},
+        "source": {"$ref": "#/$defs/source"}
+      }
+    },
+    "chord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "file", "master", "dur_s", "lufs", "peak_db", "sr", "source"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "file": {"type": "string", "pattern": "^notes/[a-z0-9-]+/chords/[A-Za-z0-9+-]+\\.opus$"},
+        "master": {"type": "string", "pattern": "^notes/[a-z0-9-]+/chords/[A-Za-z0-9+-]+\\.flac$"},
+        "dur_s": {"type": "number", "minimum": 0, "maximum": 8},
+        "lufs": {"type": ["number", "null"]},
+        "peak_db": {"type": "number"},
+        "sr": {"type": "integer", "minimum": 8000, "maximum": 192000},
+        "source": {"$ref": "#/$defs/source"}
+      }
+    },
+    "gap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["midi", "name", "status", "reason"],
+      "properties": {
+        "midi": {"type": "integer", "minimum": 0, "maximum": 127},
+        "name": {"type": "string", "minLength": 1},
+        "status": {"enum": ["absent", "not-in-sources"]},
+        "reason": {"type": "string", "minLength": 1},
+        "files": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "recovered": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["midi", "name", "cents", "file"],
+      "properties": {
+        "midi": {"type": "integer", "minimum": 0, "maximum": 127},
+        "name": {"type": "string", "minLength": 1},
+        "cents": {"type": "number", "minimum": -100, "maximum": 100},
+        "file": {"type": "string", "minLength": 1},
+        "t0": {"type": "number", "minimum": 0}
+      }
+    }
+  }
+}
