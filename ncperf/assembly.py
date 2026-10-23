@@ -84,6 +84,9 @@ def written_clock(comp: dict | None, plan: dict | None) -> dict | None:
     """
     comp = comp or {}
     plan = plan or {}
+    if isinstance(plan.get("language_clock"), dict):
+        from . import language
+        return language.clock_view(plan)
     text = f"{comp.get('composition') or ''}\n{comp.get('performance') or ''}"
     symbols = [str(chord.get("symbol") or "") for chord in (plan.get("chords") or []) if isinstance(chord, dict)]
     if not symbols:

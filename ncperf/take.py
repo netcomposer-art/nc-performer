@@ -9,6 +9,7 @@ import random
 import re
 
 from . import chords as CH
+from . import language
 
 # Same ceiling as max_chords. The old plan stopped at 12.
 CHORD_LIMIT = 40
@@ -73,7 +74,7 @@ def composition_chords(text: str) -> list:
     A bar table is sorted by bar number. Prose is not scanned once that table
     is there, so a three-column prelude does not come out row by row.
     """
-    return bar_chords(text) or CH.find_full(text)
+    return bar_chords(text) or CH.find_full(language.uncomment(text))
 
 
 _PULSE = re.compile(
@@ -90,12 +91,12 @@ _BAR_WORDS = {"two": 2, "three": 3, "four": 4, "five": 5}
 
 def stated_pulse(words: str) -> bool:
     """True when the words fix the clock: a steady pulse, or a duration per bar."""
-    return bool(_PULSE.search(words or ""))
+    return bool(_PULSE.search(language.uncomment(words or "")))
 
 
 def broaden_bars(words: str) -> int:
     """How many final bars the words ask to let breathe. Zero when they do not."""
-    text = words or ""
+    text = language.uncomment(words or "")
     match = _BROADEN.search(text)
     if match:
         raw = match.group(1).lower()
@@ -109,11 +110,12 @@ def broaden_bars(words: str) -> int:
 
 def half_sections(text: str) -> tuple[list, list] | None:
     """Chords before and after 'second half', when the Composition splits the piece that way."""
-    match = _HALF_SPLIT.search(text or "")
+    clean = language.uncomment(text or "")
+    match = _HALF_SPLIT.search(clean)
     if not match:
         return None
-    left = CH.find_full(text[: match.start()])
-    right = CH.find_full(text[match.end() :])
+    left = CH.find_full(clean[: match.start()])
+    right = CH.find_full(clean[match.end() :])
     if not left or not right:
         return None
     return left, right
@@ -122,7 +124,8 @@ def half_sections(text: str) -> tuple[list, list] | None:
 # A written clock. Organic rubato is not used once one of these matches every chord.
 #   [2 bars Cm]  [4 beats G7]  [1.5 bars Am7]
 #   Cm (2 bars)  G7 (4 beats)  Cm for 2 bars
-# Tempo: "60 BPM" or "quarter = 60" (a beat is a quarter). Meter: "4/4", "3/4", "6/8", "2/2" (default 4/4).
+# Tempo: "60 BPM", "tempo 90", "q90", or "quarter = 60" (a beat is a quarter). A BPM word wins.
+# Meter: "4/4", "3/4", "6/8", "2/2" (default 4/4).
 # A change: "at bar 12, 80 BPM", "from bar 12, 80 BPM", or "bar 12: 80 BPM" (bar 1 is the opening).
 # "one chord per bar" plus a tempo change gives every chord one bar on that map.
 _BRACKET_LEN = re.compile(r"\[\s*(\d+(?:\.\d+)?)\s*(bars?|beats?)\s+([^\]]+?)\]", re.I)
@@ -157,10 +160,11 @@ def _tempo_changes(text: str) -> list[tuple[int, float]]:
 
 
 def _opening_bpm(text: str, changes: list[tuple[int, float]]) -> float | None:
-    blank = _TEMPO_CHANGE.sub(" ", text or "")
-    match = _BPM.search(blank) or _QUARTER_TEMPO.search(blank)
-    if match:
-        return float(match.group(1))
+    # ``tempo`` and ``q`` count, and a BPM word still beats an earlier alias.
+    # A change at a later bar is blanked inside opening_tempo, so it stays a change.
+    found = language.opening_tempo(text)
+    if found and found.get("bpm"):
+        return float(found["bpm"])
     for bar, bpm in changes:
         if bar <= 1:
             return bpm
@@ -260,6 +264,7 @@ def written_durations(text: str, chords: list) -> list[float] | None:
     """
     if not chords:
         return None
+    text = language.uncomment(text or "")
     changes = [(bar, bpm) for bar, bpm in _tempo_changes(text) if bar > 1]
     opening = _opening_bpm(text, _tempo_changes(text))
     specs = _bracket_lengths(text, chords) or _annotated_lengths(text, chords)

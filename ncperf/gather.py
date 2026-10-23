@@ -505,6 +505,11 @@ def slot_chord(prev: dict, index: int) -> tuple[str, int | None]:
     if not symbol:
         raise ValueError("That chord is not in this Gather.")
     bass = None
+    plan_clock = plan.get("language_clock") if isinstance(plan.get("language_clock"), dict) else None
+    if plan_clock:
+        played = [ev for ev in (plan_clock.get("played") or []) if isinstance(ev, dict) and ev.get("kind") == "chord"]
+        if 0 <= index < len(played) and str(played[index].get("symbol") or "") == symbol:
+            return symbol, played[index].get("bass")
     comp = prev.get("composition") or {}
     text = str(comp.get("composition") or "")
     words = f"{text} {comp.get('performance') or ''}"

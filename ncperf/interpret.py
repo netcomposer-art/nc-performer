@@ -7,6 +7,7 @@ Three ways in, all producing the same schema (ncperf/schema/plan.schema.json):
 """
 import datetime, json, os, re, urllib.request, urllib.error
 from . import chords as CH
+from . import language
 from . import take
 from .schema import SCHEMA, validate
 
@@ -44,24 +45,30 @@ def read_composition(path_or_text, performance=None):
     return dict(title=title, composition=comp, performance=performance if performance is not None else (perf or ''), file=f, composer=(composer or '').strip() or None)
 
 def _bars(text):
-    b = re.search(r'(\d+)\s*bars?', text, re.I); t = re.search(r'(\d+(?:\.\d+)?)\s*BPM', text, re.I); ts = re.search(r'\b(\d)/4\b', text)
-    if b and t: return int(b.group(1)), (int(ts.group(1)) if ts else 4) * 60.0 / float(t.group(1))
+    clean = language.uncomment(text or "")
+    b = re.search(r'(\d+)\s*bars?', clean, re.I)
+    found = language.opening_tempo(clean)
+    ts = re.search(r'\b(\d)/4\b', clean)
+    if b and found and found.get("bpm"):
+        return int(b.group(1)), (int(ts.group(1)) if ts else 4) * 60.0 / float(found["bpm"])
     return None, None
 
 def states_length(text) -> bool:
     """True when the words give a length: bars, minutes, or seconds. Otherwise the 120 s in _length is only a fallback."""
-    nb, _bs = _bars(text)
+    clean = language.uncomment(text or "")
+    nb, _bs = _bars(clean)
     if nb:
         return True
-    return bool(re.search(r'(\d+(?:\.\d+)?)\s*-?\s*(?:minutes?|mins?|m)\b', text, re.I) or re.search(r'(\d+(?:\.\d+)?)\s*(?:seconds?|secs?|s)\b', text, re.I))
+    return bool(re.search(r'(\d+(?:\.\d+)?)\s*-?\s*(?:minutes?|mins?|m)\b', clean, re.I) or re.search(r'(\d+(?:\.\d+)?)\s*(?:seconds?|secs?|s)\b', clean, re.I))
 
 
 def _length(text):
-    nb, bs = _bars(text)
+    clean = language.uncomment(text or "")
+    nb, bs = _bars(clean)
     if nb: return nb * bs
-    m = re.search(r'(\d+(?:\.\d+)?)\s*-?\s*(?:minutes?|mins?|m)\b(?:\s*(\d+)\s*(?:seconds?|secs?|s)\b)?', text, re.I)
+    m = re.search(r'(\d+(?:\.\d+)?)\s*-?\s*(?:minutes?|mins?|m)\b(?:\s*(\d+)\s*(?:seconds?|secs?|s)\b)?', clean, re.I)
     if m: return max(20.0, min(600.0, float(m.group(1)) * 60 + float(m.group(2) or 0)))
-    m = re.search(r'(\d+(?:\.\d+)?)\s*(?:seconds?|secs?|s)\b', text, re.I)
+    m = re.search(r'(\d+(?:\.\d+)?)\s*(?:seconds?|secs?|s)\b', clean, re.I)
     return max(20.0, min(600.0, float(m.group(1)))) if m else 120.0
 
 # ---------------- stub (rule-based, no LLM) ----------------

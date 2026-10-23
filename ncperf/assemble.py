@@ -26,6 +26,7 @@ import soundfile as sf
 from . import chords as CH
 from . import deadline
 from . import discover
+from . import language
 from . import fetch
 from . import interpret
 from . import licenses as LIC
@@ -75,8 +76,16 @@ def plan_raw(
     """
     del instrument
     comp_text = comp.get("composition") or ""
+    parsed = language.parse(comp_text) if comp_text else None
+    # A seed written in the Composition is the one Play uses. It wins over the request.
+    if parsed and parsed.get("seed") is not None:
+        seed = int(parsed["seed"])
+    language_doc = None
     if only_chords:
         found = [(str(sym), bass) for sym, bass in only_chords]
+    elif parsed and parsed.get("clock") == "language" and take.bar_chords(comp_text) is None:
+        language_doc = language.plan_doc(parsed)
+        found = language_doc["unique"]
     else:
         found = take.composition_chords(comp_text) or CH.find_full(
             f"{comp_text} {comp.get('performance') or ''}"
@@ -93,7 +102,7 @@ def plan_raw(
             comp, found, syms, words, comp_text, seed, hint, host_ok_fn, searchers,
             registry_url, verify_live, note_maps, progress_cb, origin_budget_s,
             avoid_keys, avoid_sample_ids, gather_deadline_s, settle_s,
-            once=bool(only_chords),
+            once=bool(only_chords), language_doc=language_doc,
         )
     finally:
         discover._EXCLUDE = previous_exclude
@@ -120,7 +129,7 @@ def preview_clip(plan: dict, clip: dict) -> bytes:
     return buf.getvalue()
 
 
-def render(plan: dict, out_dir: str, name: str = "performance", log=print):
+def render(plan: dict, out_dir: str, name: str = "performance", log=print, max_length_s: float | None = None):
     """Place the gathered clips in order and write FLAC, MP3, and uses.json."""
     from . import util
 
@@ -161,6 +170,20 @@ def render(plan: dict, out_dir: str, name: str = "performance", log=print):
     if missing:
         detail = "; ".join(f"{sid}: {errors.get(sid, 'missing')}" for sid in missing[:6])
         raise RuntimeError(f"could not fetch {', '.join(missing[:8])}. {detail}")
+
+    # Open chords had a 0.1 s stand-in. The file length is the cap, and a
+    # written duration still keeps its slot. A second pass leaves a measured plan.
+    clock = plan.get("language_clock")
+    if isinstance(clock, dict) and not clock.get("measured"):
+        caps = []
+        for clip in clips:
+            longest = 0.0
+            for sid in clip.get("sids") or []:
+                audio = (resolved.get(sid) or {}).get("y")
+                if audio is not None and len(audio):
+                    longest = max(longest, float(len(audio)) / SR)
+            caps.append(longest)
+        language.settle(plan, caps, max_length_s=180.0 if max_length_s is None else float(max_length_s))
 
     length = float(plan["length_s"])
     total = max(1, int(round(length * SR)))
@@ -241,6 +264,7 @@ def _plan(
     comp, found, syms, words, comp_text, seed, hint, host_ok_fn, searchers,
     registry_url, verify_live, note_maps, progress_cb, origin_budget_s,
     avoid_keys, avoid_sample_ids, gather_deadline_s, settle_s, once=False,
+    language_doc=None,
 ) -> dict:
     query = discover.terms_for(comp, hint, seed)
     named = discover._named_origin(words)
@@ -328,7 +352,14 @@ def _plan(
     index_thread = threading.Thread(target=load_index, name="nc-gather-notes", daemon=True)
     index_thread.start()
 
-    seq, slots, section_spec, slice_note = _clock(comp_text, words, found, seed, once=once)
+    if language_doc is not None:
+        # One search per recording. The played chords share those files.
+        seq = list(language_doc["unique"])
+        slots = None
+        section_spec = None
+        slice_note = language_doc.get("slice_note")
+    else:
+        seq, slots, section_spec, slice_note = _clock(comp_text, words, found, seed, once=once)
     if not seq:
         raise ValueError('no chord symbols found in the Composition (e.g. "Cm, Am, F")')
     blocked = {str(item) for item in (avoid_keys or []) if item}
@@ -370,7 +401,9 @@ def _plan(
     prefer = take.prefer_from(words)
 
     def on_pick(index, opt):
-        sym = seq[index][0]
+        plays = [index]
+        if language_doc is not None:
+            plays = language_doc["plays"].get(index) or [index]
         title = opt.get("title")
         license_id = opt.get("license")
         origin = opt.get("origin")
@@ -379,14 +412,16 @@ def _plan(
             title = got.get("title") or title
             license_id = got.get("license") or license_id
             origin = (got.get("source") or {}).get("kind") or origin
-        tell(None, {
-            "chord": index,
-            "id": f"c{index}",
-            "title": title,
-            "supplier": progress.origin_label(origin),
-            "license": license_id,
-            "symbol": sym,
-        })
+        for play_at in plays:
+            sym = language_doc["symbols"][play_at] if language_doc is not None else seq[index][0]
+            tell(None, {
+                "chord": play_at,
+                "id": f"c{play_at}",
+                "title": title,
+                "supplier": progress.origin_label(origin),
+                "license": license_id,
+                "symbol": sym,
+            })
 
     chosen = _choose_files(option_groups, seq, seed, prefer, verify_live, on_pick=on_pick)
     if any(row is None for row in chosen):
@@ -396,7 +431,16 @@ def _plan(
             + ", ".join(dict.fromkeys(missing))
             + ". A pitched clip in another key was not used."
         )
-    return _pack(comp, seq, slots, section_spec, chosen, seed, slice_note, prefer, maps)
+    share = None
+    clock = None
+    if language_doc is not None:
+        share = language_doc["share"]
+        clock = language_doc["clock"]
+        chosen = [chosen[rec] for rec in share]
+        seq = list(language_doc["expanded"])
+        slots = language_doc["slots"]
+        section_spec = language_doc["section_spec"]
+    return _pack(comp, seq, slots, section_spec, chosen, seed, slice_note, prefer, maps, share, clock)
 
 
 def _clock(comp_text, words, found, seed, once=False):
@@ -747,7 +791,7 @@ def _bass_source(sample: dict) -> dict:
     return keep
 
 
-def _pack(comp, seq, slots, section_spec, chosen, seed, slice_note, prefer, maps=None) -> dict:
+def _pack(comp, seq, slots, section_spec, chosen, seed, slice_note, prefer, maps=None, share=None, language_clock=None) -> dict:
     sources = {}
     clips = []
     events = []
@@ -762,14 +806,27 @@ def _pack(comp, seq, slots, section_spec, chosen, seed, slice_note, prefer, maps
     family = max(set(families), key=families.count) if families else ""
     anchor = next((opt for opt in chosen if opt and take.family_of(opt.get("instrument") or "") == family), anchor)
     t_end = 0.0
+    shared: dict[int, dict] = {}
     for index, opt in enumerate(chosen):
         sym, _bass = seq[index]
         slot = slots[index]
         start = float(slot["t"])
         dur = max(0.1, float(slot["dur"]))
         t_end = round(start + dur, 3)
-        if opt.get("built") == "assembled notes":
-            sids, titles, authors, pages, licenses = _add_samples(sources, picks, opt, index)
+        rec = share[index] if share is not None else None
+        if rec is not None and rec in shared:
+            prior = shared[rec]
+            sids = list(prior["sids"])
+            built = prior["built"]
+            title = prior["title"]
+            author = prior["author"]
+            page = prior["page"]
+            license_id = prior["license_id"]
+            credit = prior["credit"]
+            voicing = list(prior["voicing"])
+        elif opt.get("built") == "assembled notes":
+            stem = None if rec is None else f"r{int(rec)}"
+            sids, titles, authors, pages, licenses = _add_samples(sources, picks, opt, index, stem)
             built = "assembled notes"
             title = opt.get("title") or f"{opt.get('instrument')} {sym}"
             author = opt.get("author") or ""
@@ -788,7 +845,9 @@ def _pack(comp, seq, slots, section_spec, chosen, seed, slice_note, prefer, maps
                 )
         else:
             got = opt["accepted"]
-            sid = f"c{index}"
+            # A loop shares r{recording}. A per-chord id would let a re-gather of one
+            # pass delete the file the other passes still play.
+            sid = f"c{index}" if rec is None else f"r{int(rec)}"
             sources[sid] = got["source"]
             sids = [sid]
             if got.get("key"):
@@ -806,7 +865,7 @@ def _pack(comp, seq, slots, section_spec, chosen, seed, slice_note, prefer, maps
             voicing = [int(n) for n in discover._voicing(sym)]
             sample = _indexed_bass(maps, opt["bass_note_pc"]) if opt.get("bass_note_pc") is not None else None
             if sample:
-                sid = f"c{index}b"
+                sid = f"c{index}b" if rec is None else f"r{int(rec)}b"
                 sources[sid] = _bass_source(sample)
                 sids.append(sid)
                 built = "chord and bass note"
@@ -826,7 +885,14 @@ def _pack(comp, seq, slots, section_spec, chosen, seed, slice_note, prefer, maps
                     picks.append(f"{bass_url}#note={bass_pitch}")
                 elif bass_url:
                     picks.append(str(bass_url))
+        if rec is not None and rec not in shared:
+            shared[rec] = {
+                "sids": list(sids), "built": built, "title": title, "author": author,
+                "page": page, "license_id": license_id, "credit": credit, "voicing": list(voicing),
+            }
         voicing = [n for n in voicing if 21 <= int(n) <= 108] or [60]
+        if rec is not None and rec in shared:
+            shared[rec]["voicing"] = list(voicing)
         chords.append({
             "t": round(start, 3),
             "dur": round(dur, 3),
@@ -864,6 +930,9 @@ def _pack(comp, seq, slots, section_spec, chosen, seed, slice_note, prefer, maps
             "chord_index": index,
         })
     length = max(5.0, round(t_end, 3))
+    if language_clock is not None and section_spec:
+        musical = sum(float(seconds) for _count, seconds in section_spec)
+        length = max(length, max(5.0, round(musical, 3)))
     notes = [
         "Raw assembly. One clip per chord, in order. No reverb, no room tone, no mastering, no time-stretch, no pitch-shift.",
     ]
@@ -876,6 +945,10 @@ def _pack(comp, seq, slots, section_spec, chosen, seed, slice_note, prefer, maps
         )
     if prefer:
         notes.append("The words asked for " + ", ".join(prefer) + ".")
+    if language_clock and (language_clock.get("hacks") or []):
+        notes.append("Written hacks set Live's starting chain only. The render does not play them.")
+        if any(hack.get("ramp") is not None for hack in language_clock["hacks"]):
+            notes.append("A ramp was written. A person plays ramps in Live.")
     title = comp.get("title") or "Untitled"
     plan = {
         "nc_plan_version": "0.1",
@@ -915,6 +988,8 @@ def _pack(comp, seq, slots, section_spec, chosen, seed, slice_note, prefer, maps
         "gather_picks": list(dict.fromkeys(picks)),
         "from_gather": True,
     }
+    if language_clock is not None:
+        plan["language_clock"] = language_clock
     sections = []
     cursor = 0.0
     for idx, (count, seconds) in enumerate(section_spec):
@@ -926,7 +1001,7 @@ def _pack(comp, seq, slots, section_spec, chosen, seed, slice_note, prefer, maps
     return plan
 
 
-def _add_samples(sources, picks, opt, index):
+def _add_samples(sources, picks, opt, index, stem=None):
     sids = []
     titles = []
     authors = []
@@ -936,7 +1011,7 @@ def _add_samples(sources, picks, opt, index):
         kind = sample.get("kind")
         if kind not in ("freesound", "uiowa_mis", "commons", "supplier"):
             continue
-        sid = f"c{index}n{nth}"
+        sid = f"{stem}n{nth}" if stem else f"c{index}n{nth}"
         keep = {}
         for field in ("kind", "url", "id", "audio_url", "page", "title", "author", "license", "pitched", "expect_midi", "segment", "onset_s", "length_s", "credit_checked", "manifest"):
             if sample.get(field) not in (None, ""):

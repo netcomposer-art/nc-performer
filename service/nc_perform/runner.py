@@ -35,6 +35,7 @@ from .ids import sha256_text
 from .jobs import Store
 import ncperf.assemble as assemble
 import ncperf.assembly as assembly
+import ncperf.language as language
 from .limits import Reject, check_plan, load_suppliers, source_cap
 from ncperf.cancel import MESSAGE as CANCELLED_MESSAGE
 from ncperf.cancel import bind as bind_cancel
@@ -309,6 +310,9 @@ class Runner:
         if req.get("gather_id"):
             restore_cache(self.storage, req["gather_id"])
         processed = bool(req.get("processed")) and bool(settings.processed)
+        # A language-clock piece is raw even when processing is on. Words the
+        # parser left alone are not sent to a model. A legacy piece still is.
+        language_piece = language.uses_language(comp.get("composition") or "")
         mode = "plan"
         os.environ["NC_SUPPLIERS_JSON"] = settings.suppliers_json
         os.environ["NC_PERFORMER"] = settings.instance_name
@@ -319,7 +323,7 @@ class Runner:
             fetch._reg.clear()
         with egress_guard(settings):
             suppliers = None
-            if plan is None and not processed:
+            if plan is None and (not processed or language_piece):
                 instrument = (comp.get("instrument") or "").strip() or None
 
                 def progress_cb(line, sound=None):
@@ -454,6 +458,20 @@ class Runner:
                 files, measured = assembly.materialize(plan, files, budget_s=gather.FETCH_S)
             except ValueError as exc:
                 raise Reject(str(exc)) from exc
+            if isinstance(plan.get("language_clock"), dict) and not plan["language_clock"].get("measured"):
+                caps = []
+                for clip in plan.get("clips") or []:
+                    info = measured.get(str(clip.get("id") or "")) or {}
+                    caps.append(float(info.get("duration_s") or 0))
+                language.settle(
+                    plan, caps,
+                    max_length_s=settings.max_length_s,
+                    max_sources=source_cap(plan, settings),
+                    max_chords=settings.max_chords,
+                    max_layers=settings.max_layers,
+                    max_plan_bytes=settings.max_plan_bytes,
+                )
+                check_plan(plan, settings, suppliers)
             clock = assembly.written_clock(comp, plan)
         sounds = public_sounds(plan, job_id, base, files)
         if plan.get("assembly") == "raw":
@@ -733,7 +751,6 @@ class Runner:
             raw = plan.get("assembly") == "raw"
             open(comp_path, "w", encoding="utf-8").write(_composition_md(comp, raw=raw))
             plan_path = os.path.join(work, "plan.json")
-            json.dump(plan, open(plan_path, "w", encoding="utf-8"), indent=1, ensure_ascii=False)
 
             def log(line: str):
                 low = line.lower()
@@ -748,7 +765,7 @@ class Runner:
             # The 10 minute cap is enforced by the caller: the Cloudflare queue
             # consumer stops waiting, and `docker` can be given a stop timeout.
             if raw:
-                flac, mp3, rlog = assemble.render(plan, work, log=log)
+                flac, mp3, rlog = assemble.render(plan, work, log=log, max_length_s=settings.max_length_s)
             else:
                 # Librosa and the renderer stay out of process start. A raw Gather never loads them.
                 from ncperf.render import Renderer
@@ -763,6 +780,9 @@ class Runner:
             master = os.path.join(work, "performance.flac")
             if flac != master:
                 os.replace(flac, master)
+            # Render may place a language clock once the files are measured.
+            # The record hashes this file, so it has to be the plan that was played.
+            json.dump(plan, open(plan_path, "w", encoding="utf-8"), indent=1, ensure_ascii=False)
             record_url = f"{settings.public_base_url}/records/{job_id}.json"
             _tag(master, preview, plan.get("title") or comp.get("title") or "Performance",
                  comp.get("composer") or "anonymous", record_url)
