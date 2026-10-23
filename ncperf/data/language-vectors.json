@@ -1,0 +1,887 @@
+[
+  {
+    "name": "peter-line",
+    "text": "Tempo 90, T1 - [Cm(4) fm9, gm7]loop(4), LP 500->200: T2 - steady break beat, T3 - notes, create melody, dorian.",
+    "bpm": 90,
+    "clock": "language",
+    "seed": null,
+    "meter": "4/4",
+    "gather": [
+      "Cm",
+      "Fm9",
+      "Gm7"
+    ],
+    "played": [
+      {
+        "kind": "chord",
+        "symbol": "Cm",
+        "bass": null,
+        "beats": 4,
+        "bars": null,
+        "seconds": 2.667,
+        "recording": 0
+      },
+      {
+        "kind": "chord",
+        "symbol": "Fm9",
+        "bass": null,
+        "beats": null,
+        "bars": null,
+        "seconds": null,
+        "recording": 1
+      },
+      {
+        "kind": "chord",
+        "symbol": "Gm7",
+        "bass": null,
+        "beats": null,
+        "bars": null,
+        "seconds": null,
+        "recording": 2
+      },
+      {
+        "kind": "chord",
+        "symbol": "Cm",
+        "bass": null,
+        "beats": 4,
+        "bars": null,
+        "seconds": 2.667,
+        "recording": 0
+      },
+      {
+        "kind": "chord",
+        "symbol": "Fm9",
+        "bass": null,
+        "beats": null,
+        "bars": null,
+        "seconds": null,
+        "recording": 1
+      },
+      {
+        "kind": "chord",
+        "symbol": "Gm7",
+        "bass": null,
+        "beats": null,
+        "bars": null,
+        "seconds": null,
+        "recording": 2
+      },
+      {
+        "kind": "chord",
+        "symbol": "Cm",
+        "bass": null,
+        "beats": 4,
+        "bars": null,
+        "seconds": 2.667,
+        "recording": 0
+      },
+      {
+        "kind": "chord",
+        "symbol": "Fm9",
+        "bass": null,
+        "beats": null,
+        "bars": null,
+        "seconds": null,
+        "recording": 1
+      },
+      {
+        "kind": "chord",
+        "symbol": "Gm7",
+        "bass": null,
+        "beats": null,
+        "bars": null,
+        "seconds": null,
+        "recording": 2
+      },
+      {
+        "kind": "chord",
+        "symbol": "Cm",
+        "bass": null,
+        "beats": 4,
+        "bars": null,
+        "seconds": 2.667,
+        "recording": 0
+      },
+      {
+        "kind": "chord",
+        "symbol": "Fm9",
+        "bass": null,
+        "beats": null,
+        "bars": null,
+        "seconds": null,
+        "recording": 1
+      },
+      {
+        "kind": "chord",
+        "symbol": "Gm7",
+        "bass": null,
+        "beats": null,
+        "bars": null,
+        "seconds": null,
+        "recording": 2
+      }
+    ],
+    "hacks": [
+      {
+        "abbr": "lp",
+        "type": "lowpass",
+        "value": 500,
+        "ramp": 200
+      }
+    ],
+    "words": [
+      "T1",
+      "-",
+      ":",
+      "T2",
+      "-",
+      "steady",
+      "break",
+      "beat",
+      "T3",
+      "-",
+      "notes",
+      "create",
+      "melody",
+      "dorian"
+    ],
+    "notes": [
+      "->200 is a ramp. A person plays ramps in Live.",
+      "A duration stays on its own chord. The others play their whole recordings.",
+      "The loop uses the same recordings.",
+      "Words are left for the AI."
+    ],
+    "iread": "q90; [Cm(4) Fm9 Gm7]x4; lp500\nT1 - : T2 - steady break beat T3 - notes create melody dorian\n->200 is a ramp. A person plays ramps in Live.\nA duration stays on its own chord. The others play their whole recordings.\nThe loop uses the same recordings.\nWords are left for the AI."
+  },
+  {
+    "name": "guard-prose",
+    "text": "a slow melody",
+    "bpm": null,
+    "clock": "legacy",
+    "seed": null,
+    "meter": "4/4",
+    "gather": [],
+    "played": [],
+    "hacks": [],
+    "words": [
+      "a",
+      "slow",
+      "melody"
+    ],
+    "notes": [
+      "\"a\" is a word here, not A major.",
+      "Words are left for the AI."
+    ],
+    "iread": "a slow melody\n\"a\" is a word here, not A major.\nWords are left for the AI."
+  },
+  {
+    "name": "guard-group",
+    "text": "[a e]",
+    "bpm": null,
+    "clock": "language",
+    "seed": null,
+    "meter": "4/4",
+    "gather": [
+      "A",
+      "E"
+    ],
+    "played": [
+      {
+        "kind": "chord",
+        "symbol": "A",
+        "bass": null,
+        "beats": null,
+        "bars": null,
+        "seconds": null,
+        "recording": 0
+      },
+      {
+        "kind": "chord",
+        "symbol": "E",
+        "bass": null,
+        "beats": null,
+        "bars": null,
+        "seconds": null,
+        "recording": 1
+      }
+    ],
+    "hacks": [],
+    "words": [],
+    "notes": [],
+    "iread": "[A E]"
+  },
+  {
+    "name": "lowercase-quality",
+    "text": "am",
+    "bpm": null,
+    "clock": "language",
+    "seed": null,
+    "meter": "4/4",
+    "gather": [
+      "Am"
+    ],
+    "played": [
+      {
+        "kind": "chord",
+        "symbol": "Am",
+        "bass": null,
+        "beats": null,
+        "bars": null,
+        "seconds": null,
+        "recording": 0
+      }
+    ],
+    "hacks": [],
+    "words": [],
+    "notes": [],
+    "iread": "Am"
+  },
+  {
+    "name": "lowercase-duration",
+    "text": "a(4)",
+    "bpm": null,
+    "clock": "language",
+    "seed": null,
+    "meter": "4/4",
+    "gather": [
+      "A"
+    ],
+    "played": [
+      {
+        "kind": "chord",
+        "symbol": "A",
+        "bass": null,
+        "beats": 4,
+        "bars": null,
+        "seconds": null,
+        "recording": 0
+      }
+    ],
+    "hacks": [],
+    "words": [],
+    "notes": [
+      "A duration needs a tempo."
+    ],
+    "iread": "A(4)\nA duration needs a tempo."
+  },
+  {
+    "name": "quality-parens",
+    "text": "Cm(maj7)",
+    "bpm": null,
+    "clock": "legacy",
+    "seed": null,
+    "meter": "4/4",
+    "gather": [
+      "Cm-maj7"
+    ],
+    "played": [
+      {
+        "kind": "chord",
+        "symbol": "Cm-maj7",
+        "bass": null,
+        "beats": null,
+        "bars": null,
+        "seconds": null,
+        "recording": 0
+      }
+    ],
+    "hacks": [],
+    "words": [],
+    "notes": [],
+    "iread": "Cm-maj7"
+  },
+  {
+    "name": "quote-and-mix",
+    "text": "q60; [Dm7 G7 Cmaj7(8|)] a slow melody \"Cm\"",
+    "bpm": 60,
+    "clock": "language",
+    "seed": null,
+    "meter": "4/4",
+    "gather": [
+      "Dm7",
+      "G7",
+      "Cmaj7"
+    ],
+    "played": [
+      {
+        "kind": "chord",
+        "symbol": "Dm7",
+        "bass": null,
+        "beats": null,
+        "bars": null,
+        "seconds": null,
+        "recording": 0
+      },
+      {
+        "kind": "chord",
+        "symbol": "G7",
+        "bass": null,
+        "beats": null,
+        "bars": null,
+        "seconds": null,
+        "recording": 1
+      },
+      {
+        "kind": "chord",
+        "symbol": "Cmaj7",
+        "bass": null,
+        "beats": null,
+        "bars": 8,
+        "seconds": 32,
+        "recording": 2
+      }
+    ],
+    "hacks": [],
+    "words": [
+      "a",
+      "slow",
+      "melody",
+      "\"Cm\""
+    ],
+    "notes": [
+      "\"a\" is a word here, not A major.",
+      "Quoted words stay words.",
+      "A duration stays on its own chord. The others play their whole recordings.",
+      "Words are left for the AI."
+    ],
+    "iread": "q60; [Dm7 G7 Cmaj7(8|)]\na slow melody \"Cm\"\n\"a\" is a word here, not A major.\nQuoted words stay words.\nA duration stays on its own chord. The others play their whole recordings.\nWords are left for the AI."
+  },
+  {
+    "name": "rest-beats",
+    "text": "q90; C _(2) F",
+    "bpm": 90,
+    "clock": "language",
+    "seed": null,
+    "meter": "4/4",
+    "gather": [
+      "C",
+      "F"
+    ],
+    "played": [
+      {
+        "kind": "chord",
+        "symbol": "C",
+        "bass": null,
+        "beats": null,
+        "bars": null,
+        "seconds": null,
+        "recording": 0
+      },
+      {
+        "kind": "rest",
+        "symbol": null,
+        "bass": null,
+        "beats": 2,
+        "bars": null,
+        "seconds": 1.333,
+        "recording": null
+      },
+      {
+        "kind": "chord",
+        "symbol": "F",
+        "bass": null,
+        "beats": null,
+        "bars": null,
+        "seconds": null,
+        "recording": 1
+      }
+    ],
+    "hacks": [],
+    "words": [],
+    "notes": [],
+    "iread": "q90; C _(2) F"
+  },
+  {
+    "name": "rest-word",
+    "text": "q60 rest 2 bars C",
+    "bpm": 60,
+    "clock": "language",
+    "seed": null,
+    "meter": "4/4",
+    "gather": [
+      "C"
+    ],
+    "played": [
+      {
+        "kind": "rest",
+        "symbol": null,
+        "bass": null,
+        "beats": null,
+        "bars": 2,
+        "seconds": 8,
+        "recording": null
+      },
+      {
+        "kind": "chord",
+        "symbol": "C",
+        "bass": null,
+        "beats": null,
+        "bars": null,
+        "seconds": null,
+        "recording": 0
+      }
+    ],
+    "hacks": [],
+    "words": [],
+    "notes": [],
+    "iread": "q60; _(2|) C"
+  },
+  {
+    "name": "seed-first",
+    "text": "seed 4182 sd 9 Cm",
+    "bpm": null,
+    "clock": "legacy",
+    "seed": 4182,
+    "meter": "4/4",
+    "gather": [
+      "Cm"
+    ],
+    "played": [
+      {
+        "kind": "chord",
+        "symbol": "Cm",
+        "bass": null,
+        "beats": null,
+        "bars": null,
+        "seconds": null,
+        "recording": 0
+      }
+    ],
+    "hacks": [],
+    "words": [],
+    "notes": [
+      "Another seed was written. The first is kept."
+    ],
+    "iread": "sd4182; Cm\nAnother seed was written. The first is kept."
+  },
+  {
+    "name": "comment",
+    "text": "Cm # not Am\nF",
+    "bpm": null,
+    "clock": "legacy",
+    "seed": null,
+    "meter": "4/4",
+    "gather": [
+      "Cm",
+      "F"
+    ],
+    "played": [
+      {
+        "kind": "chord",
+        "symbol": "Cm",
+        "bass": null,
+        "beats": null,
+        "bars": null,
+        "seconds": null,
+        "recording": 0
+      },
+      {
+        "kind": "chord",
+        "symbol": "F",
+        "bass": null,
+        "beats": null,
+        "bars": null,
+        "seconds": null,
+        "recording": 1
+      }
+    ],
+    "hacks": [],
+    "words": [],
+    "notes": [],
+    "iread": "Cm F"
+  },
+  {
+    "name": "bar-line",
+    "text": "q90; [C(1) D(1) | E(2)]",
+    "bpm": 90,
+    "clock": "language",
+    "seed": null,
+    "meter": "4/4",
+    "gather": [
+      "C",
+      "D",
+      "E"
+    ],
+    "played": [
+      {
+        "kind": "chord",
+        "symbol": "C",
+        "bass": null,
+        "beats": 1,
+        "bars": null,
+        "seconds": 0.667,
+        "recording": 0
+      },
+      {
+        "kind": "chord",
+        "symbol": "D",
+        "bass": null,
+        "beats": 1,
+        "bars": null,
+        "seconds": 0.667,
+        "recording": 1
+      },
+      {
+        "kind": "chord",
+        "symbol": "E",
+        "bass": null,
+        "beats": 2,
+        "bars": null,
+        "seconds": 1.333,
+        "recording": 2
+      }
+    ],
+    "hacks": [],
+    "words": [],
+    "notes": [
+      "The beats before | add up to 2, not 4."
+    ],
+    "iread": "q90; [C(1) D(1) | E(2)]\nThe beats before | add up to 2, not 4."
+  },
+  {
+    "name": "legacy-brackets",
+    "text": "4/4 · 69 BPM\n[1 bar C]\n[1 bar Dm7/C]",
+    "bpm": 69,
+    "clock": "legacy",
+    "seed": null,
+    "meter": "4/4",
+    "gather": [
+      "C",
+      "Dm7"
+    ],
+    "played": [
+      {
+        "kind": "chord",
+        "symbol": "C",
+        "bass": null,
+        "beats": null,
+        "bars": 1,
+        "seconds": 3.478,
+        "recording": 0
+      },
+      {
+        "kind": "chord",
+        "symbol": "Dm7",
+        "bass": 0,
+        "beats": null,
+        "bars": 1,
+        "seconds": 3.478,
+        "recording": 1
+      }
+    ],
+    "hacks": [],
+    "words": [],
+    "notes": [],
+    "iread": "q69; C(1|) Dm7/C(1|)"
+  },
+  {
+    "name": "bpm-wins",
+    "text": "tempo 80, 90 BPM, C",
+    "bpm": 90,
+    "clock": "legacy",
+    "seed": null,
+    "meter": "4/4",
+    "gather": [
+      "C"
+    ],
+    "played": [
+      {
+        "kind": "chord",
+        "symbol": "C",
+        "bass": null,
+        "beats": null,
+        "bars": null,
+        "seconds": null,
+        "recording": 0
+      }
+    ],
+    "hacks": [],
+    "words": [],
+    "notes": [
+      "Another tempo was written. The BPM is kept."
+    ],
+    "iread": "q90; C\nAnother tempo was written. The BPM is kept."
+  },
+  {
+    "name": "tempo-alias",
+    "text": "tempo 90 C",
+    "bpm": 90,
+    "clock": "legacy",
+    "seed": null,
+    "meter": "4/4",
+    "gather": [
+      "C"
+    ],
+    "played": [
+      {
+        "kind": "chord",
+        "symbol": "C",
+        "bass": null,
+        "beats": null,
+        "bars": null,
+        "seconds": null,
+        "recording": 0
+      }
+    ],
+    "hacks": [],
+    "words": [],
+    "notes": [],
+    "iread": "q90; C"
+  },
+  {
+    "name": "q-alias",
+    "text": "q90 C",
+    "bpm": 90,
+    "clock": "legacy",
+    "seed": null,
+    "meter": "4/4",
+    "gather": [
+      "C"
+    ],
+    "played": [
+      {
+        "kind": "chord",
+        "symbol": "C",
+        "bass": null,
+        "beats": null,
+        "bars": null,
+        "seconds": null,
+        "recording": 0
+      }
+    ],
+    "hacks": [],
+    "words": [],
+    "notes": [],
+    "iread": "q90; C"
+  },
+  {
+    "name": "loop-recordings",
+    "text": "[C F]x3",
+    "bpm": null,
+    "clock": "language",
+    "seed": null,
+    "meter": "4/4",
+    "gather": [
+      "C",
+      "F"
+    ],
+    "played": [
+      {
+        "kind": "chord",
+        "symbol": "C",
+        "bass": null,
+        "beats": null,
+        "bars": null,
+        "seconds": null,
+        "recording": 0
+      },
+      {
+        "kind": "chord",
+        "symbol": "F",
+        "bass": null,
+        "beats": null,
+        "bars": null,
+        "seconds": null,
+        "recording": 1
+      },
+      {
+        "kind": "chord",
+        "symbol": "C",
+        "bass": null,
+        "beats": null,
+        "bars": null,
+        "seconds": null,
+        "recording": 0
+      },
+      {
+        "kind": "chord",
+        "symbol": "F",
+        "bass": null,
+        "beats": null,
+        "bars": null,
+        "seconds": null,
+        "recording": 1
+      },
+      {
+        "kind": "chord",
+        "symbol": "C",
+        "bass": null,
+        "beats": null,
+        "bars": null,
+        "seconds": null,
+        "recording": 0
+      },
+      {
+        "kind": "chord",
+        "symbol": "F",
+        "bass": null,
+        "beats": null,
+        "bars": null,
+        "seconds": null,
+        "recording": 1
+      }
+    ],
+    "hacks": [],
+    "words": [],
+    "notes": [
+      "The loop uses the same recordings."
+    ],
+    "iread": "[C F]x3\nThe loop uses the same recordings."
+  },
+  {
+    "name": "open-duration",
+    "text": "Cm(?)",
+    "bpm": null,
+    "clock": "language",
+    "seed": null,
+    "meter": "4/4",
+    "gather": [
+      "Cm"
+    ],
+    "played": [
+      {
+        "kind": "chord",
+        "symbol": "Cm",
+        "bass": null,
+        "beats": null,
+        "bars": null,
+        "seconds": null,
+        "recording": 0
+      }
+    ],
+    "hacks": [],
+    "words": [],
+    "notes": [
+      "An open duration plays the whole recording."
+    ],
+    "iread": "Cm(?)\nAn open duration plays the whole recording."
+  },
+  {
+    "name": "article",
+    "text": "A slow melody",
+    "bpm": null,
+    "clock": "legacy",
+    "seed": null,
+    "meter": "4/4",
+    "gather": [],
+    "played": [],
+    "hacks": [],
+    "words": [
+      "A",
+      "slow",
+      "melody"
+    ],
+    "notes": [
+      "Words are left for the AI."
+    ],
+    "iread": "A slow melody\nWords are left for the AI."
+  },
+  {
+    "name": "no-carry",
+    "text": "q90; [Cm(4) Fm9 Gm7]",
+    "bpm": 90,
+    "clock": "language",
+    "seed": null,
+    "meter": "4/4",
+    "gather": [
+      "Cm",
+      "Fm9",
+      "Gm7"
+    ],
+    "played": [
+      {
+        "kind": "chord",
+        "symbol": "Cm",
+        "bass": null,
+        "beats": 4,
+        "bars": null,
+        "seconds": 2.667,
+        "recording": 0
+      },
+      {
+        "kind": "chord",
+        "symbol": "Fm9",
+        "bass": null,
+        "beats": null,
+        "bars": null,
+        "seconds": null,
+        "recording": 1
+      },
+      {
+        "kind": "chord",
+        "symbol": "Gm7",
+        "bass": null,
+        "beats": null,
+        "bars": null,
+        "seconds": null,
+        "recording": 2
+      }
+    ],
+    "hacks": [],
+    "words": [],
+    "notes": [
+      "A duration stays on its own chord. The others play their whole recordings."
+    ],
+    "iread": "q90; [Cm(4) Fm9 Gm7]\nA duration stays on its own chord. The others play their whole recordings.",
+    "place_caps": [
+      1,
+      3.5,
+      2
+    ],
+    "place": {
+      "entries": [
+        {
+          "at_s": 0,
+          "len_s": 1,
+          "recording": 0,
+          "symbol": "Cm"
+        },
+        {
+          "at_s": 2.667,
+          "len_s": 3.5,
+          "recording": 1,
+          "symbol": "Fm9"
+        },
+        {
+          "at_s": 6.167,
+          "len_s": 2,
+          "recording": 2,
+          "symbol": "Gm7"
+        }
+      ],
+      "total_s": 8.167
+    }
+  },
+  {
+    "name": "quoted-not-syntax",
+    "text": "\"90 BPM\" \"Cm\" C",
+    "bpm": null,
+    "clock": "language",
+    "seed": null,
+    "meter": "4/4",
+    "gather": [
+      "C"
+    ],
+    "played": [
+      {
+        "kind": "chord",
+        "symbol": "C",
+        "bass": null,
+        "beats": null,
+        "bars": null,
+        "seconds": null,
+        "recording": 0
+      }
+    ],
+    "hacks": [],
+    "words": [
+      "\"90 BPM\"",
+      "\"Cm\""
+    ],
+    "notes": [
+      "Quoted words stay words.",
+      "Words are left for the AI."
+    ],
+    "iread": "C\n\"90 BPM\" \"Cm\"\nQuoted words stay words.\nWords are left for the AI."
+  }
+]
