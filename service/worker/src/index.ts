@@ -44,6 +44,7 @@ import { REQUIRED_OUTPUTS, containerPageUpdate, missingOutputs, readableBytes } 
 import { mapPool } from "./pool";
 import { containerBase } from "./base";
 import { fileSidFor, lostStacks, missingStacksMessage, readGatherClip, stackParts, withRetry } from "./stacks";
+import { storeObject, storeResponse, type Sized } from "./stream";
 import { carriedCopies, chordInPlan, containerFiles, regatherProblem, regatherRequest, withTimeout, type RegatherSpec } from "./regather";
 import { applyPerformHit, applyRegatherHit, burstBlock, claimToken, corsHeaders, failureForPage, forPage, GATHER_CACHE, isInternalFailure, jobStatusFields, newId, pageGatherState, PER_10MIN, PER_DAY, proxyHosts, publicInternalError, publishedRegistryStats, queuedGatherFields, registryPublicStats, rejectPlan, siteverifyRequest, testerPass, turnstileDeniedBody, turnstileFailure, turnstileToken, wordsTooLong, type FoundSound, type RateBlock, type RegistryStats, type TurnstileFailure } from "./policy";
 
@@ -52,6 +53,9 @@ import { applyPerformHit, applyRegatherHit, burstBlock, claimToken, corsHeaders,
 // is not listed in wrangler migrations.
 export { ContainerProxy };
 import { publicJwk, recordHashOf, signatureFor, signerFrom, verifyHash, type Signer } from "./sign";
+
+/** R2 needs the length of a streamed body. */
+const sized: Sized = (length) => new FixedLengthStream(length);
 
 const ALLOWED_HOSTS = [
   "musicmatter.art",
@@ -1394,11 +1398,9 @@ async function copyGather(env: Env, container: DurableObjectStub<RenderContainer
     await mapPool(carriedCopies(keys, fromId, id, doc.regather.chord), 8, async ([from, to]) => {
       const got = await withRetry(async () => {
         const obj = await env.PERFORMANCES.get(from);
-        if (!obj) return false;
-        await env.PERFORMANCES.put(to, await obj.arrayBuffer(), {
-          httpMetadata: { contentType: obj.httpMetadata?.contentType || "application/octet-stream", cacheControl: GATHER_CACHE },
-        });
-        return true;
+        return await storeObject(obj, (body) => env.PERFORMANCES.put(to, body, {
+          httpMetadata: { contentType: obj?.httpMetadata?.contentType || "application/octet-stream", cacheControl: GATHER_CACHE },
+        }), sized);
       });
       if (!got.ok) missed.push(from);
     });
@@ -1414,14 +1416,11 @@ async function copyGather(env: Env, container: DurableObjectStub<RenderContainer
   await mapPool(files, 8, async (file) => {
     const sid = String(file.sid || "");
     const got = await withRetry(async () => {
+      // Streamed: eight buffered 50 MB note files were more than the isolate's 128 MB.
       const audio = await containerFetch(container, id, `http://container/internal/jobs/${id}/audio/${sid}`, { headers });
-      if (!audio.ok) return false;
-      const bytes = await audio.arrayBuffer();
-      if (!bytes.byteLength) return false;
-      await env.PERFORMANCES.put(`gathers/${id}/audio/${sid}`, bytes, {
+      return await storeResponse(audio, (body) => env.PERFORMANCES.put(`gathers/${id}/audio/${sid}`, body, {
         httpMetadata: { contentType: audioType(file.ext), cacheControl: GATHER_CACHE },
-      });
-      return true;
+      }), sized);
     });
     if (!got.ok) {
       failed.push(sid);
