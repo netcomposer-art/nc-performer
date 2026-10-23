@@ -1,0 +1,82 @@
+# Uploads sliced notes to the nc-performances bucket. Manual only.
+# This file has no push, pull_request, or schedule trigger. Do not add one.
+# Peter runs it. It does not deploy the Worker.
+name: Publish notes
+
+on:
+  workflow_dispatch:
+    inputs:
+      instruments:
+        description: "Comma-separated instruments. cello is the Iowa pizzicato."
+        required: false
+        default: "guitar,piano,cello"
+        type: string
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: service/worker/package-lock.json
+      - name: Install ffmpeg and the kit
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+      - name: Install Worker dependencies
+        working-directory: service/worker
+        run: npm ci
+      - name: Require Cloudflare credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          missing=0
+          require() {
+            name="$1"
+            val="${2:-}"
+            trimmed=$(printf '%s' "$val" | tr -d '[:space:]')
+            if [ -z "$trimmed" ]; then
+              echo "::error title=Missing ${name}::${name} is empty. Add it under Settings → Secrets and variables → Actions. Publish notes stops here and does not continue."
+              missing=1
+            fi
+          }
+          require CLOUDFLARE_API_TOKEN "${CLOUDFLARE_API_TOKEN}"
+          require CLOUDFLARE_ACCOUNT_ID "${CLOUDFLARE_ACCOUNT_ID}"
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+          echo "CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are set."
+      - name: Slice the notes
+        env:
+          INSTRUMENTS: ${{ inputs.instruments }}
+        run: |
+          set -euo pipefail
+          out="${RUNNER_TEMP}/sliced-notes"
+          args=()
+          while IFS= read -r id; do
+            [ -n "$id" ] || continue
+            args+=(--library "$id")
+          done < <(python -m ncperf.publish_notes libraries --instruments "$INSTRUMENTS")
+          python -m ncperf.slicer -o "$out" "${args[@]}"
+          echo "SLICED_OUT=${out}" >> "$GITHUB_ENV"
+      - name: Upload to R2 and verify
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          python -m ncperf.publish_notes upload --out "$SLICED_OUT" --wrangler "npx wrangler"

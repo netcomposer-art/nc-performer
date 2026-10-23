@@ -45,6 +45,7 @@ import { mapPool } from "./pool";
 import { containerBase } from "./base";
 import { fileSidFor, lostStacks, missingStacksMessage, readGatherClip, stackParts, withRetry } from "./stacks";
 import { carriedCopies, chordInPlan, containerFiles, regatherProblem, regatherRequest, withTimeout, type RegatherSpec } from "./regather";
+import { EXPIRY_PREFIXES, expiryMayDelete, publishedNoteResponse } from "./notes";
 import { applyPerformHit, applyRegatherHit, burstBlock, claimToken, corsHeaders, failureForPage, forPage, GATHER_CACHE, isInternalFailure, jobStatusFields, newId, pageGatherState, PER_10MIN, PER_DAY, proxyHosts, publicInternalError, publishedRegistryStats, queuedGatherFields, registryPublicStats, rejectPlan, siteverifyRequest, testerPass, turnstileDeniedBody, turnstileFailure, turnstileToken, wordsTooLong, type FoundSound, type RateBlock, type RegistryStats, type TurnstileFailure } from "./policy";
 
 // @cloudflare/containers 0.3.7 looks up this exact export on ctx.exports when
@@ -457,6 +458,10 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
   if (request.method === "GET" && path === "/api/config") return config(env);
   if (request.method === "GET" && path === "/.well-known/nc-record-keys.json") return keys(env);
   if (request.method === "GET" && path === "/api/feed") return feed(env, base);
+  if (request.method === "GET" && (path === "/api/notes" || path.startsWith("/api/notes/"))) {
+    const note = await publishedNoteResponse(request.headers.get("Origin"), path, (key) => env.PERFORMANCES.get(key));
+    if (note) return note;
+  }
   if (request.method === "GET" && path === "/admin") return adminPage(request, env);
   if (request.method === "POST" && path === "/api/gather") return gather(request, env, base);
   if (request.method === "POST" && path === "/api/perform") return perform(request, env, base);
@@ -2353,22 +2358,29 @@ async function adminModerate(request: Request, env: Env, action: "hide" | "taked
 async function sweep(env: Env): Promise<void> {
   const now = isoNow();
   const cutoff = isoPlus(-7 * 24 * 3600 * 1000);
+  // EXPIRY_PREFIXES is performances/ and jobs/. notes/ is the sliced library and is not listed.
+  const performancePrefix = EXPIRY_PREFIXES[0];
+  const jobsPrefix = EXPIRY_PREFIXES[1];
   let cursor: string | undefined;
   do {
-    const page = await env.PERFORMANCES.list({ prefix: "performances/", cursor, limit: 500 });
+    const page = await env.PERFORMANCES.list({ prefix: performancePrefix, cursor, limit: 500 });
     for (const obj of page.objects) {
       if (!obj.key.endsWith("/meta.json")) continue;
       const meta = (await readJsonKey(env, obj.key)) as Meta | null;
       if (!meta?.audio_expires_at || meta.audio_expires_at >= now) continue;
       const id = meta.id || obj.key.split("/")[1];
-      for (const audioName of EXPIRE_AUDIO) await env.PERFORMANCES.delete(`performances/${id}/${audioName}`);
+      for (const audioName of EXPIRE_AUDIO) {
+        const key = `performances/${id}/${audioName}`;
+        if (expiryMayDelete(key)) await env.PERFORMANCES.delete(key);
+      }
     }
     cursor = page.truncated ? page.cursor : undefined;
   } while (cursor);
   cursor = undefined;
   do {
-    const page = await env.PERFORMANCES.list({ prefix: "jobs/", cursor, limit: 500 });
+    const page = await env.PERFORMANCES.list({ prefix: jobsPrefix, cursor, limit: 500 });
     for (const obj of page.objects) {
+      if (!expiryMayDelete(obj.key)) continue;
       const status = (await readJsonKey(env, obj.key)) as { at?: string } | null;
       if (status?.at && status.at < cutoff) await env.PERFORMANCES.delete(obj.key);
     }
