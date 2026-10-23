@@ -43,7 +43,7 @@ import { CANCELLED_MESSAGE, cancelToken, queueErrorIsCancel } from "./cancel";
 import { REQUIRED_OUTPUTS, containerPageUpdate, missingOutputs, readableBytes } from "./outputs";
 import { mapPool } from "./pool";
 import { containerBase } from "./base";
-import { lostStacks, missingStacksMessage, recoverGatherAudio, stackParts, withRetry } from "./stacks";
+import { fileSidFor, lostStacks, missingStacksMessage, readGatherClip, stackParts, withRetry } from "./stacks";
 import { carriedCopies, chordInPlan, containerFiles, regatherProblem, regatherRequest, withTimeout, type RegatherSpec } from "./regather";
 import { applyPerformHit, applyRegatherHit, burstBlock, claimToken, corsHeaders, failureForPage, forPage, GATHER_CACHE, isInternalFailure, jobStatusFields, newId, pageGatherState, PER_10MIN, PER_DAY, proxyHosts, publicInternalError, publishedRegistryStats, queuedGatherFields, registryPublicStats, rejectPlan, siteverifyRequest, testerPass, turnstileDeniedBody, turnstileFailure, turnstileToken, wordsTooLong, type FoundSound, type RateBlock, type RegistryStats, type TurnstileFailure } from "./policy";
 
@@ -1821,44 +1821,45 @@ function publicJob(
 
 async function gatherAudio(request: Request, env: Env, id: string, sid: string): Promise<Response> {
   if (!ID_RE.test(id) || !/^[A-Za-z0-9._-]{1,80}$/.test(sid)) return json({ error: "not found" }, 404);
-  let obj = await env.PERFORMANCES.get(`gathers/${id}/audio/${sid}`);
   const doc = (await readJsonKey(env, `gathers/${id}/collection.json`)) as GatherDoc | null;
-  const row = (doc?.files || []).find((file) => file.sid === sid);
-  if (!obj && doc) {
+  // c3 of a loop plays the file its clip names (r1), like ncperf.gather.read_audio.
+  const stack = !!doc && stackParts(doc.plan, sid).length > 0;
+  const got = await readGatherClip(doc, sid, {
+    get: (fileSid) => env.PERFORMANCES.get(`gathers/${id}/audio/${fileSid}`),
     // A single file: the first play fetches it from the URL Gather stored.
     // A note stack has no URL: the container mixes it again from its notes.
-    const stack = stackParts(doc.plan, sid).length > 0;
-    const got = await recoverGatherAudio(doc, sid, {
-      upstream: async (url) => {
-        const upstream = await fetch(url);
-        return upstream.ok ? await upstream.arrayBuffer() : null;
-      },
-      rebuild: async (cid) => {
-        // Only a finished Gather. While it is still copying, the copy itself is on the way.
-        if (!(await env.PERFORMANCES.head(`gathers/${id}/status.json`))) return null;
-        return rebuildStack(env, request, id, cid);
-      },
-      store: async (bytes) => {
-        await env.PERFORMANCES.put(`gathers/${id}/audio/${sid}`, bytes, {
-          httpMetadata: { contentType: stack ? "audio/wav" : audioType(row?.ext), cacheControl: GATHER_CACHE },
-        });
+    upstream: async (url) => {
+      const upstream = await fetch(url);
+      return upstream.ok ? await upstream.arrayBuffer() : null;
+    },
+    rebuild: async (cid) => {
+      // Only a finished Gather. While it is still copying, the copy itself is on the way.
+      if (!(await env.PERFORMANCES.head(`gathers/${id}/status.json`))) return null;
+      return rebuildStack(env, request, id, cid);
+    },
+    store: async (bytes) => {
+      const fileSid = fileSidFor(doc, sid);
+      const row = (doc?.files || []).find((file) => file.sid === fileSid);
+      await env.PERFORMANCES.put(`gathers/${id}/audio/${fileSid}`, bytes, {
+        httpMetadata: { contentType: stack ? "audio/wav" : audioType(row?.ext), cacheControl: GATHER_CACHE },
+      });
+    },
+  });
+  if (!got) return json({ error: "not found" }, 404);
+  const row = (doc?.files || []).find((file) => file.sid === got.fileSid);
+  if ("obj" in got) {
+    return new Response(got.obj.body, {
+      headers: {
+        "content-type": got.obj.httpMetadata?.contentType || audioType(row?.ext),
+        "cache-control": GATHER_CACHE,
+        ...corsHeaders(request.headers.get("Origin")),
       },
     });
-    if (got) {
-      if (got.via === "rebuilt") console.error(JSON.stringify({ event: "gather_stack_rebuilt", id, sid }));
-      return new Response(got.bytes, {
-        headers: {
-          "content-type": stack ? "audio/wav" : audioType(row?.ext),
-          "cache-control": GATHER_CACHE,
-          ...corsHeaders(request.headers.get("Origin")),
-        },
-      });
-    }
   }
-  if (!obj) return json({ error: "not found" }, 404);
-  return new Response(obj.body, {
+  if (got.via === "rebuilt") console.error(JSON.stringify({ event: "gather_stack_rebuilt", id, sid }));
+  return new Response(got.bytes, {
     headers: {
-      "content-type": obj.httpMetadata?.contentType || audioType(row?.ext),
+      "content-type": stack ? "audio/wav" : audioType(row?.ext),
       "cache-control": GATHER_CACHE,
       ...corsHeaders(request.headers.get("Origin")),
     },

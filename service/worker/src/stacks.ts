@@ -28,6 +28,23 @@ export function stackParts(plan: unknown, cid: string): string[] {
   return sids.length > 1 ? sids : [];
 }
 
+/**
+ * The one stored file a single-file clip plays, or null for a stack or an
+ * unknown id. A loop's passes share one recording (c1, c3, c5 all name r1),
+ * so the R2 object is gathers/{id}/audio/r1, not one per clip.
+ */
+export function singleSid(plan: unknown, cid: string): string | null {
+  const clip = clipsOf(plan).find((c) => String(c.id ?? "") === cid);
+  const sids = Array.isArray(clip?.sids) ? clip!.sids.map((s) => String(s ?? "")).filter(Boolean) : [];
+  return sids.length === 1 ? sids[0] : null;
+}
+
+/** The R2 audio name a GET /api/jobs/{id}/audio/{sid} reads. A stack keeps its clip id. */
+export function fileSidFor(doc: StackDoc | null, sid: string): string {
+  if (!doc || stackParts(doc.plan, sid).length) return sid;
+  return singleSid(doc.plan, sid) || sid;
+}
+
 /** Every stacked clip id in the plan. */
 export function stackIds(plan: unknown): string[] {
   return clipsOf(plan).map((c) => String(c.id ?? "")).filter((cid) => cid && stackParts(plan, cid).length > 1);
@@ -128,4 +145,27 @@ export async function recoverGatherAudio(
   if (!fits(bytes)) return null;
   await deps.store(bytes);
   return { bytes, via: "upstream" };
+}
+
+export type ClipReader<T> = AudioFallback & {
+  /** The stored R2 object for one audio name, or null. */
+  get: (fileSid: string) => Promise<T | null>;
+};
+
+/**
+ * What gatherAudio serves for one clip id: the stored object (under the name
+ * fileSidFor gives), else the recovered bytes (kept under that same name),
+ * else null for a 404. store() receives the bytes for fileSid.
+ */
+export async function readGatherClip<T>(
+  doc: StackDoc | null,
+  sid: string,
+  deps: ClipReader<T>,
+): Promise<{ fileSid: string; obj: T } | { fileSid: string; bytes: ArrayBuffer; via: "rebuilt" | "upstream" } | null> {
+  const fileSid = fileSidFor(doc, sid);
+  const obj = await deps.get(fileSid);
+  if (obj) return { fileSid, obj };
+  if (!doc) return null;
+  const got = await recoverGatherAudio(doc, fileSid, deps);
+  return got ? { fileSid, ...got } : null;
 }
