@@ -6,6 +6,8 @@
   nc perform        interpret + render in one go
   nc verify-record  check a performance record
   nc submit         send a record to a Perform instance (any host)
+  nc slice          cut native-pitch notes into Opus 96k + FLAC (does not upload)
+  nc sample         render listen checks from those notes
 """
 import argparse, json, os, sys, datetime
 from . import __version__
@@ -96,6 +98,14 @@ def cmd_submit(a):
     out = submit(a.record, a.audio_dir, api, a.plan)
     print(json.dumps(out, indent=1))
 
+def cmd_slice(a):
+    from .slicer import run_slice
+    run_slice(a.out, libraries=a.library or None, index_path=a.index, recover=not a.no_recover)
+
+def cmd_sample(a):
+    from .sampler import render_checks
+    render_checks(a.notes, a.out)
+
 def cmd_verify(a):
     from . import record as R
     ok, lines = R.verify(a.record, audio_dir=a.audio_dir, check_files=not a.no_files, strict_loudness=a.strict_loudness)
@@ -122,6 +132,16 @@ def main(argv=None):
     u.add_argument('record'); u.add_argument('--audio-dir'); u.add_argument('--plan', help='plan.json (default: <audio-dir>/plan.json)')
     u.add_argument('--api', help='Perform base URL (or set NC_PERFORM_API). No default host.')
     u.add_argument('--no-files', action='store_true'); u.set_defaults(f=cmd_submit)
+    sl = s.add_parser('slice', help='cut native-pitch notes into Opus 96k and a FLAC master (does not upload)', description='Cut native-pitch notes into Opus 96k and a FLAC master. Does not upload.')
+    sl.add_argument('-o', '--out', required=True)
+    sl.add_argument('--index', help='note-index.json (default: the bundled index)')
+    sl.add_argument('--library', action='append', default=[], help='library id, repeatable; default guitar, piano, cello pizzicato')
+    sl.add_argument('--no-recover', action='store_true', help='slice the index only')
+    sl.set_defaults(f=cmd_slice)
+    sm = s.add_parser('sample', help='render the 96 BPM listen checks from sliced notes')
+    sm.add_argument('--notes', required=True, help='directory written by nc slice')
+    sm.add_argument('-o', '--out', required=True)
+    sm.set_defaults(f=cmd_sample)
     a = p.parse_args(argv)
     if a.cmd == 'interpret' and not (a.plan or a.composition): p.error('give a composition.md, or --plan FILE')
     a.f(a)
