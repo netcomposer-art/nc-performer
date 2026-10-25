@@ -519,8 +519,9 @@ def parse_take_state(raw, gather_id: str) -> dict:
 
     ``plan`` is assembly plan v1. v1 ``processing`` may be omitted. Its chain is
     the effect names in the order the page ran them, and ``params`` is whatever
-    JSON the page used. v2 is the hack stack: ``schema`` 2 and a chain of hack
-    objects, with the fixed limiter last. This function does not re-run either.
+    JSON the page used. v2 is the hack stack. Schema 2 is a chain of hack
+    objects, with the fixed limiter last. Schema 3 stores a master chain, up to
+    eight track chains, and an optional glide. This function does not re-run any of them.
     """
     if not isinstance(raw, dict):
         raise ValueError("take_state must be a JSON object.")
@@ -569,12 +570,17 @@ def _processing_v1(processing) -> dict:
 
 
 def _processing_v2(processing) -> dict:
-    """v2 keeps each hack object. The limiter is fixed and last, and is not one of the ten."""
+    """v2 keeps each hack object. The limiter is fixed and last, and is not one of the ten.
+
+    Schema 3 is stored beside that and is not run. A flat schema 2 chain is unchanged.
+    """
     if not isinstance(processing, dict):
         raise ValueError("processing must be a JSON object.")
     schema = processing.get("schema")
-    if isinstance(schema, bool) or not isinstance(schema, int) or schema != 2:
-        raise ValueError("processing.schema must be 2.")
+    if isinstance(schema, bool) or not isinstance(schema, int) or schema not in (2, 3):
+        raise ValueError("processing.schema must be 2 or 3.")
+    if schema == 3:
+        return _processing_v3(processing)
     chain = processing.get("chain")
     if not isinstance(chain, list) or not chain:
         raise ValueError("The limiter stays last.")
@@ -584,7 +590,65 @@ def _processing_v2(processing) -> dict:
     return {"schema": 2, "chain": items}
 
 
-def _hack(item, last: bool) -> dict:
+_TRACK_KEY = re.compile(r"t([1-8])$")
+_GLIDE_PARAMS = ("cutoff_hz", "centre_hz")
+
+
+def _processing_v3(processing) -> dict:
+    """Schema 3: master chain, at most eight track chains, optional glide. Not rendered."""
+    master = processing.get("master")
+    if not isinstance(master, dict):
+        raise ValueError("processing.master is the master chain.")
+    chain = master.get("chain")
+    if not isinstance(chain, list) or not chain:
+        raise ValueError("The limiter stays last.")
+    if len(chain) > MOVABLE_HACKS + 1:
+        raise ValueError("A hack stack has at most 10 hacks, plus the limiter.")
+    items = [_hack(item, last=index == len(chain) - 1, allow_auto=True) for index, item in enumerate(chain)]
+    tracks_in = processing.get("tracks") or {}
+    if not isinstance(tracks_in, dict):
+        raise ValueError("processing.tracks must be an object.")
+    if len(tracks_in) > 8:
+        raise ValueError("Only 8 tracks can have their own hacks.")
+    tracks = {}
+    for key, node in tracks_in.items():
+        if not isinstance(key, str) or not _TRACK_KEY.fullmatch(key):
+            raise ValueError("Only 8 tracks can have their own hacks.")
+        if not isinstance(node, dict):
+            raise ValueError("A track chain is an object.")
+        tchain = node.get("chain")
+        if tchain is None:
+            tchain = []
+        if not isinstance(tchain, list):
+            raise ValueError("A track chain is a list.")
+        if len(tchain) > MOVABLE_HACKS:
+            raise ValueError("A hack stack has at most 10 hacks, plus the limiter.")
+        built = []
+        for item in tchain:
+            if isinstance(item, dict) and (item.get("type") == "limiter" or item.get("fixed") is True):
+                raise ValueError("A track chain has no limiter.")
+            built.append(_hack(item, last=False, allow_auto=True))
+        tracks[key] = {"chain": built}
+    return {"schema": 3, "master": {"chain": items}, "tracks": tracks}
+
+
+def _auto(auto) -> dict:
+    if not isinstance(auto, dict):
+        raise ValueError("A glide is an object.")
+    param = auto.get("param")
+    if param not in _GLIDE_PARAMS:
+        raise ValueError("A glide moves cutoff_hz or centre_hz.")
+    frm = auto.get("from")
+    to = auto.get("to")
+    for value in (frm, to):
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+            raise ValueError("A glide needs two frequencies above 0.")
+    if auto.get("over") != "piece":
+        raise ValueError("A glide covers the whole piece.")
+    return {"param": param, "from": frm, "to": to, "over": "piece"}
+
+
+def _hack(item, last: bool, allow_auto: bool = False) -> dict:
     if not isinstance(item, dict):
         raise ValueError("Each hack is an object.")
     type_name = item.get("type")
@@ -616,6 +680,10 @@ def _hack(item, last: bool) -> dict:
     }
     if fixed is True:
         kept["fixed"] = True
+    if item.get("auto") is not None:
+        if not allow_auto:
+            raise ValueError("A glide belongs on schema 3.")
+        kept["auto"] = _auto(item.get("auto"))
     return kept
 
 
@@ -743,6 +811,14 @@ def write_take_files(data: bytes, out_dir: str) -> tuple[str, str]:
     return flac, mp3
 
 
+def _stored_chain(processing: dict) -> list:
+    """The chain to write on the record. Schema 3 keeps it under master."""
+    chain = processing.get("chain")
+    if chain is None and isinstance(processing.get("master"), dict):
+        chain = processing["master"].get("chain")
+    return list(chain or [])
+
+
 def finish_browser_record(rec: dict, take_state: dict, info: dict, flac_path: str) -> dict:
     """Record the upload, the plan, and the processing. Recompute the hash.
 
@@ -766,7 +842,7 @@ def finish_browser_record(rec: dict, take_state: dict, info: dict, flac_path: st
         {
             "n": 2,
             "tool": "browser-processing",
-            "chain": list(processing.get("chain") or []),
+            "chain": list(_stored_chain(processing)),
             "params": processing.get("params") or {},
             "type": "Filtering, modulation, and dials ran in the browser. The server did not re-run them.",
         },
