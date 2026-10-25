@@ -564,6 +564,15 @@ def _specs() -> list[dict]:
             "file_re": r"Marimba\.cord\.ff\..*stereo", "author": UIOWA_AUTHOR, "license": UIOWA_LICENSE,
             "velocity": ["ff"],
         },
+        {
+            # Iowa violin arco 2012, one file per note. This kept more notes
+            # than the older cello arco pp and mf chromatic runs. Gaps stay gaps.
+            "id": "uiowa-violin-arco-2012", "origin": "uiowa", "instrument": "strings", "pluck": False,
+            "kind": "uiowa_mis", "native": True, "lo": 55, "hi": 100,
+            "page": uiowa + "MIS-Pitches-2012/MISViolin2012.html",
+            "file_re": r"Violin\.arco\.ff\..*stereo", "author": UIOWA_AUTHOR, "license": UIOWA_LICENSE,
+            "velocity": ["ff"],
+        },
     ]
 
 
