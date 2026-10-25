@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       instruments:
-        description: "Comma-separated instruments. cello is the Iowa pizzicato."
+        description: "Comma-separated instruments. cello is the Iowa pizzicato. bass is the fingered hollowbody, B1–A#4, 36 notes."
         required: false
         default: "guitar,piano,cello"
         type: string

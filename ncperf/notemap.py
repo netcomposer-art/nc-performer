@@ -543,6 +543,18 @@ def _specs() -> list[dict]:
                 {"midi": 70, "id": "246660"},  # A#4
             ],
         },
+        {
+            # Fingered hollowbody. mf is lovel 64–95. Each key also has an f
+            # layer and three more round robins. The manifest stores one file
+            # per MIDI, so this is mf round robin 1 only. Zones where the key
+            # is not the recorded pitch are left out.
+            "id": "karoryfer-darkblack", "origin": "github", "instrument": "bass", "pluck": True,
+            "kind": "sfz_note", "native": True, "lo": 35, "hi": 76,
+            "page": "https://github.com/sfzinstruments/karoryfer.black-and-blue-basses",
+            "author": "Karoryfer Samples", "license": "CC0-1.0", "velocity": ["mf"],
+            "sfz_url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.black-and-blue-basses/main/Programs/maps/darkblack_reg_mf_map.sfz",
+            "sample_base": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.black-and-blue-basses/main/Programs/",
+        },
     ]
 
 

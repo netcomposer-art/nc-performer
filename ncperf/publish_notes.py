@@ -22,11 +22,17 @@ MANIFEST_TYPE = "application/json"
 OPUS_CACHE = "public, max-age=31536000, immutable"
 MANIFEST_CACHE = "public, max-age=300"
 # The workflow's instrument names. Cello is the Iowa pizzicato library.
+# bass is the fingered hollowbody. Publish keeps B1–A#4, MIDI 35–70.
 LIBRARIES = {
     "guitar": "uiowa-guitar",
     "piano": "uiowa-piano",
     "cello": "uiowa-cello-pizz",
+    "bass": "karoryfer-darkblack",
 }
+# Worker GET /api/notes/bass/{midi}.opus. B1 is 35 and A#4 is 70: 36 notes.
+BASS_SLUG = "bass"
+BASS_LO = 35
+BASS_HI = 70
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WRANGLER_CWD = os.path.join(ROOT, "service", "worker")
 
@@ -50,7 +56,8 @@ def parse_instruments(text: str) -> list[str]:
         if name and name not in names:
             names.append(name)
     if not names:
-        raise SystemExit("instruments is empty. Use guitar, piano, or cello.")
+        known = ", ".join(LIBRARIES)
+        raise SystemExit(f"instruments is empty. Known names: {known}.")
     unknown = [name for name in names if name not in LIBRARIES]
     if unknown:
         known = ", ".join(LIBRARIES)
@@ -60,6 +67,32 @@ def parse_instruments(text: str) -> list[str]:
 
 def library_ids(names: list[str]) -> list[str]:
     return [LIBRARIES[name] for name in names]
+
+
+def bass_midis() -> list[int]:
+    return list(range(BASS_LO, BASS_HI + 1))
+
+
+def check_bass_slug(notes: dict) -> None:
+    """The bass publish is the 36 notes GET /api/notes/bass/{midi}.opus serves."""
+    want = set(bass_midis())
+    got = set()
+    for key in notes:
+        try:
+            midi = int(key)
+        except (TypeError, ValueError):
+            raise SystemExit(f"bass note {key} is not a MIDI number") from None
+        got.add(midi)
+    if got == want:
+        return
+    missing = sorted(want - got)
+    extra = sorted(got - want)
+    parts = [f"bass must be the {len(want)} notes B1–A#4 (MIDI {BASS_LO}–{BASS_HI}) at /api/notes/bass/"]
+    if missing:
+        parts.append("missing " + ", ".join(str(midi) for midi in missing))
+    if extra:
+        parts.append("extra " + ", ".join(str(midi) for midi in extra))
+    raise SystemExit("; ".join(parts))
 
 
 def plan_uploads(out_dir: str) -> list[Upload]:
@@ -87,6 +120,8 @@ def plan_uploads(out_dir: str) -> list[Upload]:
         notes = doc.get("notes") or {}
         if not notes:
             raise SystemExit(f"{name} has no notes")
+        if slug == BASS_SLUG:
+            check_bass_slug(notes)
         for midi, note in notes.items():
             for field, role, content_type in (("file", "opus", OPUS_TYPE), ("master", "flac", FLAC_TYPE)):
                 key = str(note.get(field) or "")

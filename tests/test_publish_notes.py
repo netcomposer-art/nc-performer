@@ -16,7 +16,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from ncperf.publish_notes import (  # noqa: E402
+    BASS_HI,
+    BASS_LO,
     BUCKET,
+    bass_midis,
+    check_bass_slug,
     check_remote,
     get_argv,
     library_ids,
@@ -67,8 +71,11 @@ def _note(midi, slug):
     }
 
 
-def _tree(root, slug, midis):
-    spec = _spec(instrument="cello pizzicato" if slug != "guitar" else "guitar", id="uiowa-" + slug)
+def _tree(root, slug, midis, instrument=None):
+    spec = _spec(
+        instrument=instrument or ("cello pizzicato" if slug != "guitar" else "guitar"),
+        id="uiowa-" + slug,
+    )
     if slug == "cello-pizzicato":
         spec = _spec(id="uiowa-cello-pizz", instrument="cello pizzicato")
     notes = {midi: _note(midi, slug) for midi in midis}
@@ -92,11 +99,48 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(names, ["guitar", "piano", "cello"])
         self.assertEqual(library_ids(names), ["uiowa-guitar", "uiowa-piano", "uiowa-cello-pizz"])
 
+    def test_bass_maps_to_its_library(self):
+        names = parse_instruments("bass")
+        self.assertEqual(names, ["bass"])
+        self.assertEqual(library_ids(names), ["karoryfer-darkblack"])
+
+    def test_dropped_sampler_names_are_refused(self):
+        for name in ("strings", "vibes", "kalimba"):
+            with self.assertRaises(SystemExit):
+                parse_instruments(name)
+
     def test_an_unknown_instrument_is_refused(self):
         with self.assertRaises(SystemExit):
             parse_instruments("violin")
         with self.assertRaises(SystemExit):
             parse_instruments("  ")
+
+    def test_bass_publish_is_the_36_notes_the_worker_serves(self):
+        self.assertEqual(len(bass_midis()), 36)
+        self.assertEqual(bass_midis()[0], BASS_LO)
+        self.assertEqual(bass_midis()[-1], BASS_HI)
+        check_bass_slug({str(midi): {} for midi in bass_midis()})
+        tmp = tempfile.mkdtemp(prefix="nc-pub-bass-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        _tree(tmp, "bass", bass_midis(), instrument="bass")
+        items = plan_uploads(tmp)
+        opus = [item.key for item in items if item.role == "opus"]
+        self.assertEqual(opus, [f"notes/bass/{midi}.opus" for midi in bass_midis()])
+        self.assertEqual(
+            [item.key for item in items if item.role == "manifest"],
+            ["notes/bass/manifest.json"],
+        )
+
+    def test_bass_publish_refuses_a_different_set(self):
+        with self.assertRaises(SystemExit):
+            check_bass_slug({str(midi): {} for midi in range(BASS_LO, BASS_HI)})
+        tmp = tempfile.mkdtemp(prefix="nc-pub-bass-short-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        _tree(tmp, "bass", list(range(BASS_LO, BASS_HI)), instrument="bass")
+        with self.assertRaises(SystemExit) as caught:
+            plan_uploads(tmp)
+        self.assertIn("36 notes", str(caught.exception))
+        self.assertIn("/api/notes/bass/", str(caught.exception))
 
     def test_only_opus_flac_and_the_manifest_are_uploaded(self):
         tmp = tempfile.mkdtemp(prefix="nc-pub-")
