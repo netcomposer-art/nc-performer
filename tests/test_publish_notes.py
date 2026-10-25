@@ -104,13 +104,18 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(names, ["bass"])
         self.assertEqual(library_ids(names), ["karoryfer-darkblack"])
 
+    def test_vibes_maps_to_the_cord_marimba(self):
+        names = parse_instruments("vibes")
+        self.assertEqual(names, ["vibes"])
+        self.assertEqual(library_ids(names), ["uiowa-marimba-cord-2012"])
+
     def test_strings_maps_to_the_violin(self):
         names = parse_instruments("strings")
         self.assertEqual(names, ["strings"])
         self.assertEqual(library_ids(names), ["uiowa-violin-arco-2012"])
 
     def test_dropped_sampler_names_are_refused(self):
-        for name in ("vibes", "kalimba"):
+        for name in ("kalimba",):
             with self.assertRaises(SystemExit):
                 parse_instruments(name)
 
