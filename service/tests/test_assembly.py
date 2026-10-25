@@ -386,6 +386,62 @@ class AssemblyPlanTest(unittest.TestCase):
             parse([nan, self._limiter()])
         self.assertIn("finite", str(broken.exception))
 
+    def test_take_state_v2_stores_schema_3_without_running_it(self):
+        chain = [
+            self._hack("lowpass", params={"cutoff": 75, "cutoff_hz": 500}),
+            self._limiter(),
+        ]
+        chain[0]["auto"] = {"param": "cutoff_hz", "from": 500, "to": 200, "over": "piece"}
+        got = assembly.parse_take_state({
+            "nc_take_version": "2",
+            "plan": self._good(),
+            "processing": {
+                "schema": 3,
+                "master": {"chain": chain},
+                "tracks": {"t1": {"chain": []}, "t8": {"chain": []}},
+            },
+        }, GATHER)
+        self.assertEqual(got["nc_take_version"], "2")
+        self.assertEqual(got["processing"]["schema"], 3)
+        self.assertEqual(got["processing"]["master"]["chain"], chain)
+        self.assertEqual(got["processing"]["tracks"]["t1"], {"chain": []})
+        self.assertEqual(got["processing"]["tracks"]["t8"], {"chain": []})
+        rec = {"performance": {"outputs": [{}]}}
+        assembly.finish_browser_record(rec, got, {"upload_sha256": "ab" * 32}, os.path.join(self.tmp, "missing.flac"))
+        self.assertEqual(rec["hacks_chain"][1]["chain"], chain)
+        self.assertIn("did not re-run", rec["hacks_chain"][1]["type"])
+        self.assertEqual(rec["take_state"]["processing"]["schema"], 3)
+
+    def test_schema_3_rejections(self):
+        def parse(processing):
+            assembly.parse_take_state({
+                "nc_take_version": "2",
+                "plan": self._good(),
+                "processing": processing,
+            }, GATHER)
+
+        master = {"chain": [self._hack("lowpass"), self._limiter()]}
+        tracks = {f"t{i}": {"chain": []} for i in range(1, 10)}
+        with self.assertRaises(ValueError) as too_many:
+            parse({"schema": 3, "master": master, "tracks": tracks})
+        self.assertIn("8", str(too_many.exception))
+        with self.assertRaises(ValueError) as track_lim:
+            parse({"schema": 3, "master": master, "tracks": {"t2": {"chain": [self._limiter()]}}})
+        self.assertIn("limiter", str(track_lim.exception).lower())
+        wet = self._hack("delay", params={"wet": 0})
+        wet["auto"] = {"param": "wet", "from": 0, "to": 1, "over": "piece"}
+        with self.assertRaises(ValueError) as glide:
+            parse({"schema": 3, "master": {"chain": [wet, self._limiter()]}})
+        self.assertIn("cutoff_hz", str(glide.exception))
+        with self.assertRaises(ValueError) as on_two:
+            parse({"schema": 2, "chain": [wet, self._limiter()]})
+        self.assertIn("schema 3", str(on_two.exception))
+        zero = self._hack("bandpass")
+        zero["auto"] = {"param": "centre_hz", "from": 0, "to": 800, "over": "piece"}
+        with self.assertRaises(ValueError) as freq:
+            parse({"schema": 3, "master": {"chain": [zero, self._limiter()]}})
+        self.assertIn("above 0", str(freq.exception))
+
     def _hack(self, type_name, n=1, params=None):
         return {
             "id": f"{type_name}-{n}",
