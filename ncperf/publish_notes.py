@@ -22,10 +22,15 @@ MANIFEST_TYPE = "application/json"
 OPUS_CACHE = "public, max-age=31536000, immutable"
 MANIFEST_CACHE = "public, max-age=300"
 # The workflow's instrument names. Cello is the Iowa pizzicato library.
+# bass, strings, vibes, and kalimba are the later single-note libraries.
 LIBRARIES = {
     "guitar": "uiowa-guitar",
     "piano": "uiowa-piano",
     "cello": "uiowa-cello-pizz",
+    "bass": "karoryfer-darkblack",
+    "strings": "uiowa-cello-arco",
+    "vibes": "uiowa-vibraphone-dampen",
+    "kalimba": "vcsl-kalimba",
 }
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WRANGLER_CWD = os.path.join(ROOT, "service", "worker")
@@ -50,7 +55,8 @@ def parse_instruments(text: str) -> list[str]:
         if name and name not in names:
             names.append(name)
     if not names:
-        raise SystemExit("instruments is empty. Use guitar, piano, or cello.")
+        known = ", ".join(LIBRARIES)
+        raise SystemExit(f"instruments is empty. Known names: {known}.")
     unknown = [name for name in names if name not in LIBRARIES]
     if unknown:
         known = ", ".join(LIBRARIES)

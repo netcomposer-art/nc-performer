@@ -356,11 +356,11 @@ def assign_recoveries(measurements, holes):
     return best
 
 
-def absent_reason(midi: int, near: dict | None) -> str:
+def absent_reason(midi: int, near: dict | None, where: str = "the Iowa file") -> str:
     tail = "A neighbour was not moved into the hole."
     if not near or int(near.get("midi", -1)) != int(midi) or near.get("cents") is None:
         return (
-            "Scanned the Iowa file that covers this pitch. The strict onset and pitch check "
+            f"Scanned {where} that covers this pitch. The strict onset and pitch check "
             "did not accept it, and a neighbour was not moved into the hole."
         )
     name = note_name(midi)
@@ -369,22 +369,22 @@ def absent_reason(midi: int, near: dict | None) -> str:
     fft_cents = near.get("fft_cents")
     if abs(cents) > 15:
         return (
-            f"Scanned the Iowa file. The note measures as {name} "
+            f"Scanned {where}. The note measures as {name} "
             f"at {cents:+.0f} cents, outside the 15 cent gate, so it was not kept. {tail}"
         )
     if spread is not None and float(spread) > SPREAD_CENTS:
         return (
-            f"Scanned the Iowa file. The note measures as {name} at {cents:+.0f} cents, "
+            f"Scanned {where}. The note measures as {name} at {cents:+.0f} cents, "
             f"but the pitch wanders by {float(spread):.0f} cents, past the {SPREAD_CENTS:.0f} cent spread gate, "
             f"so it was not kept. {tail}"
         )
     if fft_cents is not None and abs(float(fft_cents)) > FFT_DISAGREE_CENTS:
         return (
-            f"Scanned the Iowa file. pYIN measures {name} at {cents:+.0f} cents, "
+            f"Scanned {where}. pYIN measures {name} at {cents:+.0f} cents, "
             f"but the FFT peak is {float(fft_cents):+.0f} cents from that note, so it was not kept. {tail}"
         )
     return (
-        "Scanned the Iowa file that covers this pitch. The strict onset and pitch check "
+        f"Scanned {where} that covers this pitch. The strict onset and pitch check "
         "did not accept it, and a neighbour was not moved into the hole."
     )
 
@@ -710,8 +710,84 @@ def build_chord_manifest(spec: dict, chords: dict) -> dict:
     return doc
 
 
+def parse_sfz_regions(text: str, sample_base: str) -> list[dict]:
+    """One native-pitch sample per MIDI from an SFZ map.
+
+    A zone whose key is not the recorded pitch is dropped. Round robins after
+    the first are dropped, because the manifest stores one file per MIDI.
+    Sample paths are resolved from `sample_base` (the program directory, for
+    a map that is included from that program). Nothing is transposed.
+    """
+    found = []
+    seen = set()
+    for region in re.split(r"(?i)<region>", text or "")[1:]:
+        def grab(key: str, region: str = region):
+            match = re.search(rf"(?i)\b{key}=(-?\d+)", region)
+            return int(match.group(1)) if match else None
+        lo, hi = grab("lokey"), grab("hikey")
+        centre, seq = grab("pitch_keycenter"), grab("seq_position")
+        sample_m = re.search(r"(?i)sample=([^\r\n]+)", region)
+        if lo is None or hi is None or lo != hi or not sample_m:
+            continue
+        if centre is not None and centre != lo:
+            continue
+        if seq not in (None, 1):
+            continue
+        sample = sample_m.group(1).strip().replace("\\", "/")
+        url = urllib.parse.urljoin(sample_base, sample)
+        if url in seen:
+            continue
+        seen.add(url)
+        found.append({"url": url, "name": sample.rsplit("/", 1)[-1], "lo": int(lo), "hi": int(hi)})
+    return found
+
+
+def sfz_note_sources(url: str, sample_base: str) -> list[dict]:
+    from . import fetch
+    text, _ = fetch.text(url)
+    return parse_sfz_regions(text, sample_base)
+
+
+_NAMED_NOTE = re.compile(r"_([A-G](?:#|b)?)(-?\d)(?:_|$)")
+
+
+def named_note_sources(spec: dict) -> list[dict]:
+    """Wav files whose names carry the MIDI pitch. No pitch is invented."""
+    from . import fetch, notemap
+    text, _ = fetch.text(spec["github_contents"])
+    doc = json.loads(text)
+    if not isinstance(doc, list):
+        raise RuntimeError("note listing was not a file list")
+    rx = re.compile(spec.get("file_re") or ".")
+    found = []
+    seen = set()
+    for item in doc:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "")
+        url = str(item.get("download_url") or "")
+        if not url or not name.lower().endswith((".wav", ".aif", ".aiff", ".flac")):
+            continue
+        if not rx.search(name):
+            continue
+        match = _NAMED_NOTE.search(name)
+        if not match:
+            continue
+        midi = notemap._midi(match.group(1), match.group(2))
+        if url in seen:
+            continue
+        seen.add(url)
+        found.append({"url": url, "name": name, "lo": int(midi), "hi": int(midi)})
+    return found
+
+
 def list_sources(spec: dict) -> list[dict]:
-    """mf files on the instrument page whose names give a pitch span."""
+    """Files whose names give a pitch span. One note per file stays one note."""
+    kind = spec.get("kind")
+    if kind == "sfz_note":
+        return sfz_note_sources(spec["sfz_url"], spec["sample_base"])
+    if kind == "named_note":
+        return named_note_sources(spec)
     from . import notemap
     found = []
     seen = set()
@@ -754,6 +830,88 @@ def _write_audio(out_dir: str, note: dict, seg, sr) -> dict:
     return {"opus": os.path.getsize(opus), "flac": os.path.getsize(flac), "sr": int(sr), "dur_s": note["dur_s"]}
 
 
+def native_decision(audio, sr, midi: int) -> dict:
+    """Pitch check for a file that is already one note.
+
+    pYIN has to pass the slicer's strict gate. When pYIN does not name this
+    note, the FFT cents `tuning_cents` records for an indexed note can keep
+    it, still within 15 cents. The audio is not resampled or retuned, and a
+    reading of a different MIDI is not moved onto this one.
+    """
+    midi = int(midi)
+    found = identify_region(audio, sr, midi, midi)
+    if found and found.get("accepted") is True and int(found["midi"]) == midi:
+        return {"ok": True, "midi": midi, "cents": round(float(found["cents"]), 1), "method": "pyin", "near": found}
+    cents = tuning_cents(audio, sr, midi)
+    if cents is not None and abs(float(cents)) <= 15:
+        return {"ok": True, "midi": midi, "cents": round(float(cents), 1), "method": "fft", "near": found}
+    return {"ok": False, "midi": midi, "cents": None, "method": None, "near": found}
+
+
+def accept_native(audio, sr, midi: int):
+    row = native_decision(audio, sr, midi)
+    if not row["ok"]:
+        return None
+    return row
+
+
+def _onset_s(audio, sr) -> float:
+    """Where the note starts. A quiet lead-in is not the note.
+
+    Same threshold the pitch check uses: the first sample above 5% of the
+    peak. The slice then keeps the usual 5 ms before that.
+    """
+    y = np.asarray(audio)
+    mono = y.mean(axis=1) if y.ndim == 2 else y
+    if len(mono) == 0:
+        return 0.0
+    level = np.abs(mono)
+    peak = float(level.max())
+    if peak <= 0:
+        return 0.0
+    return float(int(np.argmax(level > 0.05 * peak)) / float(sr))
+
+
+def _take_native(spec, item, audio, sr, slug, out_dir, notes, near_miss, sizes) -> None:
+    """Keep this file only when `accept_native` names its own MIDI.
+
+    Two files of the same MIDI (a kalimba tine recorded twice) keep the one
+    closer to the note. The other file is not moved onto a missing pitch.
+    """
+    midi = int(item["lo"])
+    reading = native_decision(audio, sr, midi)
+    found = reading.get("near")
+    if not reading["ok"]:
+        if midi not in notes and found and int(found.get("midi", -1)) == midi:
+            prev = near_miss.get(midi)
+            if prev is None or abs(float(found["cents"])) < abs(float(prev.get("cents") or 99)):
+                near_miss[midi] = found
+        return
+    cents = round(float(reading["cents"]), 1)
+    prev = notes.get(midi)
+    if prev is not None and abs(float(prev["cents"])) <= abs(cents):
+        return
+    seg, t0, t1 = slice_note(audio, sr, _onset_s(audio, sr), None)
+    if len(seg) < int(0.05 * sr):
+        return
+    record = make_note(slug, midi, seg, sr, _source(item["url"], t0, t1, spec["license"]), cents, reading["method"])
+    _write_audio(out_dir, record, seg, sr)
+    notes[midi] = record
+    row = {
+        "midi": midi,
+        "name": record["name"],
+        "opus": os.path.getsize(os.path.join(out_dir, record["file"])),
+        "flac": os.path.getsize(os.path.join(out_dir, record["master"])),
+        "dur_s": record["dur_s"],
+        "recovered": False,
+    }
+    for i, prev_row in enumerate(sizes):
+        if prev_row["midi"] == midi:
+            sizes[i] = row
+            return
+    sizes.append(row)
+
+
 def slice_instrument(spec: dict, library: dict | None, out_dir: str, recover: bool = True, log=print) -> dict:
     """Slice one Iowa library. Holes that survive the rescan are recorded."""
     require_license(spec["license"])
@@ -779,12 +937,21 @@ def slice_instrument(spec: dict, library: dict | None, out_dir: str, recover: bo
     # A chromatic run is opened in full so a hole inside it can be recovered.
     # A one-note file (piano) is opened only when the index already uses it.
     # The rest of the keyboard stays unscanned and is not reported as absent.
+    # `native` libraries are one file per note and have no index. Each file in
+    # the spec range is opened and kept only when the strict pitch check names
+    # that file's own MIDI.
     chromatic = any(item["hi"] > item["lo"] for item in files)
+    native = bool(spec.get("native"))
 
     def covers_index(item: dict) -> bool:
         return any(item["lo"] <= midi <= item["hi"] for midi in index_notes)
 
-    if chromatic and recover:
+    def in_spec(item: dict) -> bool:
+        return int(spec["lo"]) <= int(item["lo"]) <= int(spec["hi"]) and item["lo"] == item["hi"]
+
+    if native:
+        wanted = [item for item in files if in_spec(item)]
+    elif chromatic and recover:
         wanted = files
     else:
         wanted = [item for item in files if covers_index(item)]
@@ -832,7 +999,9 @@ def slice_instrument(spec: dict, library: dict | None, out_dir: str, recover: bo
                 self_n += 1
                 if found and found.get("accepted") and found["midi"] == midi:
                     self_ok += 1
-        if recover:
+        if native and item["lo"] == item["hi"]:
+            _take_native(spec, item, audio, sr, slug, out_dir, notes, near_miss, sizes)
+        if recover and not (native and item["lo"] == item["hi"]):
             holes = [midi for midi in range(item["lo"], item["hi"] + 1) if midi not in notes and midi not in index_notes]
             if holes:
                 from . import pitch
@@ -876,8 +1045,14 @@ def slice_instrument(spec: dict, library: dict | None, out_dir: str, recover: bo
         log(json.dumps({"event": "sliced_file", "id": spec["id"], "file": item["name"], "notes": len(notes)}))
 
     absent, not_in, unscanned = classify_gaps(spec["lo"], spec["hi"], page_covered, scanned_covered, notes)
-    gaps = [_gap(midi, "absent", absent_reason(midi, near_miss.get(midi)), spans.get(midi, [])[:6]) for midi in absent]
-    gaps += [_gap(midi, "not-in-sources", "No mf file on the Iowa page has this pitch in its name.") for midi in not_in]
+    where = "the Iowa file" if spec.get("kind") == "uiowa_mis" else "the source file"
+    gaps = [_gap(midi, "absent", absent_reason(midi, near_miss.get(midi), where), spans.get(midi, [])[:6]) for midi in absent]
+    if spec.get("kind") == "uiowa_mis":
+        layer = (spec.get("velocity") or ["mf"])[0]
+        missing_reason = f"No {layer} file on the Iowa page has this pitch in its name."
+    else:
+        missing_reason = "No source file is named as this pitch."
+    gaps += [_gap(midi, "not-in-sources", missing_reason) for midi in not_in]
     manifest = build_note_manifest(spec, notes, gaps, recovered_rows)
     dest = os.path.join(out_dir, "manifests", slug + ".json")
     os.makedirs(os.path.dirname(dest), exist_ok=True)
@@ -934,23 +1109,27 @@ def _assert_terms() -> None:
 
 
 def run_slice(out_dir: str, libraries: list[str] | None = None, index_path: str | None = None, recover: bool = True, log=print) -> dict:
-    """Slice the named Iowa libraries. Remaining holes do not fail the run."""
+    """Slice the named libraries. Remaining holes do not fail the run."""
     from . import noteindex, notemap
-    _assert_terms()
     path = index_path or os.environ.get("NC_NOTE_INDEX") or noteindex.BUNDLED
     with open(path, encoding="utf-8") as fh:
         doc = json.load(fh)
     by_id = {lib.get("id"): lib for lib in doc.get("libraries") or [] if isinstance(lib, dict)}
     wanted = list(libraries or DEFAULT_LIBRARIES)
-    by_spec = {spec["id"]: spec for spec in notemap._specs() if spec["kind"] == "uiowa_mis"}
+    kinds = {"uiowa_mis", "sfz_note", "named_note"}
+    by_spec = {spec["id"]: spec for spec in notemap._specs() if spec.get("kind") in kinds}
     missing = [name for name in wanted if name not in by_spec]
     specs = [by_spec[name] for name in wanted if name in by_spec]
     if missing:
         raise SystemExit("unknown library: " + ", ".join(missing))
+    if any(spec.get("kind") == "uiowa_mis" for spec in specs):
+        _assert_terms()
     os.makedirs(out_dir, exist_ok=True)
     reports = []
     for spec in specs:
-        spec = dict(spec, velocity=["mf"])
+        spec = dict(spec)
+        if not spec.get("velocity"):
+            spec["velocity"] = ["mf"]
         reports.append(slice_instrument(spec, by_id.get(spec["id"]), out_dir, recover=recover, log=log))
     summary = _size_summary(reports)
     with open(os.path.join(out_dir, "gap-report.json"), "w", encoding="utf-8") as fh:

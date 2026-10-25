@@ -483,6 +483,24 @@ def _specs() -> list[dict]:
             "file_re": r"Vibraphone\.shortsustain\.mf\.", "author": UIOWA_AUTHOR, "license": UIOWA_LICENSE,
         },
         {
+            # The root MIScello2012.html page is chromatic runs. The one-file-per-note
+            # arco set is this 2012 pitches page, and it is ff (there is no mf file).
+            "id": "uiowa-cello-arco", "origin": "uiowa", "instrument": "strings", "pluck": False,
+            "kind": "uiowa_mis", "native": True, "lo": 36, "hi": 81,
+            "page": uiowa + "MIS-Pitches-2012/MISCello2012.html",
+            "file_re": r"Cello\.arco\.ff\..*stereo", "author": UIOWA_AUTHOR, "license": UIOWA_LICENSE,
+            "velocity": ["ff"],
+        },
+        {
+            # MISVibraphone2012.html lives under MIS-Pitches-2012/. The dampened
+            # set is named dampen.ff, one file per note, C3–F6.
+            "id": "uiowa-vibraphone-dampen", "origin": "uiowa", "instrument": "vibes", "pluck": True,
+            "kind": "uiowa_mis", "native": True, "lo": 48, "hi": 89,
+            "page": uiowa + "MIS-Pitches-2012/MISVibraphone2012.html",
+            "file_re": r"Vibraphone\.dampen\.ff\..*stereo", "author": UIOWA_AUTHOR, "license": UIOWA_LICENSE,
+            "velocity": ["ff"],
+        },
+        {
             "id": "freesound-piano", "origin": "freesound", "instrument": "piano", "pluck": False,
             "kind": "freesound", "page": "https://freesound.org/people/feelander/packs/17718/",
             "author": "feelander", "license": "CC0-1.0",
@@ -542,6 +560,29 @@ def _specs() -> list[dict]:
                 {"midi": 67, "id": "247047"},  # G4
                 {"midi": 70, "id": "246660"},  # A#4
             ],
+        },
+        {
+            # Fingered hollowbody. mf is lovel 64–95. Each key also has an f
+            # layer and three more round robins. The manifest stores one file
+            # per MIDI, so this is mf round robin 1 only. Zones where the key
+            # is not the recorded pitch are left out.
+            "id": "karoryfer-darkblack", "origin": "github", "instrument": "bass", "pluck": True,
+            "kind": "sfz_note", "native": True, "lo": 35, "hi": 76,
+            "page": "https://github.com/sfzinstruments/karoryfer.black-and-blue-basses",
+            "author": "Karoryfer Samples", "license": "CC0-1.0", "velocity": ["mf"],
+            "sfz_url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.black-and-blue-basses/main/Programs/maps/darkblack_reg_mf_map.sfz",
+            "sample_base": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.black-and-blue-basses/main/Programs/",
+        },
+        {
+            # Tanzanian kalimba, one wav per tine. Two files share D#4 and two
+            # share F4; the pitch check keeps the closer one. The other chromatic
+            # pitches from G1 to C#6 are gaps.
+            "id": "vcsl-kalimba", "origin": "github", "instrument": "kalimba", "pluck": True,
+            "kind": "named_note", "native": True, "lo": 31, "hi": 85,
+            "page": "https://github.com/sgossner/VCSL/tree/master/Idiophones/Plucked%20Idiophones/Kalimba%2C%20Tanzania",
+            "author": "Versilian Community Sample Library", "license": "CC0-1.0", "velocity": ["rr2"],
+            "github_contents": "https://api.github.com/repos/sgossner/VCSL/contents/Idiophones/Plucked%20Idiophones/Kalimba%2C%20Tanzania",
+            "file_re": r"MBira3_pluck_Main_",
         },
     ]
 

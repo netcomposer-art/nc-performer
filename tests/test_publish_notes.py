@@ -92,6 +92,16 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(names, ["guitar", "piano", "cello"])
         self.assertEqual(library_ids(names), ["uiowa-guitar", "uiowa-piano", "uiowa-cello-pizz"])
 
+    def test_the_new_sampler_names_map_to_their_libraries(self):
+        names = parse_instruments("bass, strings, vibes, kalimba")
+        self.assertEqual(names, ["bass", "strings", "vibes", "kalimba"])
+        self.assertEqual(library_ids(names), [
+            "karoryfer-darkblack",
+            "uiowa-cello-arco",
+            "uiowa-vibraphone-dampen",
+            "vcsl-kalimba",
+        ])
+
     def test_an_unknown_instrument_is_refused(self):
         with self.assertRaises(SystemExit):
             parse_instruments("violin")

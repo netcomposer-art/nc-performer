@@ -22,6 +22,7 @@ from ncperf.slicer import (  # noqa: E402
     PRE_ROLL_S,
     RING_CAP_S,
     SLICE_FADE_S,
+    accept_native,
     assign_recoveries,
     build_chord_manifest,
     build_note_manifest,
@@ -31,6 +32,7 @@ from ncperf.slicer import (  # noqa: E402
     make_chord,
     make_note,
     note_name,
+    parse_sfz_regions,
     slice_note,
     strict_regions,
     validate_manifest,
@@ -405,6 +407,73 @@ class SamplerTest(unittest.TestCase):
         # Fm root writes G#3. There is no other G# in that voicing to swap in.
         self.assertEqual(cello["events"][1][1], [53, 56, 60])
         self.assertEqual(cello["bpm"], 96)
+
+
+class NativeFileTest(unittest.TestCase):
+    def test_leading_silence_is_not_the_whole_slice(self):
+        from ncperf.slicer import _onset_s
+        sr = 44100
+        silence = np.zeros((int(0.25 * sr), 1), np.float32)
+        audio = np.concatenate([silence, _tone(sr, 1.2, 440.0)[:, None]])
+        onset = _onset_s(audio, sr)
+        self.assertGreater(onset, 0.2)
+        seg, _t0, _t1 = slice_note(audio, sr, onset, None)
+        self.assertGreater(len(seg), int(0.5 * sr))
+
+    def test_a_native_file_is_kept_only_when_it_is_that_note(self):
+        sr = 44100
+        # A4 is MIDI 69, 440 Hz.
+        ok = accept_native(_tone(sr, 1.5, 440.0)[:, None], sr, 69)
+        self.assertIsNotNone(ok)
+        self.assertEqual(ok["midi"], 69)
+        self.assertLess(abs(ok["cents"]), 15)
+        # A semitone sharp is not stored as A4, and it is not moved.
+        self.assertIsNone(accept_native(_tone(sr, 1.5, 466.16)[:, None], sr, 69))
+
+    def test_sfz_keeps_the_first_native_round_robin_only(self):
+        text = """
+        <region>
+        sample=..\\Samples\\bass_e2_mf_rr2.wav
+        lokey=40
+        hikey=40
+        seq_position=2
+        pitch_keycenter=40
+        <region>
+        sample=..\\Samples\\bass_e2_mf_rr1.wav
+        lokey=40
+        hikey=40
+        pitch_keycenter=40
+        <region>
+        sample=..\\Samples\\bass_f2_stretched.wav
+        lokey=41
+        hikey=41
+        pitch_keycenter=40
+        <region>
+        sample=..\\Samples\\bass_span.wav
+        lokey=40
+        hikey=42
+        pitch_keycenter=41
+        """
+        rows = parse_sfz_regions(text, "https://example.test/Programs/")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["lo"], 40)
+        self.assertEqual(rows[0]["hi"], 40)
+        self.assertTrue(rows[0]["url"].endswith("/Samples/bass_e2_mf_rr1.wav"))
+
+    def test_new_libraries_are_native_and_do_not_shift(self):
+        from ncperf.notemap import _specs
+        by_id = {spec["id"]: spec for spec in _specs()}
+        expect = {
+            "uiowa-cello-arco": (36, 81, "PD-equivalent", "strings"),
+            "uiowa-vibraphone-dampen": (48, 89, "PD-equivalent", "vibes"),
+            "karoryfer-darkblack": (35, 76, "CC0-1.0", "bass"),
+            "vcsl-kalimba": (31, 85, "CC0-1.0", "kalimba"),
+        }
+        for sid, (lo, hi, license_id, instrument) in expect.items():
+            spec = by_id[sid]
+            self.assertTrue(spec.get("native"))
+            self.assertEqual((spec["lo"], spec["hi"], spec["license"], spec["instrument"]), (lo, hi, license_id, instrument))
+            self.assertNotIn("pitch_shift", spec)
 
 
 class CommandTest(unittest.TestCase):
