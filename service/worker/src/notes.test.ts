@@ -68,6 +68,28 @@ test("the manifest uses a five minute cache and a missing object is 404", async 
   assert.equal(miss?.headers.get("cache-control"), "no-store");
 });
 
+test("bass serves the 36 notes from B1 through A#4", async () => {
+  const seen: string[] = [];
+  for (let midi = 35; midi <= 70; midi++) {
+    const path = `/api/notes/bass/${midi}.opus`;
+    const hit = noteObject(path);
+    assert.equal(hit !== "hidden" && hit !== null && hit.key, `notes/bass/${midi}.opus`, path);
+    const res = await publishedNoteResponse("https://netcomposer.art", path, async (key) => {
+      seen.push(key);
+      return { body: "OPUS" };
+    });
+    assert.equal(res?.status, 200, path);
+    assert.equal(res?.headers.get("content-type"), "audio/ogg", path);
+  }
+  assert.equal(seen.length, 36);
+  assert.deepEqual(seen[0], "notes/bass/35.opus");
+  assert.deepEqual(seen[35], "notes/bass/70.opus");
+  const manifest = noteObject("/api/notes/bass/manifest.json");
+  assert.equal(manifest !== "hidden" && manifest !== null && manifest.key, "notes/bass/manifest.json");
+  assert.equal(noteObject("/api/notes/bass/"), "hidden");
+  assert.equal(noteObject("/api/notes/bass/34.flac"), "hidden");
+});
+
 test("the expiry job does not touch notes/", () => {
   assert.deepEqual(EXPIRY_PREFIXES, ["performances/", "jobs/"]);
   assert.equal(EXPIRY_PREFIXES.some((prefix) => prefix.startsWith("notes/")), false);

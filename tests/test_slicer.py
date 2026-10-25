@@ -463,17 +463,12 @@ class NativeFileTest(unittest.TestCase):
     def test_new_libraries_are_native_and_do_not_shift(self):
         from ncperf.notemap import _specs
         by_id = {spec["id"]: spec for spec in _specs()}
-        expect = {
-            "uiowa-cello-arco": (36, 81, "PD-equivalent", "strings"),
-            "uiowa-vibraphone-dampen": (48, 89, "PD-equivalent", "vibes"),
-            "karoryfer-darkblack": (35, 76, "CC0-1.0", "bass"),
-            "vcsl-kalimba": (31, 85, "CC0-1.0", "kalimba"),
-        }
-        for sid, (lo, hi, license_id, instrument) in expect.items():
-            spec = by_id[sid]
-            self.assertTrue(spec.get("native"))
-            self.assertEqual((spec["lo"], spec["hi"], spec["license"], spec["instrument"]), (lo, hi, license_id, instrument))
-            self.assertNotIn("pitch_shift", spec)
+        for gone in ("uiowa-cello-arco", "uiowa-vibraphone-dampen", "vcsl-kalimba"):
+            self.assertNotIn(gone, by_id)
+        spec = by_id["karoryfer-darkblack"]
+        self.assertTrue(spec.get("native"))
+        self.assertEqual((spec["lo"], spec["hi"], spec["license"], spec["instrument"]), (35, 76, "CC0-1.0", "bass"))
+        self.assertNotIn("pitch_shift", spec)
 
 
 class CommandTest(unittest.TestCase):

@@ -875,8 +875,8 @@ def _onset_s(audio, sr) -> float:
 def _take_native(spec, item, audio, sr, slug, out_dir, notes, near_miss, sizes) -> None:
     """Keep this file only when `accept_native` names its own MIDI.
 
-    Two files of the same MIDI (a kalimba tine recorded twice) keep the one
-    closer to the note. The other file is not moved onto a missing pitch.
+    Two files of the same MIDI keep the one closer to the note.
+    The other file is not moved onto a missing pitch.
     """
     midi = int(item["lo"])
     reading = native_decision(audio, sr, midi)
