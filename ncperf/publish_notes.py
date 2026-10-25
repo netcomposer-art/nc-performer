@@ -23,11 +23,13 @@ OPUS_CACHE = "public, max-age=31536000, immutable"
 MANIFEST_CACHE = "public, max-age=300"
 # The workflow's instrument names. Cello is the Iowa pizzicato library.
 # bass is the fingered hollowbody. Publish keeps B1–A#4, MIDI 35–70.
+# vibes is the Iowa 2012 cord marimba.
 LIBRARIES = {
     "guitar": "uiowa-guitar",
     "piano": "uiowa-piano",
     "cello": "uiowa-cello-pizz",
     "bass": "karoryfer-darkblack",
+    "vibes": "uiowa-marimba-cord-2012",
 }
 # Worker GET /api/notes/bass/{midi}.opus. B1 is 35 and A#4 is 70: 36 notes.
 BASS_SLUG = "bass"

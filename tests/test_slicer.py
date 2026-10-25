@@ -469,6 +469,11 @@ class NativeFileTest(unittest.TestCase):
         self.assertTrue(spec.get("native"))
         self.assertEqual((spec["lo"], spec["hi"], spec["license"], spec["instrument"]), (35, 76, "CC0-1.0", "bass"))
         self.assertNotIn("pitch_shift", spec)
+        vibes = by_id["uiowa-marimba-cord-2012"]
+        self.assertTrue(vibes.get("native"))
+        self.assertEqual((vibes["lo"], vibes["hi"], vibes["license"], vibes["instrument"]), (36, 96, "PD-equivalent", "vibes"))
+        self.assertNotIn("pitch_shift", vibes)
+        self.assertIn("Marimba\\.cord\\.ff\\.", vibes["file_re"])
 
 
 class CommandTest(unittest.TestCase):

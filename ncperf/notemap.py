@@ -555,6 +555,15 @@ def _specs() -> list[dict]:
             "sfz_url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.black-and-blue-basses/main/Programs/maps/darkblack_reg_mf_map.sfz",
             "sample_base": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.black-and-blue-basses/main/Programs/",
         },
+        {
+            # Iowa marimba 2012, cord mallets, one file per note. Cord kept
+            # more notes than rubber. The pitch check leaves the gaps out.
+            "id": "uiowa-marimba-cord-2012", "origin": "uiowa", "instrument": "vibes", "pluck": True,
+            "kind": "uiowa_mis", "native": True, "lo": 36, "hi": 96,
+            "page": uiowa + "MIS-Pitches-2012/MISMarimba2012.html",
+            "file_re": r"Marimba\.cord\.ff\..*stereo", "author": UIOWA_AUTHOR, "license": UIOWA_LICENSE,
+            "velocity": ["ff"],
+        },
     ]
 
 
