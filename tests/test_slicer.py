@@ -469,6 +469,11 @@ class NativeFileTest(unittest.TestCase):
         self.assertTrue(spec.get("native"))
         self.assertEqual((spec["lo"], spec["hi"], spec["license"], spec["instrument"]), (35, 76, "CC0-1.0", "bass"))
         self.assertNotIn("pitch_shift", spec)
+        strings = by_id["uiowa-violin-arco-2012"]
+        self.assertTrue(strings.get("native"))
+        self.assertEqual((strings["lo"], strings["hi"], strings["license"], strings["instrument"]), (55, 100, "PD-equivalent", "strings"))
+        self.assertNotIn("pitch_shift", strings)
+        self.assertIn("Violin\\.arco\\.ff\\.", strings["file_re"])
 
 
 class CommandTest(unittest.TestCase):
