@@ -1,0 +1,15 @@
+{
+ "nc_version": "0.2",
+ "count": 1,
+ "sounds": [
+  {
+   "id": "vcsl-hand-claps-clap-rr1",
+   "role": "clap",
+   "sha256": "60da01ab26a46833e073cfb879baa0a1c58b2b44a36342f5c5797b42a9cb7a2b",
+   "source": {
+    "origin": "vcsl",
+    "url": "https://github.com/sgossner/VCSL/blob/x/Claps/Clap_rr1.wav"
+   }
+  }
+ ]
+}

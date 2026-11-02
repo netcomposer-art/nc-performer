@@ -55,6 +55,8 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
           FREESOUND_API_KEY: ${{ secrets.FREESOUND_API_KEY }}
+          FREESOUND_CLIENT_ID: ${{ secrets.FREESOUND_CLIENT_ID }}
+          FREESOUND_CLIENT_SECRET: ${{ secrets.FREESOUND_CLIENT_SECRET }}
           TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
           NC_SIGNING_KEY: ${{ secrets.NC_SIGNING_KEY }}
           NC_ADMIN_TOKEN: ${{ secrets.NC_ADMIN_TOKEN }}
@@ -78,6 +80,9 @@ jobs:
           }
           put XAI_API_KEY "${XAI_API_KEY}"
           put FREESOUND_API_KEY "${FREESOUND_API_KEY}"
+          # Library harvester OAuth2 app (original downloads). Optional: without them the harvest uses previews.
+          put FREESOUND_CLIENT_ID "${FREESOUND_CLIENT_ID}" trim
+          put FREESOUND_CLIENT_SECRET "${FREESOUND_CLIENT_SECRET}" trim
           put TURNSTILE_SECRET_KEY "${TURNSTILE_SECRET_KEY}" trim
           put NC_SIGNING_KEY "${NC_SIGNING_KEY}"
           put NC_ADMIN_TOKEN "${NC_ADMIN_TOKEN}"

@@ -1,0 +1,77 @@
+{
+ "count": 3,
+ "next": null,
+ "previous": null,
+ "results": [
+  {
+   "id": 200001,
+   "name": "909 closed hihat.wav",
+   "tags": [
+    "909",
+    "hihat",
+    "closed"
+   ],
+   "username": "hatlover",
+   "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+   "url": "https://freesound.org/people/hatlover/sounds/200001/",
+   "previews": {
+    "preview-hq-mp3": "https://cdn.freesound.org/previews/200/200001_1234-hq.mp3",
+    "preview-lq-mp3": "https://cdn.freesound.org/previews/200/200001_1234-lq.mp3",
+    "preview-hq-ogg": "https://cdn.freesound.org/previews/200/200001_1234-hq.ogg",
+    "preview-lq-ogg": "https://cdn.freesound.org/previews/200/200001_1234-lq.ogg"
+   },
+   "duration": 0.12,
+   "type": "wav",
+   "samplerate": 44100,
+   "channels": 1,
+   "filesize": 120000,
+   "pack": null
+  },
+  {
+   "id": 200002,
+   "name": "909 CH 2.wav",
+   "tags": [
+    "909",
+    "hat"
+   ],
+   "username": "hatlover",
+   "license": "https://creativecommons.org/licenses/by/4.0/",
+   "url": "https://freesound.org/people/hatlover/sounds/200002/",
+   "previews": {
+    "preview-hq-mp3": "https://cdn.freesound.org/previews/200/200002_1234-hq.mp3",
+    "preview-lq-mp3": "https://cdn.freesound.org/previews/200/200002_1234-lq.mp3",
+    "preview-hq-ogg": "https://cdn.freesound.org/previews/200/200002_1234-hq.ogg",
+    "preview-lq-ogg": "https://cdn.freesound.org/previews/200/200002_1234-lq.ogg"
+   },
+   "duration": 0.1,
+   "type": "wav",
+   "samplerate": 44100,
+   "channels": 1,
+   "filesize": 120000,
+   "pack": null
+  },
+  {
+   "id": 200003,
+   "name": "909 hat already rejected.wav",
+   "tags": [
+    "909",
+    "hat"
+   ],
+   "username": "someone",
+   "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+   "url": "https://freesound.org/people/someone/sounds/200003/",
+   "previews": {
+    "preview-hq-mp3": "https://cdn.freesound.org/previews/200/200003_1234-hq.mp3",
+    "preview-lq-mp3": "https://cdn.freesound.org/previews/200/200003_1234-lq.mp3",
+    "preview-hq-ogg": "https://cdn.freesound.org/previews/200/200003_1234-hq.ogg",
+    "preview-lq-ogg": "https://cdn.freesound.org/previews/200/200003_1234-lq.ogg"
+   },
+   "duration": 0.1,
+   "type": "wav",
+   "samplerate": 44100,
+   "channels": 1,
+   "filesize": 120000,
+   "pack": null
+  }
+ ]
+}

@@ -383,6 +383,8 @@ def make_handler(app: App):
                 return self._internal_registry()
             if path == "/internal/registry/check":
                 return self._internal_registry_check()
+            if path == "/internal/library/qualify":
+                return self._internal_library_qualify()
             m = re.fullmatch(r"/internal/jobs/(g-[0-9a-z]+)/stack/([A-Za-z0-9._-]{1,80})", path)
             if m:
                 return self._internal_stack(m.group(1), m.group(2))
@@ -1219,6 +1221,19 @@ def make_handler(app: App):
             )
             app.storage.put(f"jobs/{job_id}/take-audio", data, self.headers.get("Content-Type") or "application/octet-stream")
             self._send(204, b"")
+
+        def _internal_library_qualify(self):
+            """Library harvest: measure one candidate file (body) and return it qualified or rejected (JSON)."""
+            if not _internal_ok(app, self):
+                return self._send(401, {"error": "internal token required"})
+            from . import library
+            data = _copied_bytes(
+                self, library.MAX_SOURCE_BYTES,
+                "The candidate file is missing or too large.",
+                "The candidate file is incomplete.",
+            )
+            result = library.qualify(data, library.read_meta(self.headers.get("X-NC-Library-Meta")))
+            self._send(200, library.to_json(result))
 
         def _internal_note_index(self):
             if not _internal_ok(app, self):

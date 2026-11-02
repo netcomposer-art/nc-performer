@@ -1,0 +1,199 @@
+{
+ "count": 9,
+ "next": "https://freesound.org/apiv2/search/?query=808+kick&page=2",
+ "previous": null,
+ "results": [
+  {
+   "id": 100001,
+   "name": "TR808 Kick Long.wav",
+   "tags": [
+    "808",
+    "kick",
+    "drum-machine"
+   ],
+   "username": "analogfan",
+   "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+   "url": "https://freesound.org/people/analogfan/sounds/100001/",
+   "previews": {
+    "preview-hq-mp3": "https://cdn.freesound.org/previews/100/100001_1234-hq.mp3",
+    "preview-lq-mp3": "https://cdn.freesound.org/previews/100/100001_1234-lq.mp3",
+    "preview-hq-ogg": "https://cdn.freesound.org/previews/100/100001_1234-hq.ogg",
+    "preview-lq-ogg": "https://cdn.freesound.org/previews/100/100001_1234-lq.ogg"
+   },
+   "duration": 0.6,
+   "type": "wav",
+   "samplerate": 44100,
+   "channels": 1,
+   "filesize": 120000,
+   "pack": "https://freesound.org/apiv2/packs/9001/"
+  },
+  {
+   "id": 100002,
+   "name": "808 kick short.wav",
+   "tags": [
+    "808",
+    "kick",
+    "drum-machine"
+   ],
+   "username": "beatsmith",
+   "license": "https://creativecommons.org/licenses/by/4.0/",
+   "url": "https://freesound.org/people/beatsmith/sounds/100002/",
+   "previews": {
+    "preview-hq-mp3": "https://cdn.freesound.org/previews/100/100002_1234-hq.mp3",
+    "preview-lq-mp3": "https://cdn.freesound.org/previews/100/100002_1234-lq.mp3",
+    "preview-hq-ogg": "https://cdn.freesound.org/previews/100/100002_1234-hq.ogg",
+    "preview-lq-ogg": "https://cdn.freesound.org/previews/100/100002_1234-lq.ogg"
+   },
+   "duration": 0.6,
+   "type": "wav",
+   "samplerate": 44100,
+   "channels": 1,
+   "filesize": 120000,
+   "pack": null
+  },
+  {
+   "id": 100003,
+   "name": "808 Kick NC.wav",
+   "tags": [
+    "808",
+    "kick",
+    "drum-machine"
+   ],
+   "username": "ncperson",
+   "license": "http://creativecommons.org/licenses/by-nc/3.0/",
+   "url": "https://freesound.org/people/ncperson/sounds/100003/",
+   "previews": {
+    "preview-hq-mp3": "https://cdn.freesound.org/previews/100/100003_1234-hq.mp3",
+    "preview-lq-mp3": "https://cdn.freesound.org/previews/100/100003_1234-lq.mp3",
+    "preview-hq-ogg": "https://cdn.freesound.org/previews/100/100003_1234-hq.ogg",
+    "preview-lq-ogg": "https://cdn.freesound.org/previews/100/100003_1234-lq.ogg"
+   },
+   "duration": 0.6,
+   "type": "wav",
+   "samplerate": 44100,
+   "channels": 1,
+   "filesize": 120000,
+   "pack": null
+  },
+  {
+   "id": 100004,
+   "name": "808 kick sampling plus.wav",
+   "tags": [
+    "808",
+    "kick",
+    "drum-machine"
+   ],
+   "username": "oldtimer",
+   "license": "http://creativecommons.org/licenses/sampling+/1.0/",
+   "url": "https://freesound.org/people/oldtimer/sounds/100004/",
+   "previews": {
+    "preview-hq-mp3": "https://cdn.freesound.org/previews/100/100004_1234-hq.mp3",
+    "preview-lq-mp3": "https://cdn.freesound.org/previews/100/100004_1234-lq.mp3",
+    "preview-hq-ogg": "https://cdn.freesound.org/previews/100/100004_1234-hq.ogg",
+    "preview-lq-ogg": "https://cdn.freesound.org/previews/100/100004_1234-lq.ogg"
+   },
+   "duration": 0.6,
+   "type": "wav",
+   "samplerate": 44100,
+   "channels": 1,
+   "filesize": 120000,
+   "pack": null
+  },
+  {
+   "id": 100005,
+   "name": "808 kick loop 120bpm.wav",
+   "tags": [
+    "808",
+    "kick",
+    "drum-machine"
+   ],
+   "username": "looper",
+   "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+   "url": "https://freesound.org/people/looper/sounds/100005/",
+   "previews": {
+    "preview-hq-mp3": "https://cdn.freesound.org/previews/100/100005_1234-hq.mp3",
+    "preview-lq-mp3": "https://cdn.freesound.org/previews/100/100005_1234-lq.mp3",
+    "preview-hq-ogg": "https://cdn.freesound.org/previews/100/100005_1234-hq.ogg",
+    "preview-lq-ogg": "https://cdn.freesound.org/previews/100/100005_1234-lq.ogg"
+   },
+   "duration": 2.0,
+   "type": "wav",
+   "samplerate": 44100,
+   "channels": 1,
+   "filesize": 120000,
+   "pack": null
+  },
+  {
+   "id": 100006,
+   "name": "808 kick tail.wav",
+   "tags": [
+    "808",
+    "kick",
+    "drum-machine"
+   ],
+   "username": "analogfan",
+   "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+   "url": "https://freesound.org/people/analogfan/sounds/100006/",
+   "previews": {
+    "preview-hq-mp3": "https://cdn.freesound.org/previews/100/100006_1234-hq.mp3",
+    "preview-lq-mp3": "https://cdn.freesound.org/previews/100/100006_1234-lq.mp3",
+    "preview-hq-ogg": "https://cdn.freesound.org/previews/100/100006_1234-hq.ogg",
+    "preview-lq-ogg": "https://cdn.freesound.org/previews/100/100006_1234-lq.ogg"
+   },
+   "duration": 4.2,
+   "type": "wav",
+   "samplerate": 44100,
+   "channels": 1,
+   "filesize": 120000,
+   "pack": "https://freesound.org/apiv2/packs/9001/"
+  },
+  {
+   "id": 100007,
+   "name": "808 kick 2.wav",
+   "tags": [
+    "808",
+    "kick",
+    "drum-machine"
+   ],
+   "username": "analogfan",
+   "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+   "url": "https://freesound.org/people/analogfan/sounds/100007/",
+   "previews": {
+    "preview-hq-mp3": "https://cdn.freesound.org/previews/100/100007_1234-hq.mp3",
+    "preview-lq-mp3": "https://cdn.freesound.org/previews/100/100007_1234-lq.mp3",
+    "preview-hq-ogg": "https://cdn.freesound.org/previews/100/100007_1234-hq.ogg",
+    "preview-lq-ogg": "https://cdn.freesound.org/previews/100/100007_1234-lq.ogg"
+   },
+   "duration": 0.6,
+   "type": "wav",
+   "samplerate": 44100,
+   "channels": 1,
+   "filesize": 120000,
+   "pack": "https://freesound.org/apiv2/packs/9001/"
+  },
+  {
+   "id": 100008,
+   "name": "808 kick 3.wav",
+   "tags": [
+    "808",
+    "kick",
+    "drum-machine"
+   ],
+   "username": "analogfan",
+   "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+   "url": "https://freesound.org/people/analogfan/sounds/100008/",
+   "previews": {
+    "preview-hq-mp3": "https://cdn.freesound.org/previews/100/100008_1234-hq.mp3",
+    "preview-lq-mp3": "https://cdn.freesound.org/previews/100/100008_1234-lq.mp3",
+    "preview-hq-ogg": "https://cdn.freesound.org/previews/100/100008_1234-hq.ogg",
+    "preview-lq-ogg": "https://cdn.freesound.org/previews/100/100008_1234-lq.ogg"
+   },
+   "duration": 0.6,
+   "type": "wav",
+   "samplerate": 44100,
+   "channels": 1,
+   "filesize": 120000,
+   "pack": "https://freesound.org/apiv2/packs/9001/"
+  }
+ ]
+}

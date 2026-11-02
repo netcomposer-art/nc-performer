@@ -223,6 +223,7 @@ test("wrangler rate limit is a 10-or-60 second burst, not the 10-minute window",
     { name: "JOBS", class_name: "JobDO" },
     { name: "BUDGET", class_name: "BudgetDO" },
     { name: "RENDER", class_name: "RenderContainer" },
+    { name: "LIBRARY", class_name: "LibraryDO" },
   ]);
 });
 
