@@ -1,0 +1,20 @@
+{
+ "vcsl-hand-claps-soloclap-vl1": {
+  "source": {
+   "origin": "vcsl",
+   "url": "https://github.com/sgossner/VCSL/blob/x/Claps/SoloClap_vl1.wav",
+   "sha256": "2a16"
+  },
+  "at": "2026-11-02T14:03:00Z",
+  "title": "Hand claps"
+ },
+ "fs-200003-909-hat-already-rejected": {
+  "source": {
+   "origin": "freesound",
+   "id": "200003",
+   "url": "https://freesound.org/people/someone/sounds/200003/"
+  },
+  "at": "2026-11-03T10:00:00Z",
+  "title": "909 hat already rejected"
+ }
+}

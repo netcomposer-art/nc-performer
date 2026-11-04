@@ -122,7 +122,9 @@ test("the worker exports every WorkerEntrypoint from the locked containers packa
   for (const name of names) {
     assert.equal(classes.includes(name), false, `${name} is not a Durable Object and must not be a migration`);
   }
-  assert.deepEqual(classes, ["JobDO", "BudgetDO", "RenderContainer"]);
+  // v2 adds LibraryDO (the Library harvester's state).
+  assert.deepEqual(classes, ["JobDO", "BudgetDO", "RenderContainer", "LibraryDO"]);
+  assert.equal(typeof mod.LibraryDO, "function", "worker must export LibraryDO");
 });
 
 test("starting the container without ContainerProxy fails the way production did", async () => {

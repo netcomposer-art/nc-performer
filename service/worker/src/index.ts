@@ -53,6 +53,12 @@ import { applyPerformHit, applyRegatherHit, burstBlock, claimToken, corsHeaders,
 // is not listed in wrangler migrations.
 export { ContainerProxy };
 import { publicJwk, recordHashOf, signatureFor, signerFrom, verifyHash, type Signer } from "./sign";
+import { accessToken as libraryAccessToken, libraryRoute, type LibraryMessage, type RouteDeps } from "./library/admin";
+import { FreesoundClient, type BudgetKind } from "./library/freesound";
+import { knownFrom, runHarvest, type BlobStore, type Known } from "./library/harvest";
+import { runQualify, type QualifyMeta } from "./library/qualify";
+import type { QualifyResult } from "./library/manifest";
+import { LibraryState, type LibraryStore } from "./library/state";
 
 const ALLOWED_HOSTS = [
   "musicmatter.art",
@@ -114,7 +120,8 @@ export interface Env {
   BUDGET: DurableObjectNamespace<BudgetDO>;
   RENDER: DurableObjectNamespace<RenderContainer>;
   PERFORMANCES: R2Bucket;
-  PERFORM_JOBS: Queue<{ id: string }>;
+  LIBRARY: DurableObjectNamespace<LibraryDO>;
+  PERFORM_JOBS: Queue<QueueBody>;
   PERFORM_RATE: RateLimit;
   NC_INSTANCE_NAME: string;
   TURNSTILE_SITEKEY: string;
@@ -126,6 +133,15 @@ export interface Env {
   NC_LLM_API_KEY?: string;
   NC_LLM_EVERY_PERFORM?: string;
   FREESOUND_API_KEY?: string;
+  /**
+   * Library harvester OAuth2 (original Freesound downloads): the Client id of the same Freesound credential whose
+   * API key is FREESOUND_API_KEY. Optional: without it the harvest uses previews. FREESOUND_CLIENT_SECRET defaults
+   * to FREESOUND_API_KEY (Freesound's client secret is the API key).
+   */
+  FREESOUND_CLIENT_ID?: string;
+  FREESOUND_CLIENT_SECRET?: string;
+  /** Where library.json and rejected.json are read from before a harvest. Default https://musicmatter.art. */
+  NC_LIBRARY_SITE?: string;
   TURNSTILE_SECRET_KEY?: string;
   TURNSTILE_VERIFY_URL?: string;
   NC_SIGNING_KEY?: string;
@@ -137,6 +153,9 @@ export interface Env {
   NC_PROCESSED?: string;
   NC_REGISTRY_RECHECK_DAYS?: string;
 }
+
+/** A Perform job ({ id }) or a Library job (harvest, then qualify). */
+type QueueBody = { id: string; kind?: LibraryMessage["kind"]; batch?: string };
 
 type AssemblyClock = {
   written: boolean;
@@ -267,10 +286,37 @@ export class BudgetDO extends DurableObject<Env> {
       "CREATE TABLE IF NOT EXISTS queued (id TEXT PRIMARY KEY, created TEXT NOT NULL)",
       "CREATE TABLE IF NOT EXISTS flags (k TEXT PRIMARY KEY, v TEXT NOT NULL)",
       "CREATE TABLE IF NOT EXISTS seen (id TEXT PRIMARY KEY, state TEXT, cost_usd REAL, ip_hash TEXT, error_code TEXT, created_at TEXT)",
+      "CREATE TABLE IF NOT EXISTS api_calls (day TEXT NOT NULL, service TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (day, service))",
     ]) {
       this.ctx.storage.sql.exec(statement);
     }
     });
+  }
+
+  /**
+   * Count one outside API call (Library harvest: freesound-api, freesound-download, freesound-preview) against a
+   * daily cap. False, and nothing counted, once today's cap is reached.
+   */
+  async takeApi(service: string, cap: number): Promise<boolean> {
+    const d = day();
+    const rows = this.ctx.storage.sql.exec("SELECT n FROM api_calls WHERE day = ? AND service = ?", d, service).toArray();
+    const used = rows.length ? Number(rows[0].n) : 0;
+    if (used >= cap) return false;
+    this.ctx.storage.sql.exec(
+      "INSERT INTO api_calls (day, service, n) VALUES (?, ?, 1) ON CONFLICT(day, service) DO UPDATE SET n = n + 1",
+      d,
+      service,
+    );
+    this.ctx.storage.sql.exec("DELETE FROM api_calls WHERE day < ?", isoPlus(-30 * 86400 * 1000).slice(0, 10));
+    return true;
+  }
+
+  async apiToday(): Promise<Record<string, number>> {
+    const out: Record<string, number> = {};
+    for (const row of this.ctx.storage.sql.exec("SELECT service, n FROM api_calls WHERE day = ?", day()).toArray()) {
+      out[String(row.service)] = Number(row.n);
+    }
+    return out;
   }
 
   async spendToday(): Promise<number> {
@@ -374,6 +420,35 @@ export class BudgetDO extends DurableObject<Env> {
   }
 }
 
+/**
+ * Library harvest state (see src/library/state.ts): config, the seen table, candidates, batch logs and the
+ * harvester account's Freesound OAuth2 tokens. One instance ("global"). Every method delegates to LibraryState.
+ */
+export class LibraryDO extends DurableObject<Env> implements LibraryStore {
+  private state(): LibraryState {
+    return new LibraryState(this.ctx.storage);
+  }
+  getConfig() { return this.state().getConfig(); }
+  setConfig(raw: unknown) { return this.state().setConfig(raw); }
+  seenMany(keys: string[]) { return this.state().seenMany(keys); }
+  markSeen(key: string, row: Parameters<LibraryStore["markSeen"]>[1]) { return this.state().markSeen(key, row); }
+  claimSha(sha: string, id: string) { return this.state().claimSha(sha, id); }
+  putCandidate(c: Parameters<LibraryStore["putCandidate"]>[0]) { return this.state().putCandidate(c); }
+  getCandidate(id: string) { return this.state().getCandidate(id); }
+  listCandidates(state?: Parameters<LibraryStore["listCandidates"]>[0]) { return this.state().listCandidates(state); }
+  countCandidates() { return this.state().countCandidates(); }
+  decide(id: string, status: "approved" | "rejected" | "pending", at: string, note?: string) { return this.state().decide(id, status, at, note); }
+  putBatch(b: Parameters<LibraryStore["putBatch"]>[0]) { return this.state().putBatch(b); }
+  getBatch(id: string) { return this.state().getBatch(id); }
+  listBatches(limit: number) { return this.state().listBatches(limit); }
+  getOAuth() { return this.state().getOAuth(); }
+  setOAuth(rec: Parameters<LibraryStore["setOAuth"]>[0]) { return this.state().setOAuth(rec); }
+  createOAuthState(state: string, nowMs: number, ttlMs: number) { return this.state().createOAuthState(state, nowMs, ttlMs); }
+  consumeOAuthState(state: string, nowMs: number) { return this.state().consumeOAuthState(state, nowMs); }
+  acquireLock(name: string, nowMs: number, ttlMs: number) { return this.state().acquireLock(name, nowMs, ttlMs); }
+  releaseLock(name: string) { return this.state().releaseLock(name); }
+}
+
 let signerCache: { text: string; signer: Signer } | null = null;
 
 async function getSigner(env: Env): Promise<Signer | null> {
@@ -397,8 +472,19 @@ export default {
     }
   },
 
-  async queue(batch: MessageBatch<{ id: string }>, env: Env): Promise<void> {
+  async queue(batch: MessageBatch<QueueBody>, env: Env): Promise<void> {
     for (const msg of batch.messages) {
+      if (msg.body?.kind === "library-harvest" || msg.body?.kind === "library-qualify") {
+        try {
+          await runLibraryMessage(env, msg.body as LibraryMessage);
+          msg.ack();
+        } catch (err) {
+          const detail = err instanceof Error ? err.stack || err.message : String(err);
+          console.error(JSON.stringify({ event: "library_failed", kind: msg.body.kind, batch: msg.body.batch, detail }));
+          msg.retry();
+        }
+        continue;
+      }
       const id = msg.body?.id;
       if (!id) {
         msg.ack();
@@ -440,6 +526,11 @@ export default {
 
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(sweep(env));
+    // Nightly Library harvest (design v1, step 3). The queue runs it, then the qualify step, off this invocation.
+    ctx.waitUntil(scheduleLibraryHarvest(env).catch((err) => {
+      const detail = err instanceof Error ? err.message : String(err);
+      console.error(JSON.stringify({ event: "library_schedule", detail }));
+    }));
   },
 };
 
@@ -463,6 +554,10 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     if (note) return note;
   }
   if (request.method === "GET" && path === "/admin") return adminPage(request, env);
+  if (path.startsWith("/api/library/")) {
+    const routed = await libraryRoute(request, libraryRouteDeps(env), base);
+    if (routed) return routed;
+  }
   if (request.method === "POST" && path === "/api/gather") return gather(request, env, base);
   if (request.method === "POST" && path === "/api/perform") return perform(request, env, base);
   if (request.method === "POST" && path === "/api/keep-take") return keepTake(request, env, base);
@@ -2690,4 +2785,165 @@ function bin(body: ArrayBuffer | Uint8Array, contentType: string, extra?: Record
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// ---- Library harvester (design v1, step 3): harvest -> qualify -> curate (Peter) -> publish ----
+
+const LIBRARY_CONTAINER_ID = "nc-library";
+const LIBRARY_LOCK_MS = 14 * 60 * 1000;
+
+function libraryStore(env: Env): LibraryStore {
+  // RPC stubs return promises for every method, which is all LibraryStore promises.
+  return env.LIBRARY.get(env.LIBRARY.idFromName("global")) as unknown as LibraryStore;
+}
+
+function r2Blobs(env: Env): BlobStore {
+  return {
+    async put(key, body, contentType) {
+      await env.PERFORMANCES.put(key, body, { httpMetadata: { contentType } });
+    },
+    async get(key) {
+      const obj = await env.PERFORMANCES.get(key);
+      return obj ? new Uint8Array(await obj.arrayBuffer()) : null;
+    },
+    async delete(key) {
+      await env.PERFORMANCES.delete(key);
+    },
+  };
+}
+
+function randomHex(bytes: number): string {
+  const buf = new Uint8Array(bytes);
+  crypto.getRandomValues(buf);
+  return [...buf].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function libraryLog(event: Record<string, unknown>): void {
+  console.log(JSON.stringify(event));
+}
+
+function libraryRouteDeps(env: Env): RouteDeps {
+  return {
+    store: libraryStore(env),
+    blobs: r2Blobs(env),
+    enqueue: async (msg) => {
+      await env.PERFORM_JOBS.send(msg);
+    },
+    fetch: (input, init) => fetch(input, init),
+    now: () => new Date(),
+    adminToken: env.NC_ADMIN_TOKEN,
+    apiKey: env.FREESOUND_API_KEY,
+    clientId: env.FREESOUND_CLIENT_ID,
+    // On Freesound a credential's client secret is its API key, so one credential (one key, per the API terms)
+    // serves search and OAuth2. FREESOUND_CLIENT_SECRET is only needed if it ever differs.
+    clientSecret: env.FREESOUND_CLIENT_SECRET || env.FREESOUND_API_KEY,
+    budgetToday: () => budget(env).apiToday(),
+    randomHex,
+    log: libraryLog,
+  };
+}
+
+/** musicmatter.art's library.json and rejected.json: nothing in either is harvested again. */
+async function libraryKnown(env: Env): Promise<Known> {
+  const site = (env.NC_LIBRARY_SITE || "https://musicmatter.art").replace(/\/+$/, "");
+  const read = async (name: string): Promise<unknown> => {
+    const res = await fetch(`${site}/library/${name}`, { headers: { Accept: "application/json" }, cf: { cacheTtl: 0 } } as RequestInit);
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`${name}: HTTP ${res.status}`);
+    return res.json();
+  };
+  return knownFrom(await read("library.json"), await read("rejected.json"));
+}
+
+async function scheduleLibraryHarvest(env: Env): Promise<void> {
+  if (!env.FREESOUND_API_KEY) {
+    libraryLog({ event: "library_harvest", state: "off", detail: "FREESOUND_API_KEY is not set" });
+    return;
+  }
+  // One id per night: a repeated cron or a retried message finds the same batch and does not harvest twice.
+  const batch = `n-${day()}`;
+  const msg: LibraryMessage = { id: batch, kind: "library-harvest", batch };
+  await env.PERFORM_JOBS.send(msg);
+}
+
+async function runLibraryMessage(env: Env, msg: LibraryMessage): Promise<void> {
+  const store = libraryStore(env);
+  const now = Date.now();
+  const lock = msg.kind === "library-harvest" ? "harvest" : "qualify";
+  if (!(await store.acquireLock(lock, now, LIBRARY_LOCK_MS))) {
+    libraryLog({ event: "library_busy", kind: msg.kind, batch: msg.batch });
+    return;
+  }
+  try {
+    if (msg.kind === "library-harvest") {
+      if (!env.FREESOUND_API_KEY) throw new Error("FREESOUND_API_KEY is not set");
+      const cfg = await store.getConfig();
+      const caps: Record<BudgetKind, number> = { api: cfg.daily_api_cap, download: cfg.daily_download_cap, preview: cfg.daily_preview_cap };
+      const client = new FreesoundClient({
+        fetch: (input, init) => fetch(input, init),
+        apiKey: env.FREESOUND_API_KEY,
+        take: (kind) => budget(env).takeApi(`freesound-${kind}`, caps[kind]),
+        sleep,
+      });
+      const deps = libraryRouteDeps(env);
+      const log = await runHarvest(
+        {
+          store,
+          client,
+          blobs: r2Blobs(env),
+          accessToken: () => libraryAccessToken({ ...deps, fetch: (input, init) => budget(env).takeApi("freesound-api", caps.api).then((ok) => (ok ? fetch(input, init) : new Response("{}", { status: 429 }))) }),
+          known: () => libraryKnown(env),
+          now: () => new Date(),
+          log: libraryLog,
+        },
+        msg.batch,
+      );
+      if (log.picked.length) {
+        await env.PERFORM_JOBS.send({ id: msg.batch, kind: "library-qualify", batch: msg.batch } satisfies LibraryMessage);
+      }
+      return;
+    }
+    await runQualify(
+      {
+        store,
+        blobs: r2Blobs(env),
+        qualify: qualifyInContainer(env),
+        known: () => libraryKnown(env),
+        now: () => new Date(),
+        log: libraryLog,
+      },
+      msg.batch,
+    );
+  } finally {
+    await store.releaseLock(lock);
+  }
+}
+
+/** POST one file to the container's /internal/library/qualify. The container is its own instance, not the Perform one. */
+function qualifyInContainer(env: Env): (raw: Uint8Array, meta: QualifyMeta) => Promise<QualifyResult> {
+  let ready: Promise<DurableObjectStub<RenderContainer>> | null = null;
+  const start = async () => {
+    const container = getContainer(env.RENDER, LIBRARY_CONTAINER_ID);
+    await container.startAndWaitForPorts({
+      startOptions: { envVars: containerEnv(env, containerBase(env.NC_PUBLIC_BASE_URL, "")), enableInternet: false },
+      cancellationOptions: { portReadyTimeoutMS: PORT_READY_MS, instanceGetTimeoutMS: PORT_READY_MS },
+    });
+    return container;
+  };
+  return async (raw, meta) => {
+    ready ??= start();
+    const container = await ready;
+    const headers: Record<string, string> = {};
+    if (env.NC_INTERNAL_TOKEN) headers.authorization = `Bearer ${env.NC_INTERNAL_TOKEN}`;
+    const metaHeader = btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify(meta)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    const body = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer;
+    const res = await postContainerBytes(container, meta.id, "http://container/internal/library/qualify", headers, body, {
+      "content-type": "application/octet-stream",
+      "x-nc-library-meta": metaHeader,
+    });
+    if (!res.ok) throw new Error(`container qualify HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    const doc = (await res.json()) as QualifyResult & { flac_b64?: string; preview_b64?: string };
+    const fromB64 = (b64?: string) => (b64 ? Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)) : undefined);
+    return { ...doc, flac: fromB64(doc.flac_b64), preview: fromB64(doc.preview_b64) };
+  };
 }

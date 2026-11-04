@@ -417,12 +417,14 @@ Do these steps once, in order.
    | `TURNSTILE_SECRET_KEY` | Add this. It is the secret half of the widget whose site key is `0x4AAAAAAFbvFabFcwn6LUki`. If you leave it empty, the workflow skips it and the bot check stays off. |
    | `XAI_API_KEY` | Add this. The key from step 3. If you leave it empty, the workflow skips it and planning stays on the stub. |
    | `FREESOUND_API_KEY` | Add this when you want the official Freesound API. If you leave it empty, the workflow skips it and search falls back to the Freesound HTML page. |
+   | `FREESOUND_CLIENT_ID` | Optional. The Client id of the Freesound credential whose API key is `FREESOUND_API_KEY` (see "Library harvester" below). Without it the Library harvest stores MP3 previews, marked `"quality": "preview"`. |
+   | `FREESOUND_CLIENT_SECRET` | Optional. Leave empty: the Worker uses `FREESOUND_API_KEY`, which on Freesound is the same value. Set it only if the two ever differ. |
    | `NC_SIGNING_KEY` | Add this. The PEM from step 4. If you leave it empty, the workflow skips it and hosted records stay unsigned. |
    | `NC_ADMIN_TOKEN` | Add this. Generate it with `openssl rand -hex 32` and paste that one line. It is the Bearer token for `/admin`. If you leave it empty, the workflow skips it and `/admin` stays off. |
    | `NC_TESTER_TOKEN` | Add this yourself. Generate it with `openssl rand -hex 32` and paste that one line into the GitHub secret only. It is the value of the `X-NC-Tester` header, and it skips only the per-network 10-minute and daily limits. If you leave it empty, the workflow skips it and every visitor stays on the public limits. Do not paste it into chat. |
 
    Never paste those values into a chat, an issue, or a commit.
-6. Deploy by hand: Actions → **Deploy Perform** → **Run workflow**. The workflow checks out the repo, refuses to continue when `CLOUDFLARE_API_TOKEN` or `CLOUDFLARE_ACCOUNT_ID` is missing, runs `wrangler deploy` from `service/worker`, then sets `XAI_API_KEY`, `FREESOUND_API_KEY`, `TURNSTILE_SECRET_KEY`, `NC_SIGNING_KEY`, `NC_ADMIN_TOKEN`, and `NC_TESTER_TOKEN` only when that GitHub secret has a value. It has no push trigger.
+6. Deploy by hand: Actions → **Deploy Perform** → **Run workflow**. The workflow checks out the repo, refuses to continue when `CLOUDFLARE_API_TOKEN` or `CLOUDFLARE_ACCOUNT_ID` is missing, runs `wrangler deploy` from `service/worker`, then sets `XAI_API_KEY`, `FREESOUND_API_KEY`, `FREESOUND_CLIENT_ID`, `FREESOUND_CLIENT_SECRET`, `TURNSTILE_SECRET_KEY`, `NC_SIGNING_KEY`, `NC_ADMIN_TOKEN`, and `NC_TESTER_TOKEN` only when that GitHub secret has a value. It has no push trigger.
 7. When the run finishes, the log prints a `*.workers.dev` URL. That is the site. Open it and run one short Composition.
 8. Leave the DNS for netcomposer.art alone. The Worker does not require that domain. A custom hostname can be attached later if the DNS moves to Cloudflare.
 
@@ -431,6 +433,35 @@ Do these steps once, in order.
 The container type is `standard-3` (2 vCPU, 8 GiB, 16 GB disk). That is the smallest type that can load Dragonfly and the Python audio stack. `basic` is 1 GiB and `standard-1` is 4 GiB. While the instance is awake the active rate is about **$0.00006 per second** (about $0.22 per hour): 2 × $0.000020 per vCPU-second plus 8 × $0.0000025 per GiB-second. It sleeps 15 minutes after the last request, and that idle time is billed too.
 
 A failed Perform should say `Something went wrong while performing. Please try again. (job id)`. The page reads that sentence from the job JSON. To capture the live error, open Actions → **Diagnose Perform** → **Run workflow**, then press Perform on the site. The workflow prints container status and tails `nc-perform-api` for 5 minutes. It uses the same Cloudflare secrets as deploy and does not print them. It does not deploy. Wrangler has no stored container log, so the tail is the log.
+
+## Library harvester
+
+NYX's Library is a curated commons of one-shots on musicmatter.art (`library/library.json`). Design: "NYX Library: a curated commons for samples, design v1" (Peter, 2026-10-31), step 3. This Worker harvests candidates; nothing reaches the Library until Peter approves it.
+
+1. **Harvest** (nightly, the 04:15 UTC cron; queue job `library-harvest`). Searches Freesound (`GET /apiv2/search/`, API key in an `Authorization: Token` header) with a list of role queries, electronic drums first ("808 kick", "909 closed hihat", "808 clap", "808 rimshot", ...). Keeps CC0, CC BY and CC BY-SA only, read from each sound's license URL; NC, ND, Sampling+ and anything else are skipped with the reason in the batch log. Keeps sounds of 3 s or less, skips loops, at most 2 per pack and 2 per query a night, 40 a night. Skips every sound it has seen before and every sound in musicmatter.art's `library.json` and `rejected.json`; if those can't be read, it does not harvest. Original files when the harvester account is connected (OAuth2), the HQ MP3 preview otherwise (`"quality": "preview"`, to upgrade later). Files go to R2 `candidates/raw/`.
+2. **Qualify** (queue job `library-qualify`, its own container instance `nc-library`). `POST /internal/library/qualify` decodes to 48 kHz, trims, and measures exactly as musicmatter.art's seed does (`nc_perform/library_measures.py` is a verbatim copy of musicmatter.art `tools/library/measures.py`; a test pins both files' sha256), fingerprints (sha256), drops duplicates, rejects silent, clipped, too long or undecodable files with the reason, picks a role (name, then query, then tags; measures settle open or closed hats) and tags. Writes `candidates/<id>/audio.flac` (24-bit), `preview.mp3` (level-matched, 128 kbps) and `manifest.nc.json` (curation pending, creator credited).
+3. **Curate.** musicmatter.art `tools/library/fetch_review.py` pulls the pending queue and builds the Library Review page; Peter approves or rejects.
+4. **Publish.** musicmatter.art `tools/library/publish_harvest.py` copies approved sounds into the site and `library.json`, logs rejections in `rejected.json`, and tells this Worker, which never harvests either again.
+
+Budget: every Freesound call is counted in `BudgetDO` against a daily cap (default 500 API requests, 100 original downloads, 200 previews; hard ceilings 1,800 and 400 under Freesound's 2,000 and 500) and paced under the per-minute limits (one API call per 1.1 s, one download per 2.1 s). A 429 ends the night's run.
+
+| Route | |
+|---|---|
+| `GET /api/library/freesound/connect` | One-time: a form that asks for `NC_ADMIN_TOKEN`, then sends the browser to Freesound to authorize the harvester account. |
+| `GET /api/library/freesound/callback` | Freesound returns here. The tokens are kept in the `LibraryDO` Durable Object and refreshed before they expire (24 h). |
+| `GET /api/library/admin/status` | Secrets present, connected account, today's Freesound calls, queue counts, last batches. |
+| `GET` / `PUT /api/library/admin/config` | Harvest settings: `queries` ([{q, role}]), `per_query`, `max_candidates`, `max_duration_s`, caps, `enabled`. |
+| `POST /api/library/admin/harvest` | Run a harvest now (same daily budget). |
+| `GET /api/library/admin/candidates?state=pending` | The review queue with manifests and file links. |
+| `GET /api/library/admin/candidates/<id>/audio.flac`, `preview.mp3`, `manifest.nc.json` | Candidate files. |
+| `POST /api/library/admin/decisions` | `{"decisions": {"<id>": {"status": "approved" or "rejected"}}}` after publishing. |
+| `GET /api/library/admin/batches[/<id>]` | Harvest logs: every skip and failed gate with its reason. |
+
+Admin routes need `Authorization: Bearer <NC_ADMIN_TOKEN>`.
+
+**Freesound terms.** The harvester follows the [Freesound API terms of use](https://freesound.org/docs/api/terms_of_use.html): non-commercial use only (NetComposer is an open, non-commercial art project; **commercial use needs a separate licence from the Music Technology Group, UPF: mtg@upf.edu**), no replicating Freesound (small nightly batches, and a person approves every sound before it is listed), every sound credits its creator (Freesound username and link) under its own license with a link to its Freesound page, and one API key only (no extra keys to get around the limits; ask MTG for higher limits instead).
+
+**Harvester account (OAuth2).** Use the Freesound credential that already gives `FREESOUND_API_KEY` (one key only, per the terms). On Freesound a credential's "Client secret/Api key" is that API key, so only its Client id is new. Signed in to Freesound as the owner of that credential, open https://freesound.org/apiv2/apply/, edit the credential, and set its Callback URL to `https://nc-perform-api.psemme.workers.dev/api/library/freesound/callback` (search keeps working; token requests don't use the callback). If no credential exists yet, create one with Name `NetComposer Library harvester`, Description `Nightly, rate-limited harvest of a few openly licensed (CC0 / CC BY) one-shot drum sounds for the non-commercial NetComposer Library on musicmatter.art. A person listens to and approves every sound; each keeps its creator credit and license.`, and that Callback URL, and put its Api key in `FREESOUND_API_KEY`. Put the Client id in the GitHub secret `FREESOUND_CLIENT_ID` (`FREESOUND_CLIENT_SECRET` can stay empty: the Worker then uses `FREESOUND_API_KEY`), run Deploy Perform, then open `https://nc-perform-api.psemme.workers.dev/api/library/freesound/connect` once, enter `NC_ADMIN_TOKEN`, and approve on Freesound while signed in as the account the harvest should download as.
 
 ## How a model call works
 
