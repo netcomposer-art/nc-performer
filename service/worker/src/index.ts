@@ -12,6 +12,7 @@
  * ncperf.interpret.llm (POST {base}/chat/completions). XAI_API_KEY alone makes
  * that base https://api.x.ai/v1 and the model grok-4.3. See service/nc_perform/config.py.
  */
+import { shareRoute, type ShareDeps } from "./share.ts";
 import { DurableObject } from "cloudflare:workers";
 import { Container, ContainerProxy, getContainer } from "@cloudflare/containers";
 import pageHtml from "../../web/index.html";
@@ -554,6 +555,10 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     if (note) return note;
   }
   if (request.method === "GET" && path === "/admin") return adminPage(request, env);
+  if (path === "/api/share" || path.startsWith("/api/share/")) {
+    const shared = await shareRoute(request, shareDeps(env));
+    if (shared) return shared;
+  }
   if (path.startsWith("/api/library/")) {
     const routed = await libraryRoute(request, libraryRouteDeps(env), base);
     if (routed) return routed;
@@ -2536,6 +2541,25 @@ async function rateLimit(env: Env, ipHash: string, tester: boolean, kind: "perfo
   }
   if (tester) return null;
   return budget(env).hit(ipHash, PER_10MIN, PER_DAY, kind);
+}
+
+/** Instrument links: R2 under share/, and the burst limit under its own key so links and Performs don't share it. */
+function shareDeps(env: Env): ShareDeps {
+  return {
+    get: (key) => env.PERFORMANCES.get(key),
+    put: async (key, body, meta) => {
+      await env.PERFORMANCES.put(key, body, { httpMetadata: { contentType: "application/json" }, customMetadata: meta });
+    },
+    allow: async (request) => {
+      const ip = request.headers.get("CF-Connecting-IP") || "";
+      const ipHash = await sha256Text(`${env.NC_IP_HASH_SALT || "nc-perform"}:${ip}`);
+      try {
+        return (await env.PERFORM_RATE.limit({ key: `share:${ipHash}` })).success;
+      } catch {
+        return true; // local tests have no binding
+      }
+    },
+  };
 }
 
 function rateJson(block: RateBlock): Response {
