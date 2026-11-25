@@ -60,6 +60,9 @@ test("envelope rules: only presets of the five instruments, short names, our own
   assert.ok(shareProblem({ ...good, by: "x".repeat(41) }));
   assert.ok(shareProblem({ ...good, from: "https://evil.example/synth/" }));
   assert.ok(shareProblem({ ...good, from: "http://netcomposer.art/synth/" }));
+  assert.equal(shareProblem({ ...good, from: "https://triki.art/synth/#s=0123456789" }), null);
+  assert.ok(shareProblem({ ...good, from: "https://www.triki.art/synth/" }));
+  assert.ok(shareProblem({ ...good, from: "https://triki.art.evil.example/synth/" }));
   for (const f of ["netcomposer.synth", "netcomposer.rhythm", "netcomposer.bass", "netcomposer.nyx", "netcomposer.calliope"]) {
     assert.equal(shareProblem({ ...good, format: f }), null, f);
   }

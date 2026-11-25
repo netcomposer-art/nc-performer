@@ -57,12 +57,15 @@ export function shareProblem(raw: unknown): string | null {
   return null;
 }
 
-/** A link this site made: https://netcomposer.art/... (no other host, at most 4 KB). */
+/** The site's hosts: netcomposer.art now, triki.art later (Peter, 2026-11-25), so a move needs no change here. */
+export const SHARE_HOSTS = ["netcomposer.art", "triki.art"] as const;
+
+/** A link this site made: https://netcomposer.art/... or https://triki.art/... (no other host, at most 4 KB). */
 export function isOurLink(text: string): boolean {
   if (text.length > 4096) return false;
   try {
     const u = new URL(text);
-    return u.protocol === "https:" && u.hostname === "netcomposer.art";
+    return u.protocol === "https:" && (SHARE_HOSTS as readonly string[]).includes(u.hostname);
   } catch {
     return false;
   }
