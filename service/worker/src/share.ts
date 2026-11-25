@@ -28,6 +28,9 @@ const ID_LEN = 10;
 const ID = new RegExp(`^/api/share/([0-9a-z]{${ID_LEN}})$`);
 const NAME_MAX = 80;
 const BY_MAX = 40;
+const CATEGORY_MAX = 32;
+const TAGS_MAX = 8;
+const TAG_MAX = 24;
 
 export type ShareEnvelope = {
   v: 1;
@@ -38,6 +41,9 @@ export type ShareEnvelope = {
   name?: string;
   by?: string;
   from?: string;
+  /** The preset library's category and tags (nc-ui presets, 2026-11-25): optional, additive. */
+  category?: string;
+  tags?: string[];
 };
 
 /** The problem with an envelope, in a short sentence, or null when it can be stored. */
@@ -54,6 +60,17 @@ export function shareProblem(raw: unknown): string | null {
   if (e.name !== undefined && (typeof e.name !== "string" || e.name.length > NAME_MAX)) return "The name is too long.";
   if (e.by !== undefined && (typeof e.by !== "string" || e.by.length > BY_MAX)) return "The author name is too long.";
   if (e.from !== undefined && (typeof e.from !== "string" || !isOurLink(e.from))) return "Bad remix link.";
+  if (e.category !== undefined && (typeof e.category !== "string" || !e.category || e.category.length > CATEGORY_MAX)) {
+    return "Bad category.";
+  }
+  if (
+    e.tags !== undefined &&
+    (!Array.isArray(e.tags) ||
+      e.tags.length > TAGS_MAX ||
+      !e.tags.every((t) => typeof t === "string" && t.length > 0 && t.length <= TAG_MAX))
+  ) {
+    return "Bad tags.";
+  }
   return null;
 }
 

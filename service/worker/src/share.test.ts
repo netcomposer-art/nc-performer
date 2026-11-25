@@ -99,3 +99,10 @@ test("ids are 10 unbiased base-36 characters", () => {
   const seen = new Set(Array.from({ length: 200 }, () => newShareId()));
   assert.equal(seen.size, 200);
 });
+
+test("the preset library's category and tags travel, checked as the site checks them", () => {
+  assert.equal(shareProblem({ ...good, category: "Pads & Strings", tags: ["warm", "slow attack"] }), null);
+  assert.equal(shareProblem({ ...good, category: "" }), "Bad category.");
+  assert.equal(shareProblem({ ...good, tags: ["x".repeat(25)] }), "Bad tags.");
+  assert.equal(shareProblem({ ...good, tags: Array.from({ length: 9 }, (_, i) => `t${i}`) }), "Bad tags.");
+});
